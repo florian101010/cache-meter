@@ -1,0 +1,22 @@
+{
+  "name": "cache-meter",
+  "version": "0.1.0",
+  "description": "Prompt-Cache-Countdown, Trefferquote und Kontext im Band über dem Prompt; Token-Verlauf, Limits und Keepwarm im Pane /tokens",
+  "author": {
+    "name": "Florian Grimmer"
+  },
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "cacheTtl": {
+      "type": "string",
+      "title": "Cache-TTL",
+      "description": "auto: 60m, bei überschrittenem Abo-Limit 5m; ein von Claude Code gemeldeter Wert (Modellwechsel) gewinnt. 60m/5m: fest.",
+      "options": [
+        "auto",
+        "60m",
+        "5m"
+      ],
+      "default": "auto"
+    }
+  }
+}

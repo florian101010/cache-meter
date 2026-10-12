@@ -1,0 +1,4 @@
+.DS_Store
+# Von Claude Code beim Laden erzeugte Typdeklarationen
+.claude-plugin/types/
+node_modules/
