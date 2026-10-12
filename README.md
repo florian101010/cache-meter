@@ -1,3 +1,5 @@
+<p align="center"><img src="https://raw.githubusercontent.com/florian101010/cache-meter/assets/brand/header.svg" width="100%" alt="Cache Meter – Never lose your prompt cache to a coffee break again. A coffee cup inside a countdown ring that drains, pings and refills."></p>
+
 # Cache Meter (Claude Code Mod)
 
 [![CI](https://github.com/florian101010/cache-meter/actions/workflows/ci.yml/badge.svg)](https://github.com/florian101010/cache-meter/actions/workflows/ci.yml)
@@ -6,7 +8,7 @@
 ![Claude Code mod](https://img.shields.io/badge/Claude%20Code-mod-d97757)
 ![Claude Code ≥ 2.1.287](https://img.shields.io/badge/Claude%20Code-%E2%89%A5%202.1.287-555)
 
-**Never lose your prompt cache to a coffee break.**
+**Never lose your prompt cache to a coffee break again.**
 
 Claude Code re-sends your entire conversation with every message. The prompt cache is what makes that fast and cheap – but it only lives for **one hour** on a Claude subscription (five minutes on an API key). Step away longer, and your next message re-writes the whole context from scratch: a [slower turn](https://code.claude.com/docs/en/prompt-caching#cache-lifetime), billed at the [cache-write rate](https://code.claude.com/docs/en/prompt-caching#check-cache-performance). Nothing on screen warns you.
 
@@ -66,11 +68,11 @@ Safe by design: it never changes your prompts or tool calls and writes nothing t
 
 The band above the prompt, always there:
 
-![The band above the prompt: cache 60m with a green countdown bar, 100% hit, context 15%, auto-compact at 97%, API value $1.06 and a Compact button](docs/images/band.png)
+![The band above the prompt: cache 60m with a green countdown bar, 100% hit, context 15%, auto-compact at 97%, API value $1.06 and a Compact button](https://raw.githubusercontent.com/florian101010/cache-meter/assets/screenshots/band.png)
 
 `/tokens` – the dashboard, here as a sidebar beside the chat (Claude Code's fullscreen renderer):
 
-<img src="docs/images/overview.png" width="640" alt="The /tokens overview: a big 60-minute countdown marked WARM with the expiry time and where keepwarm would ping, a keepwarm card with a 'Keep warm 2h' button, the context gauge with the auto-compact marker, session totals with 'cache saved 40% of input cost' and the plan limits, and a column chart of every request">
+<img src="https://raw.githubusercontent.com/florian101010/cache-meter/assets/screenshots/overview.png" width="640" alt="The /tokens overview: a big 60-minute countdown marked WARM with the expiry time and where keepwarm would ping, a keepwarm card with a 'Keep warm 2h' button, the context gauge with the auto-compact marker, session totals with 'cache saved 40% of input cost' and the plan limits, and a column chart of every request">
 
 > **What is a Claude Code mod?** A mod is a Claude Code plugin whose TypeScript hooks run *inside* Claude Code: it can draw above the prompt, open panes, add slash commands and react to events such as each model request. See the official [mods overview](https://code.claude.com/docs/en/plugins/mods/overview). Cache Meter is a mod only – no skills, no MCP server, no settings hooks.
 
@@ -119,13 +121,13 @@ It runs only in interactive sessions, never drops a message, and after an expens
 | **Health** | Did requests fail or get cut off? How long does the advisor take? What does the session cost per hour and per prompt? | `/tokens health` |
 
 <p>
-<img src="docs/images/context.png" width="49%" alt="The Context tab: where the context goes by category, the heaviest memory files, MCP servers, skills listed of total and agents">
-<img src="docs/images/health.png" width="49%" alt="The Health tab: session age, prompts, cost as API value per prompt, tokens per prompt, stop reasons, API errors, server-side tool calls and the cache check">
+<img src="https://raw.githubusercontent.com/florian101010/cache-meter/assets/screenshots/context.png" width="49%" alt="The Context tab: where the context goes by category, the heaviest memory files, MCP servers, skills listed of total and agents">
+<img src="https://raw.githubusercontent.com/florian101010/cache-meter/assets/screenshots/health.png" width="49%" alt="The Health tab: session age, prompts, cost as API value per prompt, tokens per prompt, stop reasons, API errors, server-side tool calls and the cache check">
 </p>
 
 **Where it shows.** In Claude Code's classic renderer the pane sits above the prompt, and your next prompt closes it so the conversation keeps its room. In the fullscreen renderer (`/tui fullscreen`) it docks beside the chat as a sidebar, opens there by itself at session start (option [`autoSidebar`](#configuration)) and stays open while you work.
 
-**Switching tabs.** `/tokens context` or `/tokens health` – a prefix is enough, and typing `/tok` lists all three in the typeahead. Or click a tab (fullscreen renderer), or press ctrl+x, Tab, then `1`–`3`.
+**Switching tabs.** `/tokens context` or `/tokens health` – a prefix is enough; after `/tokens ` Claude Code shows the three tab names as a hint. Or click a tab (fullscreen renderer), or press ctrl+x, Tab, then `1`–`3`.
 
 **Where the numbers come from.** Everything is what Claude Code reports to mods – token counts per request, context breakdown, cost, plan limits, stop reasons, errors. Nothing is sent anywhere; only **Count exactly** in the Context tab asks the API to count tokens, once, when you press it.
 
@@ -195,7 +197,7 @@ Run `/reload-plugins` in an open session, or start a new one. `/plugin` then sho
 
 ```bash
 git clone https://github.com/florian101010/cache-meter.git
-claude --plugin-dir "$PWD/cache-meter"          # for one session
+claude --plugin-dir /absolute/path/to/cache-meter   # for one session (the clone's absolute path)
 ```
 
 To load the clone in every session, add its **absolute** path to `CLAUDE_CODE_PLUGIN_DIRS` in the `env` block of `~/.claude/settings.json` (paths separated by `:`; see [settings and environment variables](https://code.claude.com/docs/en/plugins/mods/reference#settings-and-environment-variables)). Claude Code then loads the clone exactly as it is checked out – keep that checkout on `main` and develop in a separate worktree. While a copy named `cache-meter` is already loaded that way, `--plugin-dir` cannot load a second one (the first wins); see [CONTRIBUTING.md](CONTRIBUTING.md#set-up) for how to try a worktree.
@@ -208,7 +210,6 @@ To load the clone in every session, add its **absolute** path to `CLAUDE_CODE_PL
 |---|---|
 | See cache and context | the band above the prompt, always on |
 | Open the full view | `/tokens` – again to close; Esc at an empty prompt closes it above the prompt |
-| See the options while typing | type `/tok` – the typeahead lists `/tokens overview`, `/tokens context`, `/tokens health` with one line each; after `/tokens ` the tab names |
 | Open a tab directly | `/tokens context`, `/tokens health`, `/tokens overview` (a prefix is enough: `/tokens h`) – switches an open pane instead of closing it |
 | Switch tabs | `/tokens health` etc.; or press ctrl+x, then Tab (the pane gets the keys), then `1`–`3` – Esc hands the keys back; clicking a tab works only in Claude Code's fullscreen renderer, which captures the mouse |
 | Count the context exactly | `x` or **Count exactly** in the Context tab – one API request per tool and memory file, as `/context` |
@@ -230,32 +231,77 @@ With `auto`, Cache Meter follows Claude Code's own TTL controls and your plan st
 
 ## Privacy, cost and permissions
 
-- **Writes nothing to disk and sends nothing on its own.** Requests leave only when you ask: the `/keepwarm` pings, and **Count exactly** in the Context tab (token counts through Claude Code, as `/context` makes them). All values live in session state (`$.state`) and are gone after `/clear`, `/resume`, `/branch` or the end of the session.
-- **Reads what Claude Code reports to mods:** token counts of each request, context fill and its breakdown (Claude Code's free local estimate), cost, plan limits, stop reasons, API errors, server-side tool calls, and Claude Code's verdict on the cache at model switches and resumes.
-- **Reads** the environment variables `FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL` and `ENABLE_PROMPT_CACHING_1H`, and the `promptCacheTtl` setting through `$.settings.read()`.
-- **Cost:** none, except `/keepwarm` and **Count exactly**. Each ping reads your whole context at the model's cache-read price ([pricing](https://platform.claude.com/docs/en/about-claude/pricing)) and counts against your plan. How cache reads count towards the 5-hour and weekly limits is not documented – watch the limits in the pane.
+> [!NOTE]
+> **Local and read-only.** Cache Meter never changes your prompts or tool calls, never reads their text, writes nothing to disk and sends nothing on its own. Full details: [PRIVACY.md](PRIVACY.md) · [SECURITY.md](SECURITY.md).
 
-More in [PRIVACY.md](PRIVACY.md) and [SECURITY.md](SECURITY.md).
+| | | Source |
+|---|---|---|
+| **Reads** | What Claude Code reports to mods: token counts, model, stop reason and server-side tool calls of each request; context fill and its breakdown (Claude Code's free local estimate, including the paths of your CLAUDE.md files and the names of MCP servers, skills and agents); cost as `/cost` shows it; plan-limit percentages; number of prompts and the session's start time; API errors; Claude Code's own verdict on the cache at model switches and resumes; whether the session is fullscreen. Plus the TTL controls `FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL`, `ENABLE_PROMPT_CACHING_1H` and the `promptCacheTtl` setting | The code ([`hooks/register.tsx`](hooks/register.tsx)); `claude plugin validate .` lists every event it hooks and every call it makes. Data sources: [events › Follow a turn](https://code.claude.com/docs/en/plugins/mods/events#follow-a-turn), [reference › Mods API methods](https://code.claude.com/docs/en/plugins/mods/reference#mods-api-methods) (`$.session.usage`, `$.session.turns`), [events › Handle the settings hook events](https://code.claude.com/docs/en/plugins/mods/events#hook-the-settings-hook-events) |
+| **Keeps** | Everything in memory for the session only – gone when it ends and after `/clear`, `/resume` or `/branch`. Nothing on disk | [interface › Keep state](https://code.claude.com/docs/en/plugins/mods/interface#keep-state) (`$.state` lasts until the session ends or `/clear`, `/resume`, `/branch`); no `$.fs` or `$.store` call in the code – check with `claude plugin validate .` |
+| **Sends** | Nothing on its own. Only when you ask: `/keepwarm` pings and **Count exactly** in the Context tab – through Claude Code, with your credentials, to the provider your session already uses | [api › Call a model](https://code.claude.com/docs/en/plugins/mods/api#call-a-model) (`$.model.fork` uses the session's credentials); `$.session.usage({ breakdown: 'full' })` sends token-count requests (type declaration `SessionUsageArgs`); no `$.http` or `$.process` call in the code |
+| **Costs** | Nothing, except `/keepwarm`: each ping reads your whole context at the model's cache-read price – billed like any request on an API key, counted against your limits on a plan. How cache reads count towards the 5-hour and weekly limits is **not documented**; watch them in the pane. **Count exactly** uses token counting, which is free on the API; whether Claude Code counts it against plan limits is **not documented** | [pricing › Prompt caching](https://platform.claude.com/docs/en/about-claude/pricing#prompt-caching) (cache read 0.1×, 0.05× or 0.025× of the input price); [api › Call a model](https://code.claude.com/docs/en/plugins/mods/api#call-a-model) (“bill to the user's plan, API key, or cloud provider”); [token counting › Pricing and rate limits](https://platform.claude.com/docs/en/build-with-claude/token-counting#pricing-and-rate-limits) (“free to use”) |
 
 ## FAQ
 
-**Does it cost anything?** No – except `/keepwarm` and the Context tab's **Count exactly**, which you start yourself. Each ping reads your context at the cache-read price – about 1/20 of re-writing it after expiry (1/40 on Opus 5.5 and Sonnet 5.5, 1/80 on Fable 5.1 and Mythos 5.1) – and counts against your plan; at most 12 pings per run.
+### Cost
 
-**Does `/keepwarm` really keep the cache alive?** A cache read keeps the entry for the duration of its original write – one hour for the main conversation ([pricing](https://platform.claude.com/docs/en/about-claude/pricing)). Check it on your setup with `/usage` after a break (see [above](#keep-the-cache-warm-with-keepwarm)).
+<details>
+<summary><b>Does it cost anything?</b></summary>
 
-**Isn't this what `/usage` shows?** `/usage` reports the session's hit ratio and whether the cache is warm, when you ask. Cache Meter shows how long it stays warm, all the time, per request, with history – and can keep it warm.
+Only what you start yourself. A `/keepwarm` ping reads your context at the cache-read price – about 1/20 of re-writing it after expiry (1/40 on Opus 5.5 and Sonnet 5.5, 1/80 on Fable 5.1 and Mythos 5.1), at most 12 pings per run. On an API key that is billed like any request, on a plan it counts against your limits. **Count exactly** uses free token counting. Everything else costs nothing.
+</details>
 
-**Does it work with an API key or a cloud provider?** Yes. Claude Code's default TTL there is five minutes; set `cacheTtl` to `5m` (see [Configuration](#configuration)). `/keepwarm` is disabled at a five-minute TTL.
+<details>
+<summary><b>Does “API value” mean I am paying that?</b></summary>
 
-**Does “API value” mean I am paying that?** Not on a subscription: it is what the same session would cost on an API key, as `/cost` computes it – a comparison. Your plan's usage is the 5-hour and weekly limits in the pane. On an API key or a cloud provider the band says `spent` instead, because there it is real cost. Cache Meter tells the two apart by whether Claude Code reports plan limits.
+Not on a subscription: it is what the same session would cost on an API key, as `/cost` computes it – a comparison. Your plan's usage is the 5-hour and weekly limits in the pane. On an API key or a cloud provider the band says `spent` instead, because there it is real cost. Cache Meter tells the two apart by whether Claude Code reports plan limits.
+</details>
 
-**Does it read or change my prompts?** No. It hooks model requests only to read their token counts, stop reasons and server-side tool calls.
+<details>
+<summary><b>Does <code>/keepwarm</code> really keep the cache alive?</b></summary>
 
-**Why does the pane sit above the prompt and not beside the chat?** Claude Code places it, not the mod: beside the chat only in its fullscreen renderer (`/tui fullscreen`) from 110 columns, otherwise above the prompt – there your next prompt closes it so it doesn't take rows from the conversation. In fullscreen it opens as a sidebar by itself at session start; set `autoSidebar` to `off` to stop that. See [SECURITY.md](SECURITY.md) for everything it can reach.
+A cache read keeps the entry for the duration of its original write – one hour for the main conversation ([pricing](https://platform.claude.com/docs/en/about-claude/pricing#prompt-caching)). Check it on your setup with `/usage` after a break (see [above](#keep-the-cache-warm-with-keepwarm)).
+</details>
 
-**Where does it work?** In the Claude Code terminal and the Code tab of the Desktop app. In the VS Code extension and under `claude -p` it runs but draws nothing.
+### Using it
 
-**How do I remove it?** `claude plugin uninstall cache-meter@cache-meter`.
+<details>
+<summary><b>Isn't this what <code>/usage</code> shows?</b></summary>
+
+`/usage` reports the session's hit ratio and whether the cache is warm, when you ask. Cache Meter shows how long it stays warm, all the time, per request, with history – and can keep it warm.
+</details>
+
+<details>
+<summary><b>Why does the pane sit above the prompt and not beside the chat?</b></summary>
+
+Claude Code places it, not the mod: beside the chat only in its fullscreen renderer (`/tui fullscreen`) from 110 columns, otherwise above the prompt – there your next prompt closes it so it doesn't take rows from the conversation. In fullscreen it opens as a sidebar by itself at session start; set `autoSidebar` to `off` to stop that.
+</details>
+
+<details>
+<summary><b>Does it read or change my prompts?</b></summary>
+
+No. It hooks model requests only to read their token counts, stop reasons and server-side tool calls, and notes that you sent a prompt without reading it. See [PRIVACY.md](PRIVACY.md) and [SECURITY.md](SECURITY.md) for everything it can reach.
+</details>
+
+### Setup
+
+<details>
+<summary><b>Does it work with an API key or a cloud provider?</b></summary>
+
+Yes. Claude Code's default TTL there is five minutes; set `cacheTtl` to `5m` (see [Configuration](#configuration)). `/keepwarm` is disabled at a five-minute TTL.
+</details>
+
+<details>
+<summary><b>Where does it work?</b></summary>
+
+In the Claude Code terminal and the Code tab of the Desktop app. In the VS Code extension and under `claude -p` it runs but draws nothing.
+</details>
+
+<details>
+<summary><b>How do I remove it?</b></summary>
+
+`claude plugin uninstall cache-meter@cache-meter`.
+</details>
 
 ## Contributing
 

@@ -27,14 +27,14 @@ Requirements: Claude Code 2.1.287 or later, TypeScript (`tsc`) 5.4 or later for 
 ```bash
 git clone https://github.com/florian101010/cache-meter.git
 cd cache-meter
-claude --plugin-dir "$PWD"     # loads the mod for one session and lays the types into .claude-plugin/types/
+claude --plugin-dir /absolute/path/to/cache-meter   # this clone: loads the mod for one session and lays the types into .claude-plugin/types/
 ```
 
 If you load your clone permanently through `CLAUDE_CODE_PLUGIN_DIRS`, that checkout is live in every new session: keep it on `main` and work in a worktree (`git worktree add ../cache-meter-wt -b feat/<topic>`). While that permanent copy is loaded, `--plugin-dir` cannot load a second plugin named `cache-meter` – the first one wins, and the debug log says `another plugin of that name loads first`. To try the worktree, run Claude Code from it with the variable replaced for that session only:
 
 ```bash
 cd ../cache-meter-wt
-claude --settings "{\"env\":{\"CLAUDE_CODE_PLUGIN_DIRS\":\"$PWD\"}}"   # only this checkout loads
+claude --settings '{"env":{"CLAUDE_CODE_PLUGIN_DIRS":"/absolute/path/to/cache-meter-wt"}}'   # only this checkout loads
 ```
 
 ## Make a change
@@ -54,7 +54,7 @@ claude --settings "{\"env\":{\"CLAUDE_CODE_PLUGIN_DIRS\":\"$PWD\"}}"   # only th
 6. Smoke-test in a real headless run – every cache-meter hook must report `settled`, none `skipped` or `refused`:
 
    ```bash
-   D=$(mktemp -d); claude -p "Reply with: ok" --settings "{\"env\":{\"CLAUDE_CODE_PLUGIN_DIRS\":\"$PWD\"}}" --debug-file "$D/debug.log"; grep cache-meter "$D/debug.log"
+   D=$(mktemp -d); claude -p "Reply with: ok" --settings '{"env":{"CLAUDE_CODE_PLUGIN_DIRS":"/absolute/path/to/this/checkout"}}' --debug-file "$D/debug.log"; grep cache-meter "$D/debug.log"
    ```
 
    (This makes one small model request. Delete the debug log afterwards – it contains session data.)
@@ -67,8 +67,11 @@ Fill in the template. CI must be green. Describe what a user sees differently, a
 
 ## Repository map
 
+Images (README screenshots, header, icon and social preview sources) live on the [`assets` branch](https://github.com/florian101010/cache-meter/tree/assets), not on `main`: the directory scans `main`, and image files there hold every version for review. Its README says how to regenerate them.
+
 ```text
-.claude-plugin/plugin.json        manifest: name, version, type contract, the cacheTtl option
+.claude-plugin/plugin.json        manifest: name, version, type contract, the cacheTtl and autoSidebar options
+.claude-plugin/icon.png           listing icon (static PNG; source on the assets branch)
 .claude-plugin/marketplace.json   makes this repository a one-plugin marketplace
 hooks/hooks.json                  points to the hooks module
 hooks/register.tsx                all hooks: data sources, band, pane, commands, keepwarm

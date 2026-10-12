@@ -41,7 +41,7 @@ claude plugin test .                # must end with "0 fail" – no session, sig
 End-to-end smoke test (one tiny model request): every `cache-meter` hook in the log must say `settled`, none `skipped` or `refused`.
 
 ```bash
-D=$(mktemp -d); claude -p "Reply with: ok" --settings "{\"env\":{\"CLAUDE_CODE_PLUGIN_DIRS\":\"$PWD\"}}" --debug-file "$D/debug.log"; grep cache-meter "$D/debug.log"; rm -rf "$D"
+D=$(mktemp -d); claude -p "Reply with: ok" --settings '{"env":{"CLAUDE_CODE_PLUGIN_DIRS":"/absolute/path/to/this/checkout"}}' --debug-file "$D/debug.log"; grep cache-meter "$D/debug.log"; rm -rf "$D"
 ```
 
 Type check (needs `tsc` ≥ 5.4 and the types Claude Code writes into `.claude-plugin/types/` the first time it loads the mod, e.g. after the smoke test): `tsc -p .`
@@ -52,7 +52,7 @@ Visual check needs a real terminal session: the band, `/tokens`, and `/usage` �
 
 **Rule 1 – the official documentation is the single source of truth, not your training data.** The mods API is early access and newer than any model. Before any change, fetch fresh: <https://code.claude.com/docs/en/plugins/mods/reference> (always), <https://code.claude.com/docs/en/plugins/mods/interface> (the mod draws), <https://code.claude.com/docs/en/plugins/mods/test> (every change needs tests), plus `events`/`api` for what you touch and <https://code.claude.com/docs/en/prompt-caching> for cache logic (index: <https://code.claude.com/docs/llms.txt> → *Mods*). The type declarations Claude Code writes for the running version (`.claude-plugin/types/claude-code/index.d.ts`) win where they are more specific. Cite page and section for every API assumption in a comment, or mark it *undocumented*. Give this rule to every subagent you start for this repository.
 
-**Rule 2 – a loaded checkout is live.** If this folder is loaded through `CLAUDE_CODE_PLUGIN_DIRS`, Claude Code runs it exactly as checked out in every new session. Keep it on `main`; work in a worktree (`git worktree add ../cache-meter-wt -b feat/<topic>`). `--plugin-dir` cannot load the worktree while another `cache-meter` is loaded (the first wins: `another plugin of that name loads first` in the debug log). From the worktree, replace the variable for one session instead: `claude --settings "{\"env\":{\"CLAUDE_CODE_PLUGIN_DIRS\":\"$PWD\"}}"`.
+**Rule 2 – a loaded checkout is live.** If this folder is loaded through `CLAUDE_CODE_PLUGIN_DIRS`, Claude Code runs it exactly as checked out in every new session. Keep it on `main`; work in a worktree (`git worktree add ../cache-meter-wt -b feat/<topic>`). `--plugin-dir` cannot load the worktree while another `cache-meter` is loaded (the first wins: `another plugin of that name loads first` in the debug log). From the worktree, replace the variable for one session instead: `claude --settings '{"env":{"CLAUDE_CODE_PLUGIN_DIRS":"/absolute/path/to/this/checkout"}}'`.
 
 **Rule 3 – prices come from the pricing page.** Price multipliers (`readMultiplier`, `writeMultiplier` in `hooks/lib.ts`, the README cost table) follow <https://platform.claude.com/docs/en/about-claude/pricing#prompt-caching>, fetched fresh – check it on every new model and before every release; details: [CONTRIBUTING.md › Prices](CONTRIBUTING.md#prices).
 

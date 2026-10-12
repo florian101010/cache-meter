@@ -18,7 +18,6 @@ import {
   parseKeepWarm,
   rasterCells,
   readMultiplier,
-  tokensSuggestions,
   remainingLabel,
   resolveTtl,
   tall,
@@ -132,7 +131,6 @@ function world(on: On, opts: { env?: Record<string, string>; forkRead?: number; 
     return usageValue(100_000, 1_000_000, 970_000)
   })
   on('session.turns', () => ({ value: 4 }))
-  on('prompt.autocomplete', () => ({ suggestions: [] }))
   on('classic.StopFailure', () => ({}))
   on('session.start', () => ({ cwd: '/work' }))
   on('classic.SessionStart', () => ({}))
@@ -173,6 +171,11 @@ function world(on: On, opts: { env?: Record<string, string>; forkRead?: number; 
 /** Runs a slash command; the kit fills origin and presentation (test § Write a test). */
 function run($: Engine, command: string, args: string) {
   return $.command.run({ command, args } as never) as Promise<{ text?: string }>
+}
+
+/** Runs /tokens as a terminal of that kind and width would (types: CommandPresentation). */
+function present($: Engine, isFullscreen: boolean, columns: number) {
+  return $.command.run({ command: 'tokens', args: '', presentation: { isFullscreen, columns } } as never) as Promise<{ text?: string }>
 }
 
 async function step($: Engine, agentId?: string) {
@@ -632,21 +635,19 @@ test('/tokens toggles; above the prompt the next own prompt closes the pane, doc
 test('pane widths: a narrow dock drops secondary text, from 110 columns two columns', async ($, on) => {
   world(on)
   await step($)
-  const at = (bodyColumns: number) => $.ui.mount({ surface: 'terminal', ...PANE, props: { ...PANE.props, bodyColumns } })
-
-  let ui = await at(50)
+  let ui = await $.ui.mount({ surface: 'terminal', ...PANE, props: { ...PANE.props, bodyColumns: 50 } })
   expect(await ui.find({ type: 'Text', text: 'prompt cache · tokens' })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: 'not from cache' })).toBeDefined()
   expect(await ui.find({ key: 'columns' })).toBeUndefined()
   await ui.unmount()
 
-  ui = await at(90)
+  ui = await $.ui.mount({ surface: 'terminal', ...PANE, props: { ...PANE.props, bodyColumns: 90 } })
   // The header holds the tabs; the subtitle shows only in the wide layout.
   expect(await ui.find({ type: 'Text', text: 'prompt cache · tokens' })).toBeUndefined()
   expect(await ui.find({ key: 'columns' })).toBeUndefined()
   await ui.unmount()
 
-  ui = await at(140)
+  ui = await $.ui.mount({ surface: 'terminal', ...PANE, props: { ...PANE.props, bodyColumns: 140 } })
   expect(await ui.find({ type: 'Text', text: 'prompt cache · tokens' })).toBeDefined()
   expect(await ui.find({ key: 'columns' })).toBeDefined()
   // The countdown spans one column of two: (140 - 1) / 2 = 69, minus 4 of card chrome.
@@ -821,13 +822,11 @@ test('cache check: nothing is counted while Cache Meter knows nothing of the cac
 test('/tokens: Esc closes the pane above the prompt, but not the docked sidebar', async ($, on) => {
   const { pane } = world(on)
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
-  const tokens = (isFullscreen: boolean, columns: number) =>
-    $.command.run({ command: 'tokens', args: '', presentation: { isFullscreen, columns } } as never) as Promise<{ text?: string }>
-  expect((await tokens(true, 190)).text).toMatch(/sidebar/)
-  await tokens(true, 190) // closes
-  await tokens(false, 190)
-  await tokens(false, 190) // closes
-  await tokens(true, 100) // fullscreen, but too narrow to dock
+  expect((await present($, true, 190)).text).toMatch(/sidebar/)
+  await present($, true, 190) // closes
+  await present($, false, 190)
+  await present($, false, 190) // closes
+  await present($, true, 100) // fullscreen, but too narrow to dock
   expect(pane.opened.map(o => o.closeOnEscape)).toEqual([undefined, true, true])
   expect(pane.opened.map(o => o.rows)).toEqual([26, 26, 36])
 })
@@ -862,23 +861,6 @@ test('pane footer: offers clicks only in the fullscreen renderer, which captures
   ui = await $.ui.mount({ surface: 'terminal', ...PANE, viewport: { columns: 190, rows: 50, isFullscreen: true } })
   expect(await ui.find({ type: 'Text', text: /^click a tab or \/tokens context \| health/ })).toBeDefined()
   await ui.unmount()
-})
-
-test('typeahead: the /tokens tabs while typing the command, then the tab names', async ($, on) => {
-  expect(tokensSuggestions('/tok', 0, '/tok').map(r => r.text)).toEqual(['/tokens overview', '/tokens context', '/tokens health'])
-  // Too short to mean /tokens, another command, or a word later in a prompt: nothing.
-  expect(tokensSuggestions('/t', 0, '/t')).toEqual([])
-  expect(tokensSuggestions('/tokenize', 0, '/tokenize')).toEqual([])
-  expect(tokensSuggestions('see /tokens', 4, '/tokens')).toEqual([])
-  expect(tokensSuggestions('/tokens h', 8, 'h').map(r => r.text)).toEqual(['health'])
-  expect(tokensSuggestions('/keepwarm h', 10, 'h')).toEqual([])
-
-  world(on)
-  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
-  // The test's $ fires every event (test › Stub what Claude Code would answer); its type lacks this method.
-  const prompt = $.prompt as unknown as { autocomplete: (e: unknown) => Promise<{ suggestions: unknown[] }> }
-  const result = await prompt.autocomplete({ text: '/tokens c', cursor: 9, token: 'c', start: 8 })
-  expect(result.suggestions).toEqual([{ text: 'context', label: 'context', description: 'what fills your context: memory files, MCP servers, skills' }])
 })
 
 test('sidebar at start: opens by itself only in fullscreen, and not again once closed', async ($, on) => {

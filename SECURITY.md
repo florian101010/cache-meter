@@ -6,7 +6,7 @@ Cache Meter is a [Claude Code mod](https://code.claude.com/docs/en/plugins/mods/
 
 | | |
 |---|---|
-| Events it hooks | `session.start`, `classic.SessionStart`, `turn.step`, `classic.StopFailure`, `turn.complete`, `session.measure`, `session.compact`, `classic.PostModelSwitch`, `command.run` (its own two commands), `prompt.submit` (observed only: closes its own pane above the prompt), `prompt.autocomplete` (adds rows for `/tokens`, reads only the draft's last word), `ui.close` (observed: remembers that you closed its pane), `ui.render` (band and its own pane) – all observed, passed on unchanged |
+| Events it hooks | `session.start`, `classic.SessionStart`, `turn.step`, `classic.StopFailure`, `turn.complete`, `session.measure`, `session.compact`, `classic.PostModelSwitch`, `command.run` (its own two commands), `prompt.submit` (observed only: closes its own pane above the prompt), `ui.close` (observed: remembers that you closed its pane), `ui.render` (band and its own pane) – all observed, passed on unchanged |
 | Prompts and tool calls | never read, rewritten, approved or refused |
 | Files | none read or written |
 | Network | none of its own. `/keepwarm` calls `$.model.fork` – one request over your own conversation, through Claude Code. **Count exactly** in the Context tab calls `$.session.usage({ breakdown: 'full' })`, which makes Claude Code count tokens with the API, one request per tool and memory file, as `/context` does – only when you press it |
