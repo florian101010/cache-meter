@@ -40,7 +40,7 @@ Module variables hold only what is never drawn: the `cacheTtl` option, whether t
 
 The countdown is `lastAt + TTL − now`, redrawn every 15 seconds. `lastAt` is the start of the last main request: the documentation says the cache stays warm for one TTL "after Claude Code last sent a request … or Claude last responded" (*prompt caching › Switching models*); counting from the request's start is the conservative choice. Every hit resets the timer (*prompt caching › Cache lifetime*).
 
-The TTL is derived (see the README, *Configuration*), because no mod event carries it per request. The order after the mod's own option is Claude Code's own (*prompt caching › Choose the TTL yourself*); the plan-limit rule mirrors "Once you go over your plan's usage limit … Claude Code drops the main conversation to the five-minute TTL" (*prompt caching › Which TTL each request gets*).
+The TTL is derived (see [How the TTL is derived](#how-the-ttl-is-derived)), because no mod event carries it per request. The order after the mod's own option is Claude Code's own (*prompt caching › Choose the TTL yourself*); the plan-limit rule mirrors "Once you go over your plan's usage limit … Claude Code drops the main conversation to the five-minute TTL" (*prompt caching › Which TTL each request gets*).
 
 ## Hit rate
 
@@ -69,7 +69,7 @@ Every 15 seconds (interactive sessions only) the timer checks, in this order:
 
 A fork is "the main thread's last request again … with `prompt` after it: every tool denied, its own tail never cached" (types: `$.model.fork`). After the ping, the mod stops warming when the fork read nothing, read less than half of the known context, or wrote 10 % or more of what it read (a partial miss) – in each case the TTL assumption was wrong and further pings would be full re-writes. Otherwise `lastAt` moves to the ping's start.
 
-Whether a fork read extends the main conversation's one-hour entry is not documented; forks get the five-minute TTL themselves. See the README, *Assumptions and limitations*.
+Why a ping keeps the one-hour entry alive: a cache read lasts the "same duration as the preceding write" ([pricing › prompt caching](https://platform.claude.com/docs/en/about-claude/pricing)), and the main conversation's prefix was written with the one-hour TTL. Forks get the five-minute TTL only for what they write (*prompt caching › Which TTL each request gets*), and a keepwarm fork writes nothing of its own ("its own tail never cached"). Costs per model: README, *Keep the cache warm with /keepwarm*.
 
 The count of running main requests is raised before the first `await` in `turn.step` and lowered in its `finally`; `turn.complete` resets it, because the documentation does not say whether an aborted stream reaches `finally`.
 
@@ -80,3 +80,28 @@ The band is one row sized to `e.props.bodyColumns`. The width of every segment i
 ## Tests
 
 `claude plugin test` runs `tests/cache-meter.test.tsx` against the engine with stubs for everything Claude Code would answer (*test › Stub what Claude Code would answer*): `mock.clock` for the timer, `mock.env` for the TTL controls, a generator stub for `turn.step` (optionally slow, to keep a request in flight), and a `ui.render` stub below the band. Each safeguard – band composition, miss and partial-miss stops, no timer without a screen, no ping during a request, reset after an aborted turn, the cold-rewrite rule, the resume label – was checked by breaking it on purpose and seeing its test fail.
+
+## How the TTL is derived
+
+With the option `cacheTtl` set to `auto`, the TTL is derived in this order, following [prompt caching › choose the TTL yourself](https://code.claude.com/docs/en/prompt-caching#choose-the-ttl-yourself):
+
+1. the mod's own option `60m` / `5m`
+2. `FORCE_PROMPT_CACHING_5M=1` → 5m
+3. `CLAUDE_CODE_PROMPT_CACHE_TTL` (`5m` / `1h`)
+4. the `promptCacheTtl` setting (`5m` / `1h`)
+5. `ENABLE_PROMPT_CACHING_1H=1` → 1h
+6. a plan limit at 100 % or more – Claude Code then draws usage credits and drops to 5m → 5m
+7. the value Claude Code reported on the last model switch
+8. otherwise 60m (subscription within plan usage)
+
+## Assumptions and limitations
+
+| Topic | Status |
+|---|---|
+| TTL | derived, not measured: no mod interface reports it per request. The pane shows the rule that produced it. Check with `/usage` → *Prompt cache (main)* |
+| Does a `/keepwarm` ping extend the one-hour cache? | **Documented for cache reads in general**: a cache hit lasts the "same duration as the preceding write" ([pricing › prompt caching](https://platform.claude.com/docs/en/about-claude/pricing)), one hour for the main conversation. Forks get the five-minute TTL for what they *write* ([which TTL each request gets](https://code.claude.com/docs/en/prompt-caching#which-ttl-each-request-gets)), but a keepwarm fork writes nothing of its own ("its own tail never cached", `$.model.fork` in the type declarations). Also observed in practice with the same mechanism by [karanb192/cache-tax](https://github.com/karanb192/cache-tax) (Fable 5.1, subscription, 2026-09-19). Verify on your setup with `/usage` |
+| Does a ping reach the mod's own `turn.step` hook? | **Undocumented.** If it does, the ping shows as one row in the history; the countdown stays right. There is no filter, because a filter would drop real requests that end during a ping |
+| Countdown after `--resume` | `seconds_since_last_response` counts from the end of the last response, so the countdown is optimistic by that response's duration. If Claude Code reports `prompt_cache_likely_expired`, the cache is shown cold |
+| Dollar amounts | only Claude Code's own estimates and the `/cost` total – no price table of its own |
+| Other invalidations | a model switch, an MCP or plugin change can invalidate the cache before the TTL ends ([actions that invalidate the cache](https://code.claude.com/docs/en/prompt-caching#actions-that-invalidate-the-cache)) – visible as a low hit rate |
+| Subagents | have their own caches with a five-minute TTL; counted in the totals, not in the countdown |

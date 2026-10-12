@@ -7,6 +7,12 @@ All notable changes to Cache Meter, a Claude Code mod. The format follows [Keep 
 ### Changed
 - The whole mod is in English: band (`empty`, `expired`, `context`, `auto-compact`, `rewrite`), the `/tokens` pane, toasts, command answers and descriptions, TTL sources, plan-limit names, and the keepwarm ping prompt.
 - `/keepwarm` takes `off` (or `0`) to stop; the German `aus` is no longer accepted.
+- README leads with keeping the cache warm: a `/keepwarm` section with the cost comparison from the official pricing page and the safety limits, a "Why" section and an FAQ; title "Cache Meter (Claude Code Mod)" in the docs.
+- README trimmed to what a new user needs; the TTL derivation, how it works and assumptions and limitations moved to `docs/how-it-works.md`, the repository map to `CONTRIBUTING.md`.
+- Installation from GitHub tested end to end in an isolated config directory (`claude plugin install cache-meter --marketplace florian101010/cache-meter`): installs, loads, registers both commands, every hook settles.
+
+### Added
+- Directory listing fields in `plugin.json`: `documentationUrl`, `supportUrl`, `privacyPolicyUrl`.
 
 ## [0.2.1] – 2026-10-12
 
