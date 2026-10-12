@@ -544,6 +544,6 @@ Issues and pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) fi
 
 ## License
 
-[MIT](LICENSE) © 2026 Florian Grimmer
+[MIT](LICENSE) © 2026 [Florian Grimmer](https://www.floriangrimmer.de/)
 
 Not affiliated with or endorsed by Anthropic. Claude and Claude Code are trademarks of Anthropic.
