@@ -42,6 +42,25 @@ Type **`/keepwarm`** before lunch or a meeting. Shortly before expiry one ping �
 </tr>
 </table>
 
+## At a glance
+
+| You know this … | Cache Meter … | How |
+|---|---|---|
+| Back from lunch, the first answer is slow and costs a full re-write | keeps the cache warm through the break – one ping ≈ 1/20 of a re-write | [`/keepwarm`](#keep-the-cache-warm-with-keepwarm) |
+| You forget to type it before every break | covers every break of the session by itself, only while you are away | [`/keepwarm auto`](#every-break-by-itself-keepwarm-auto) (opt-in) |
+| No idea when the cache runs out | shows a live countdown, the hit rate and how full the context is | [band above the prompt](#what-you-see), always on |
+| What did that answer just cost? | puts the cost under every answer and the session total in the band; warns at a budget | [automatic](#every-answer-priced), option `sessionBudget` |
+| A model or effort switch silently re-wrote everything | warns before a switch splits a warm cache – at a model switch with Claude Code's own re-write estimate | [automatic](#warned-before-the-cache-breaks) |
+| The cache was cold – but why? | names the likely cause of every warm miss | [`/tokens health`](#see-everything-with-tokens), chart tooltip |
+| The context fills up fast | shows which tool results, files, MCP servers (and unused ones) and subagents fill it | [`/tokens context`](#see-everything-with-tokens) |
+| One file read flooded the context | says so the moment a single result is ≥ 10k tokens (and ≥ 2 % of the window) | [automatic](#a-word-when-it-matters) |
+| Will I hit my plan limit before it resets? | forecasts the limit and warns once when it is half used and on course to fill | [automatic](#a-word-when-it-matters), option `limitNotice` |
+| Auto-compact always comes as a surprise | shows where it triggers and about how many prompts are left | band, [`/tokens`](#see-everything-with-tokens) |
+| You want the numbers in a ticket or a note | copies the whole session as Markdown | [`/tokens report`](#copy-the-session-as-markdown) |
+| The dashboard should stay beside the chat | docks as a sidebar in Claude Code's fullscreen renderer | [`/tui fullscreen`](#quickstart) |
+
+**Local and read-only:** never reads your prompts' text, writes nothing to disk, sends nothing you have not switched on – details in [Privacy, cost and permissions](#privacy-cost-and-permissions).
+
 **New in 0.6–0.12:** `/keepwarm auto` – every break covered by itself · a word when one tool result floods the context · plan-limit warnings · what the conversation came to after `/clear` · a barista who acts out your cache · cost under every answer · warnings before a switch re-writes the cache · the cause of every warm miss · what fills your conversation · auto-compact forecast · per-subagent use · expiry notification · session budget · live last minute and keepwarm heartbeat · a flash at each new minute · hover details · `/tokens report`. → [changelog](CHANGELOG.md)
 
 ## Quickstart
@@ -246,6 +265,7 @@ It stays with you: the report goes only to your own clipboard – the one of the
 
 ## Contents
 
+- [At a glance](#at-a-glance)
 - [Quickstart](#quickstart)
 - [Every answer, priced](#every-answer-priced)
 - [Warned before the cache breaks](#warned-before-the-cache-breaks)
