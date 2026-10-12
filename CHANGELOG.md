@@ -2,6 +2,13 @@
 
 All notable changes to Cache Meter, a Claude Code mod. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] – 2026-10-12
+
+### Changed
+- `/tokens` redesigned as a dashboard: header, round-bordered cards, tall countdown digits, gradient meters drawn with `Raster` in the terminal (text bars in the Desktop app), a context gauge with an auto-compact marker, aligned request columns with colored hit rates, a session card that hides empty subagent rows, plan-limit bars.
+- Keepwarm card with **Keep warm 2h** / **Stop keepwarm** buttons (hotkeys `w` / `s`, `c` for Compact) and a key-hint line; the pane opens 44 rows tall above the prompt.
+- Band: the hit rate is colored (green from 80 %, yellow from 50 %, red below); shortly before the cache expires the band suggests `/keepwarm?`.
+
 ## [0.3.0] – 2026-10-12
 
 ### Changed
@@ -59,7 +66,8 @@ All notable changes to Cache Meter, a Claude Code mod. The format follows [Keep 
 - Pane `/tokens`: per-request token history, totals, plan limits, cost.
 - `/keepwarm`.
 
-[0.3.0]: https://github.com/florian101010/cache-meter/compare/e430ab2...HEAD
+[0.4.0]: https://github.com/florian101010/cache-meter/compare/18e9711...HEAD
+[0.3.0]: https://github.com/florian101010/cache-meter/compare/e430ab2...18e9711
 [0.2.1]: https://github.com/florian101010/cache-meter/compare/e430ab2...HEAD
 [0.2.0]: https://github.com/florian101010/cache-meter/pull/1
 [0.1.1]: https://github.com/florian101010/cache-meter/commit/3217bf4

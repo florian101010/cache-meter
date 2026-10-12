@@ -664,7 +664,11 @@ export const register: Register = (on, options) => {
                 {keep.pings}/{MAX_PINGS} pings · {short(keep.readTokens)} tokens read · next ping in ~{remainingLabel(pingIn)}
               </Text>
               <Box flexDirection="row">
-                <Button key="keepwarm-stop" label="Stop keepwarm" onPress={() => pressKeepWarm($, null)} />
+                <Button key="keepwarm-stop" plain hotkey="s" onPress={() => pressKeepWarm($, null)}>
+                  <Text color="claude" bold>
+                    Stop keepwarm
+                  </Text>
+                </Button>
               </Box>
             </Box>
           ) : (
@@ -678,7 +682,11 @@ export const register: Register = (on, options) => {
               <Text dimColor>Stepping away? Keep this cache warm – a ping costs about 1/20 of a re-write.</Text>
               {canKeep ? (
                 <Box flexDirection="row" columnGap={2}>
-                  <Button key="keepwarm-start" label="Keep warm 2h" variant="primary" onPress={() => pressKeepWarm($, 2 * HOUR)} />
+                  <Button key="keepwarm-start" plain hotkey="w" onPress={() => pressKeepWarm($, 2 * HOUR)}>
+                    <Text color="claude" bold>
+                      Keep warm 2h
+                    </Text>
+                  </Button>
                   <Text dimColor>or /keepwarm 30m … 8h</Text>
                 </Box>
               ) : (
@@ -830,8 +838,14 @@ export const register: Register = (on, options) => {
 
         <Box flexDirection="row" justifyContent="space-between">
           <Text dimColor>Hit rate = read ÷ (new + read + written) · cross-check: /usage</Text>
-          <Button key="pane-compact" label="Compact" onPress={() => compactNow($)} />
+          <Button key="pane-compact" plain hotkey="c" onPress={() => compactNow($)}>
+            Compact
+          </Button>
         </Box>
+        <Text dimColor>
+          Keys work while the pane has focus (ctrl+x tab): {isKeeping ? 's stop keepwarm' : canKeep ? 'w keep warm 2h' : ''}
+          {isKeeping || canKeep ? ' · ' : ''}c compact · Esc back to the prompt
+        </Text>
       </Box>
     )
   })

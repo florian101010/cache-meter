@@ -73,6 +73,10 @@ Why a ping keeps the one-hour entry alive: a cache read lasts the "same duration
 
 The count of running main requests is raised before the first `await` in `turn.step` and lowered in its `finally`; `turn.complete` resets it, because the documentation does not say whether an aborted stream reaches `finally`.
 
+## Pane layout
+
+`/tokens` opens the pane 44 rows tall above the prompt (types: `PaneOpenArgs.rows`; docked beside the transcript in fullscreen). It is a column of round-bordered cards sized to `e.props.bodyColumns`: the cache card (tall digits, state, hit rates, TTL source, a countdown meter), the keepwarm card (buttons with hotkeys `w`/`s`), context (a meter with a `┃` at the auto-compact point, trend sparkline from three turns on), requests (fixed-width stacked bars, right-aligned numbers, hit rate colored green ≥ 80 %, yellow ≥ 50 %, red below), session totals, and plan limits. Meters are a `Raster` of colored cells in the terminal and text bars elsewhere, because only the terminal draws `Raster` (*reference › Elements*). Hotkeys act only while the pane has focus (*interface › Keyboard focus and hotkeys*).
+
 ## Band layout
 
 The band is one row sized to `e.props.bodyColumns`. The width of every segment is computed first; on a narrow terminal the re-write hint goes first, then the auto-compact note, then the bar (minimum six cells). The `[ Compact ]` button is hidden while `e.props.isWorking`. The weather symbols are single-width characters, not emoji, so the row lines up in every terminal font.
