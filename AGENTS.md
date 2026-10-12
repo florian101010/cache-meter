@@ -6,10 +6,10 @@ Guide for AI coding agents (Claude Code, Codex, Cursor, …) that were given thi
 
 **Cache Meter is a [Claude Code mod](https://code.claude.com/docs/en/plugins/mods/overview)** – a Claude Code plugin whose TypeScript hooks run inside Claude Code. It contains no skills, no MCP server and no settings hooks. It:
 
-- draws one row **above the prompt**: prompt-cache countdown, hit rate of the last request, context fill, auto-compact point, a Compact button;
-- adds **`/tokens`**: a pane with per-request token history, session totals (main conversation and subagents), cost, plan limits (5 h / 7 d), cold rewrites;
+- draws one row **above the prompt**: prompt-cache countdown, hit rate of the last request, context fill, auto-compact point, the session's cost at API prices (`cost.usd`), a Compact button;
+- adds **`/tokens [overview | context | health]`**: a pane with three tabs – **Overview** (countdown, keepwarm, context, what caching saved, session totals, cost at API prices, plan limits, cold rewrites, a column chart of every request), **Context** (where the context goes, from Claude Code's free estimate; an exact count only on a press), **Health** (rates, unusual stop reasons, API errors, server-side tool calls, Claude Code's cache verdict vs. the countdown);
 - adds **`/keepwarm [10m … 8h | off]`**: pings the cache through `$.model.fork` shortly before it expires; stops itself on a miss, after 12 pings, at a 5-minute TTL or at the end of the window;
-- shows a hint after a cold rewrite. It never rewrites or drops prompts, never approves tool calls, writes no files, makes no network calls except the keepwarm pings.
+- shows a hint after a cold rewrite. It never rewrites or drops prompts, never approves tool calls, writes no files, makes no network calls of its own – only the keepwarm pings and, on a press, the Context tab's exact count.
 
 Version and requirements: `.claude-plugin/plugin.json` (`version`), Claude Code ≥ 2.1.287 (terminal) or ≥ 2.1.286 (Desktop Code tab), tested with 2.1.296.
 
@@ -34,7 +34,7 @@ Alternative without a marketplace: clone and load with `claude --plugin-dir <abs
 
 ```bash
 claude plugin validate --strict .   # must print "Validation passed"
-claude plugin test .                # must print "25 pass, 0 fail" – no session, sign-in or network needed
+claude plugin test .                # must end with "0 fail" – no session, sign-in or network needed
 ```
 
 End-to-end smoke test (one tiny model request): every `cache-meter` hook in the log must say `settled`, none `skipped` or `refused`.

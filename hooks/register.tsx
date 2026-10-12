@@ -18,7 +18,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { CacheInfo, ColdWrite, KeepWarm, Measure, Totals, TtlConfig, Usage4 } from '../types'
+import type { CacheInfo, ColdWrite, Health, KeepWarm, Measure, ServerToolCall, Totals, TtlConfig, Usage4 } from '../types'
 import {
   COLD_MIN,
   HOUR,
@@ -52,8 +52,15 @@ import {
   sparkline,
   stack,
   tall,
+  contextMapOf,
+  tokensSuggestions,
+  isNormalStop,
+  bump,
+  tally,
+  stopLabel,
+  errorLabel,
 } from './lib'
-import type { Mark } from './lib'
+import type { BreakdownLike, Mark } from './lib'
 
 const PANE = 'cache-meter'
 const TICK_MS = 15_000
@@ -78,6 +85,15 @@ const keepA = atom({ plugin: 'cache-meter', key: 'keepWarm' } as const, {
   lastPingAt: null,
 })
 const coldA = atom({ plugin: 'cache-meter', key: 'coldWrites' } as const, [])
+const contextMapA = atom({ plugin: 'cache-meter', key: 'contextMap' } as const, null)
+const healthA = atom({ plugin: 'cache-meter', key: 'health' } as const, {
+  stops: {},
+  errors: {},
+  subErrors: {},
+  serverTools: {},
+  lastServerTools: null,
+  checks: { agreed: 0, differed: 0, last: null },
+})
 const ttlConfigA = atom({ plugin: 'cache-meter', key: 'ttlConfig' } as const, {
   force5m: false,
   envTtl: null,
@@ -94,6 +110,15 @@ let isPinging = false
 let mainRequests = 0
 // Where the surface last seated the pane: beside a fullscreen transcript (dock) or above the prompt (inline).
 let seat: 'dock' | 'inline' | null = null
+// Opening the dashboard as a sidebar by itself (option autoSidebar): only once the band has been drawn
+// fullscreen, once per load, and never again after the person closed it.
+let autoSidebar = 'auto'
+let isFullscreenSeen = false
+let hasAutoOpened = false
+let isDismissed = false
+// The pane's open tab; a reload starts on the overview again.
+const TABS = ['overview', 'context', 'health'] as const
+let tab: (typeof TABS)[number] = 'overview'
 
 async function ttlNow($: EngineInterface) {
   const measure = await read($, measureA)
@@ -136,14 +161,75 @@ async function measureNow($: EngineInterface) {
       history: m?.history ?? [],
       limits: usage.rateLimits.map(l => ({ kind: l.kind, percentUsed: l.percentUsed, resetsAt: l.resetsAt })),
       usd: usage.cost?.usd ?? null,
+      startedAt: usage.startedAt,
+      prompts: m?.prompts ?? null,
     }))
+    await mapContext($, usage.context.breakdown, 'summary')
   } catch {
     // No reading: the band waits for the first session.measure.
   }
 }
 
+// Where the context goes, from a breakdown of $.session.usage (types: SessionContextBreakdown).
+// 'summary' is Claude Code's local estimate and sends no request; 'full' counts with the API.
+async function mapContext($: EngineInterface, breakdown: unknown, detail: 'summary' | 'full') {
+  if (breakdown === undefined || breakdown === null) return
+  try {
+    const at = await $.clock.now()
+    const map = contextMapOf(breakdown as BreakdownLike, detail, at)
+    await update($, contextMapA, () => map)
+  } catch {
+    // A breakdown of another shape: keep the last map.
+  }
+}
+
+// The exact count behind the Context tab's button: one token-count request per tool and memory
+// file, as /context does (types: SessionUsageArgs.breakdown), so only on a press.
+let isCounting = false
+async function countExactly($: EngineInterface) {
+  if (isCounting) return
+  isCounting = true
+  $.ui.invalidate('ui.render')
+  try {
+    const usage = await $.session.usage({ breakdown: 'full' })
+    await mapContext($, usage.context.breakdown, 'full')
+  } catch (error) {
+    $.ui.toast(`Exact count failed: ${error instanceof Error ? error.message : String(error)}`)
+  } finally {
+    isCounting = false
+    $.ui.invalidate('ui.render')
+  }
+}
+
+// Claude Code's own verdict on the cache against Cache Meter's clock, taken before either is acted on.
+// Skipped while Cache Meter knows nothing of the cache (no request seen, e.g. right after /resume reset $.state).
+async function recordCheck($: EngineInterface, engineWarm: boolean, source: 'model' | 'resume') {
+  const cache = await read($, cacheA)
+  if (cache === null) return
+  const now = await $.clock.now()
+  const ourWarm = cacheStatus(cache, now, (await ttlNow($)).ms).kind === 'warm'
+  await update($, healthA, h => ({
+    ...h,
+    checks: {
+      agreed: h.checks.agreed + (engineWarm === ourWarm ? 1 : 0),
+      differed: h.checks.differed + (engineWarm === ourWarm ? 0 : 1),
+      last: { at: now, engineWarm, ourWarm, source },
+    },
+  }))
+}
+
+// A pane opened unasked is placed from 144 terminal columns (110 once the person opened it before) and
+// waits undrawn below that (types: UiOpenResult); docked, it is a sidebar, never a takeover.
+async function maybeAutoOpen($: EngineInterface) {
+  if (autoSidebar === 'off' || !isInteractive || !isFullscreenSeen || hasAutoOpened || isDismissed) return
+  hasAutoOpened = true
+  if ((await $.ui.panes()).some(p => p.id === PANE)) return
+  await $.ui.open({ id: PANE, title: 'Tokens & Cache' })
+}
+
 async function tick($: EngineInterface) {
   $.ui.invalidate('ui.render')
+  await maybeAutoOpen($)
   const keep = await read($, keepA)
   // No ping while a main request runs: that request touches the cache anyway.
   if (keep.until === null || isPinging || mainRequests > 0) return
@@ -248,12 +334,25 @@ async function stopKeepWarm($: EngineInterface): Promise<string> {
   return `Keepwarm off (${keep.pings} pings, ${short(keep.readTokens)} tokens read from the cache).`
 }
 
+// The toast box is narrow and takes only text (types: $.ui.toast), so a press gets the short form;
+// /keepwarm prints the full explanation into the transcript.
 async function pressKeepWarm($: EngineInterface, ms: number | null) {
-  $.ui.toast(ms === null ? await stopKeepWarm($) : await startKeepWarm($, ms), { timeoutMs: 8_000 })
+  const text = ms === null ? await stopKeepWarm($) : await startKeepWarm($, ms)
+  const keep = await read($, keepA)
+  const ttl = await ttlNow($)
+  const short =
+    ms !== null && keep.until !== null
+      ? `Keepwarm on until ${hhmm(keep.until)} · pings at ≤ ${Math.round((ttl.ms * PING_SHARE) / 60_000)} min left`
+      : text.split(/(?<=[.)])\s/)[0] ?? text
+  $.ui.toast(short, { timeoutMs: 8_000 })
 }
 
 export const register: Register = (on, options) => {
   setting = typeof options.cacheTtl === 'string' ? options.cacheTtl : 'auto'
+  autoSidebar = typeof options.autoSidebar === 'string' ? options.autoSidebar : 'auto'
+  isFullscreenSeen = false
+  hasAutoOpened = false
+  isDismissed = false
   isPinging = false
   mainRequests = 0
 
@@ -266,9 +365,15 @@ export const register: Register = (on, options) => {
     if (e.isInteractive) {
       // Returning the promise lets a mock clock await the tick (test § Test a timer).
       $.clock.every(TICK_MS, () => tick($))
+      // Soon after start, once the band has been drawn and said whether the session is fullscreen.
+      $.clock.after(2_000, () => maybeAutoOpen($))
     }
     try {
-      await $.command.register({ name: 'tokens', description: 'Show token and prompt-cache usage of this session in a pane' })
+      await $.command.register({
+        name: 'tokens',
+        description: 'Prompt-cache and token dashboard – tabs: overview, context (what fills it), health (errors, cost rate)',
+        argumentHint: '[overview | context | health]',
+      })
       await $.command.register({
         name: 'keepwarm',
         description: 'Keep the prompt cache warm (each ping costs one cache read of the context)',
@@ -289,6 +394,7 @@ export const register: Register = (on, options) => {
     await loadTtlConfig($)
     await measureNow($)
     if ((e.source === 'resume' || e.source === 'fork') && e.seconds_since_last_response !== undefined) {
+      if (e.prompt_cache_likely_expired !== undefined) await recordCheck($, !e.prompt_cache_likely_expired, 'resume')
       const now = await $.clock.now()
       // seconds_since_last_response counts from the last response's end; Claude Code's own verdict
       // prompt_cache_likely_expired wins over that clock (classic SessionStart input, types).
@@ -338,7 +444,12 @@ export const register: Register = (on, options) => {
       if (e.agentId !== undefined) {
         await update($, totalsA, t => ({ ...t, sub: add(t.sub, u), subSteps: t.subSteps + 1 }))
       } else {
-        await update($, stepsA, list => [...list, { ...u, at: startedAt, model: usage.model }].slice(-STEPS_KEPT))
+        // Cold by the clock AND by the counts (more written than read), so a wrong TTL assumption
+        // cannot turn a warm request into a "cold" one. A request with no cache before it (session
+        // start, after /compact or /clear) writes the cache for the first time: not a loss.
+        const isCold = wasCold && before !== null && u.write >= COLD_MIN && u.read < u.write
+        const kind = isCold ? ('cold' as const) : before === null ? ('first' as const) : undefined
+        await update($, stepsA, list => [...list, { ...u, at: startedAt, model: usage.model, ...(kind ? { kind } : {}) }].slice(-STEPS_KEPT))
         await update($, totalsA, t => ({ ...t, main: add(t.main, u), mainSteps: t.mainSteps + 1 }))
         await update($, cacheA, () => ({
           lastAt: startedAt,
@@ -348,9 +459,7 @@ export const register: Register = (on, options) => {
           coldReason: null,
           idleBeforeMs: null,
         }))
-        // Cold by the clock AND by the counts (more written than read), so a wrong TTL assumption
-        // cannot turn a warm request into a "cold" one.
-        if (wasCold && before !== null && u.write >= COLD_MIN && u.read < u.write) {
+        if (isCold && before !== null) {
           const cause: ColdWrite['cause'] = before.lastAt > 0 ? 'pause' : before.coldReason ?? 'model'
           const idleMs = cause === 'pause' ? startedAt - before.lastAt : before.idleBeforeMs
           const cold: ColdWrite = { at: startedAt, written: u.write, cause, idleMs }
@@ -367,6 +476,42 @@ export const register: Register = (on, options) => {
         }
       }
     }
+    if (isMain) {
+      // Why the request stopped, when not normally, and the tool calls the API ran itself
+      // (events › Follow a turn: serverToolUses, v2.1.290+; no tool.call fires for these).
+      const stop = result.stopReason
+      const calls: ServerToolCall[] = (result.serverToolUses ?? []).map(t => ({
+        name: t.name,
+        ms: t.endedAt === undefined ? null : Math.max(0, t.endedAt - t.startedAt),
+      }))
+      if (!isNormalStop(stop) || calls.length > 0) {
+        await update($, healthA, h => {
+          const serverTools = { ...h.serverTools }
+          for (const c of calls) {
+            const sum = serverTools[c.name] ?? { count: 0, ms: 0 }
+            serverTools[c.name] = { count: sum.count + 1, ms: sum.ms + (c.ms ?? 0) }
+          }
+
+          return {
+            ...h,
+            stops: stop !== null && !isNormalStop(stop) ? bump(h.stops, stop) : h.stops,
+            serverTools,
+            lastServerTools: calls.length > 0 ? { at: startedAt, calls } : h.lastServerTools,
+          }
+        })
+      }
+    }
+
+    return result
+  })
+
+  // A turn ended on an error (settings hook event StopFailure, observed only): counted by kind,
+  // the main conversation and subagents apart (agent_id is set for a subagent).
+  on('classic.StopFailure', async ($, e, next) => {
+    const result = await next(e)
+    await update($, healthA, h =>
+      e.agent_id === undefined ? { ...h, errors: bump(h.errors, e.error) } : { ...h, subErrors: bump(h.subErrors, e.error) },
+    )
 
     return result
   })
@@ -384,15 +529,23 @@ export const register: Register = (on, options) => {
   on('session.measure', async ($, e, next) => {
     const result = await next(e)
     const before = await read($, measureA)
-    // The auto-compact point changes only with the window (or the model): compute it once per window.
+    // A summary reading after each turn: Claude Code estimates it locally and sends no request
+    // (types: SessionUsageArgs). It gives the auto-compact point, the context map and the start time.
     let auto: { pct: number | null; isOff: boolean; isKnown: boolean } | null = null
-    if (before === null || before.autoCompactWindow !== e.context.window) {
-      try {
-        const usage = await $.session.usage({ breakdown: 'summary' })
-        auto = autoCompactOf(usage.context.breakdown, e.context.window)
-      } catch {
-        auto = null
-      }
+    let startedAt: number | null = null
+    let prompts: number | null = null
+    try {
+      const usage = await $.session.usage({ breakdown: 'summary' })
+      if (before === null || before.autoCompactWindow !== e.context.window) auto = autoCompactOf(usage.context.breakdown, e.context.window)
+      startedAt = usage.startedAt
+      await mapContext($, usage.context.breakdown, 'summary')
+    } catch {
+      auto = null
+    }
+    try {
+      prompts = await $.session.turns()
+    } catch {
+      prompts = null
     }
     await update($, measureA, m => {
       const tokens = e.context.tokens ?? null
@@ -408,6 +561,8 @@ export const register: Register = (on, options) => {
         history,
         limits: e.rateLimits.map(l => ({ kind: l.kind, percentUsed: l.percentUsed, resetsAt: l.resetsAt })),
         usd: e.cost?.usd ?? m?.usd ?? null,
+        startedAt: startedAt ?? m?.startedAt ?? null,
+        prompts: prompts ?? m?.prompts ?? null,
       }
 
       return measured
@@ -429,6 +584,8 @@ export const register: Register = (on, options) => {
   // A real model switch starts a cold cache; the event carries the engine's own TTL and estimate.
   on('classic.PostModelSwitch', async ($, e, next) => {
     const result = await next(e)
+    // Before the cache is set cold below: what Claude Code and Cache Meter each thought of it.
+    await recordCheck($, e.prompt_cache_warm, e.source === 'resume' ? 'resume' : 'model')
     await update($, ttlA, () => e.cache_ttl)
     if (e.source !== 'resume' && e.from_model !== e.to_model) {
       const cold: CacheInfo = {
@@ -449,15 +606,50 @@ export const register: Register = (on, options) => {
   // /tokens toggles. rows: the height asked for above the prompt, default a third (types: PaneOpenArgs.rows);
   // closeOnEscape: Esc at the idle, empty prompt closes it too. No focus: hotkeys would swallow typing.
   on('command.run', { command: 'tokens' }, async ($, e) => {
-    if ((await $.ui.panes()).some(p => p.id === PANE)) {
+    // /tokens <tab> opens on that tab, or switches to it when the pane is open: no focus chord needed.
+    const asked = (e.args ?? '').trim().toLowerCase()
+    const wanted = TABS.find(t => t === asked || (asked.length > 0 && t.startsWith(asked)))
+    if (asked !== '' && wanted === undefined) return { text: 'Usage: /tokens [overview | context | health]' }
+    const isOpen = (await $.ui.panes()).some(p => p.id === PANE)
+    if (wanted !== undefined) {
+      tab = wanted
+      $.ui.invalidate('ui.render')
+      if (isOpen) return { text: `Switched the pane to ${wanted}.` }
+    }
+    if (isOpen) {
+      isDismissed = true
       await $.ui.close({ id: PANE })
 
       return { text: 'Closed the "Tokens & Cache" pane.' }
     }
     // From about 114 terminal columns the body is wide enough for two columns, which needs fewer rows.
-    await $.ui.open({ id: PANE, title: 'Tokens & Cache', rows: (e.presentation?.columns ?? 80) >= 114 ? 26 : 36, closeOnEscape: true })
+    const columns = e.presentation?.columns ?? 80
+    const pane = { id: PANE, title: 'Tokens & Cache', rows: columns >= 114 ? 26 : 36 }
+    // Docked beside a fullscreen transcript from 110 columns (types: CommandPresentation), the pane is a
+    // sidebar: Esc only hands the keys back. Above the prompt Esc closes it (closeOnEscape takes only true).
+    const isDock = e.presentation?.isFullscreen === true && columns >= 110
+    await $.ui.open(isDock ? pane : { ...pane, closeOnEscape: true })
 
-    return { text: 'Opened the "Tokens & Cache" pane. Esc at an empty prompt or /tokens again closes it.' }
+    return {
+      text: isDock
+        ? 'Opened the "Tokens & Cache" sidebar. /tokens again closes it.'
+        : 'Opened the "Tokens & Cache" pane. Esc at an empty prompt or /tokens again closes it.',
+    }
+  })
+
+  // The person closed the dashboard (its close mark or ctrl+x x): it stays closed this session.
+  on('ui.close', async ($, e, next) => {
+    if (e.id === PANE && e.origin.kind === 'person') isDismissed = true
+
+    return next(e)
+  })
+
+  // Typeahead: the /tokens tabs with one line each, so the options show while typing.
+  on('prompt.autocomplete', async ($, e, next) => {
+    const result = await next(e)
+    const rows = tokensSuggestions(e.text, e.start, e.token)
+
+    return rows.length === 0 ? result : { suggestions: [...result.suggestions, ...rows] }
   })
 
   // Above the prompt the pane is a glance: it takes rows from the transcript, so the person's next prompt
@@ -480,6 +672,7 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     // What the mods after this one draw: kept beneath this row (interface § Pick where to draw › Band).
     const theirs = await next(e)
+    if (e.viewport?.isFullscreen === true) isFullscreenSeen = true
     if (e.props.hasSurvey) return theirs
     const measure = await read($, measureA)
     const cache = await read($, cacheA)
@@ -520,10 +713,18 @@ export const register: Register = (on, options) => {
       'context '.length +
       pct.length +
       (showButton ? '[ Compact ]'.length + 1 : 0)
+    // Claude Code's own cost figure, the one /cost shows: on a subscription a comparison value (what an
+    // API key would pay), on an API key or a cloud provider real spend. Hidden at $0.00.
+    const usd = measure?.usd ?? null
+    const costText = usd === null || usd < 0.005 ? '' : isPlan(measure) ? ` · API value $${usd.toFixed(2)}` : ` · spent $${usd.toFixed(2)}`
     const minBar = 6
     const showRewrite = rewriteText !== '' && base + rewriteText.length + autoText.length + minBar < cols
     const showAuto = autoText !== '' && base + autoText.length + (showRewrite ? rewriteText.length : 0) + minBar < cols
-    const free = cols - base - (showAuto ? autoText.length : 0) - (showRewrite ? rewriteText.length : 0) - 1
+    // Dropped first when the row gets narrow: after it the auto-compact point, then the bar.
+    const showCost =
+      costText !== '' && base + costText.length + (showAuto ? autoText.length : 0) + (showRewrite ? rewriteText.length : 0) + minBar < cols
+    const free =
+      cols - base - (showAuto ? autoText.length : 0) - (showRewrite ? rewriteText.length : 0) - (showCost ? costText.length : 0) - 1
     const cells = free >= minBar ? Math.min(20, free) : 0
     const lit = status.kind === 'warm' ? litCells(status.remaining, ttl.ms, cells) : 0
 
@@ -547,6 +748,7 @@ export const register: Register = (on, options) => {
         <Text dimColor>context </Text>
         <Text bold>{pct}</Text>
         {showAuto && <Text dimColor>{autoText}</Text>}
+        {showCost && <Text dimColor>{costText}</Text>}
         {showRewrite && (
           <Text color={status.kind === 'expired' ? 'warning' : 'claude'} wrap="truncate-end">
             {rewriteText}
@@ -576,6 +778,8 @@ export const register: Register = (on, options) => {
     const cache = await read($, cacheA)
     const keep: KeepWarm = await read($, keepA)
     const colds = await read($, coldA)
+    const map = await read($, contextMapA)
+    const health: Health = await read($, healthA)
     const ttl = await ttlNow($)
     const now = await $.clock.now()
     const status = cacheStatus(cache, now, ttl.ms)
@@ -757,15 +961,25 @@ export const register: Register = (on, options) => {
     // What caching saved: every input token at the base price against what reads and writes cost,
     // with the last request's model and the current TTL for the whole session (README › Pane).
     const saving = cacheSaving(totals.main, readMultiplier(steps.at(-1)?.model ?? ''), writeMultiplier(ttl.ms))
+    const errorCount = Object.values(health.errors).reduce((a, n) => a + n, 0)
+    const stopCount = Object.values(health.stops).reduce((a, n) => a + n, 0)
+    const issues = [
+      errorCount > 0 ? `${errorCount} API error${errorCount === 1 ? '' : 's'}` : '',
+      stopCount > 0 ? `${stopCount} unusual stop${stopCount === 1 ? '' : 's'}` : '',
+    ]
+      .filter(Boolean)
+      .join(' · ')
     const limits = measure?.limits ?? []
     // Name (11) + bar + ' 100%' (5) + ' · resets Mon 17:10' (19): the bar takes what the column leaves.
     const limitBar = Math.max(6, Math.min(24, rightIn - 35))
     const sessionCard = (
       <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="column">
         <Box flexDirection="row" justifyContent="space-between">
-          <Text color="claude" bold>
-            Session
-          </Text>
+          <Box flexShrink={0} marginRight={1}>
+            <Text color="claude" bold>
+              Session
+            </Text>
+          </Box>
           {saving !== null && (
             <Text bold color={saving >= 0 ? 'success' : 'warning'} wrap="truncate-end">
               {saving >= 0 ? `cache saved ${saving}%${tier === 'narrow' ? '' : ' of input cost'}` : `cache cost +${-saving}%`}
@@ -777,12 +991,17 @@ export const register: Register = (on, options) => {
         </Text>
         <Text wrap="truncate-end">
           <Text dimColor>{totals.mainSteps} requests · </Text>
-          <Text bold>{measure?.usd == null ? '–' : `$${measure.usd.toFixed(2)}`}</Text>
-          <Text dimColor> list price</Text>
+          <Text bold>{measure?.usd == null ? '–' : `${isPlan(measure) ? '≈ ' : ''}$${measure.usd.toFixed(2)}`}</Text>
+          <Text dimColor>{measure?.usd == null ? '' : costLabel(measure, tier !== 'narrow')}</Text>
         </Text>
         {totals.subSteps > 0 && (
           <Text dimColor wrap="truncate-end">
             subagents {usageLine(totals.sub)} · {totals.subSteps} requests
+          </Text>
+        )}
+        {issues !== '' && (
+          <Text color="warning" wrap="truncate-end">
+            {issues} – see 3: Health
           </Text>
         )}
         {totals.mainSteps === 0 ? null : colds.length === 0 ? (
@@ -849,16 +1068,25 @@ export const register: Register = (on, options) => {
       const all = s.input + s.read + s.write
       const hit = hitPct(s) ?? 100
 
-      return { share: all > 0 ? (s.input + s.write) / all : 0, color: hit >= 80 ? HEALTH.good : hit >= 50 ? HEALTH.fair : HEALTH.poor }
+      // The first write of a cache (session start, after /compact) is not a loss: drawn in blue.
+      const color = s.kind === 'first' ? FILL.context : hit >= 80 ? HEALTH.good : hit >= 50 ? HEALTH.fair : HEALTH.poor
+
+      return { share: all > 0 ? (s.input + s.write) / all : 0, color }
     })
     const requestsCard = (
       <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="column">
         <Box flexDirection="row" justifyContent="space-between">
-          <Text color="claude" bold>
-            Requests
-          </Text>
+          <Box flexShrink={0} marginRight={1}>
+            <Text color="claude" bold>
+              Requests
+            </Text>
+          </Box>
           <Text dimColor wrap="truncate-end">
-            {tier === 'narrow' ? 'not from cache' : 'height = share not read from the cache · newest right'}
+            {tier === 'wide'
+              ? 'height = share not from cache · blue = first write · newest right'
+              : tier === 'medium'
+                ? 'height = not from cache · blue = first write'
+                : 'not from cache'}
           </Text>
         </Box>
         {steps.length === 0 && <Text dimColor>No request measured yet.</Text>}
@@ -895,41 +1123,263 @@ export const register: Register = (on, options) => {
       </Box>
     )
 
+    // --- context tab: where the context goes ---------------------------------------------------
+    const itemRow = (name: string, tokens: number, top: number, nameW: number, note = '') => {
+      const barW = Math.max(4, Math.min(24, fullIn - nameW - 20))
+      const lit = top > 0 ? Math.max(tokens > 0 ? 1 : 0, Math.round((tokens / top) * barW)) : 0
+
+      return (
+        <Box flexDirection="row">
+          <Box width={nameW}>
+            <Text wrap="truncate-start">{name}</Text>
+          </Box>
+          <Text color="suggestion"> {'█'.repeat(lit)}</Text>
+          <Text>{' '.repeat(barW - lit)}</Text>
+          <Text bold> {right(short(tokens), 7)}</Text>
+          <Text dimColor wrap="truncate-end">
+            {note}
+          </Text>
+        </Box>
+      )
+    }
+    const window = measure?.window ?? 0
+    const pctOf = (tokens: number) => (window > 0 ? ` ${Math.round((tokens / window) * 100)}%` : '')
+    const nameW = Math.max(12, Math.min(34, Math.floor(fullIn * 0.4)))
+    const topCat = map?.categories[0]?.tokens ?? 0
+    const topFile = map?.memoryFiles[0]?.tokens ?? 0
+    const topServer = map?.mcpServers[0]?.tokens ?? 0
+    const contextView = (
+      <Box flexDirection="column">
+        {contextCard}
+        <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="column">
+          <Box flexDirection="row" justifyContent="space-between">
+            <Box flexShrink={0} marginRight={1}>
+              <Text color="claude" bold>
+                Where it goes
+              </Text>
+            </Box>
+            <Text dimColor wrap="truncate-end">
+              {map === null ? 'no reading yet' : `${map.detail === 'full' ? 'exact' : 'estimate'} · ${hhmm(map.at)}`}
+            </Text>
+          </Box>
+          {map === null && <Text dimColor>Claude Code reports it after the first answer.</Text>}
+          {map !== null && map.categories.slice(0, 8).map(c => itemRow(c.name, c.tokens, topCat, nameW, pctOf(c.tokens)))}
+          <Box flexDirection="row" justifyContent="space-between">
+            <Text dimColor wrap="truncate-end">
+              {tier === 'wide' ? 'Exact count: one API request per tool and memory file, as /context' : 'exact: 1 request per tool and file'}
+            </Text>
+            <Box flexShrink={0} marginLeft={2}>
+              {isCounting ? (
+                <Text color="claude">counting…</Text>
+              ) : (
+                <Button key="context-exact" plain hotkey="x" onPress={() => countExactly($)}>
+                  <Text color="claude" bold>
+                    Count exactly
+                  </Text>
+                </Button>
+              )}
+            </Box>
+          </Box>
+        </Box>
+        {map !== null && (
+          <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="column">
+            <Text color="claude" bold>
+              Heaviest items
+            </Text>
+            <Text dimColor>Memory files (CLAUDE.md and rules)</Text>
+            {map.memoryFiles.length === 0 && <Text dimColor> none</Text>}
+            {map.memoryFiles.slice(0, 5).map(f => itemRow(homeShort(f.name), f.tokens, topFile, nameW))}
+            <Text dimColor wrap="truncate-end">
+              MCP servers{map.deferredMcpTools > 0 ? ` · ${map.deferredMcpTools} more tools behind tool search, not loaded` : ''}
+            </Text>
+            {map.mcpServers.length === 0 && <Text dimColor> none loaded</Text>}
+            {map.mcpServers.slice(0, 5).map(m => itemRow(m.name, m.tokens, topServer, nameW, ` · ${m.tools} tools`))}
+            <Text wrap="truncate-end">
+              <Text dimColor>Skills </Text>
+              {map.skills === null ? (
+                <Text dimColor>–</Text>
+              ) : (
+                <Text>
+                  <Text bold color={map.skills.included < map.skills.total ? 'warning' : undefined}>
+                    {map.skills.included} of {map.skills.total}
+                  </Text>
+                  <Text dimColor> listed · {short(map.skills.tokens)} tokens</Text>
+                  {map.skills.included < map.skills.total && <Text dimColor> · the rest did not fit the listing budget</Text>}
+                </Text>
+              )}
+            </Text>
+            {map.agents.length > 0 && (
+              <Text dimColor wrap="truncate-end">
+                Agents {map.agents.slice(0, 4).map(a => `${a.name} ${short(a.tokens)}`).join(' · ')}
+              </Text>
+            )}
+          </Box>
+        )}
+      </Box>
+    )
+
+    // --- health tab: rates, stops, errors, server-side tools, Claude Code's cache verdict ---------
+    const label = (text: string) => <Text dimColor>{text.padEnd(10)}</Text>
+    const age = measure?.startedAt == null ? null : Math.max(0, now - measure.startedAt)
+    const hours = age === null ? 0 : age / HOUR
+    const prompts = measure?.prompts ?? null
+    const usd = measure?.usd ?? null
+    const tokensAll = totals.main.input + totals.main.read + totals.main.write + totals.main.output
+    const subErrors = tally(health.subErrors, errorLabel)
+    const serverNames = Object.entries(health.serverTools).sort((a, b) => b[1].ms - a[1].ms)
+    const lastCheck = health.checks.last
+    const healthView = (
+      <Box flexDirection="column">
+        <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="column">
+          <Text color="claude" bold>
+            Session
+          </Text>
+          <Text wrap="truncate-end">
+            {label('Age')}
+            <Text bold>{age === null ? '–' : duration(age)}</Text>
+            <Text dimColor>{measure?.startedAt == null ? '' : ` · since ${hhmm(measure.startedAt)}`}</Text>
+          </Text>
+          <Text wrap="truncate-end">
+            {label('Prompts')}
+            <Text bold>{prompts ?? '–'}</Text>
+            <Text dimColor> · {totals.mainSteps} requests</Text>
+          </Text>
+          <Text wrap="truncate-end">
+            {label('Cost')}
+            <Text bold>{usd === null ? '–' : `${isPlan(measure) ? '≈ ' : ''}$${usd.toFixed(2)}`}</Text>
+            <Text dimColor>
+              {usd === null ? '' : costLabel(measure, false)}
+              {usd !== null && hours >= 0.05 ? ` · $${(usd / hours).toFixed(2)}/h` : ''}
+              {usd !== null && prompts ? ` · $${(usd / prompts).toFixed(2)}/prompt` : ''}
+            </Text>
+          </Text>
+          <Text wrap="truncate-end">
+            {label('Tokens')}
+            <Text bold>{prompts && totals.mainSteps > 0 ? short(Math.round(tokensAll / prompts)) : '–'}</Text>
+            <Text dimColor> per prompt (main conversation, in + out)</Text>
+          </Text>
+        </Box>
+        <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="column">
+          <Text color="claude" bold>
+            Requests
+          </Text>
+          <Text wrap="truncate-end">
+            {label('Stops')}
+            {stopCount === 0 ? (
+              <Text color="success">all normal</Text>
+            ) : (
+              <Text color="warning">{tally(health.stops, stopLabel)}</Text>
+            )}
+          </Text>
+          <Text wrap="truncate-end">
+            {label('Errors')}
+            {errorCount === 0 ? <Text color="success">none</Text> : <Text color="error">{tally(health.errors, errorLabel)}</Text>}
+            <Text dimColor>{subErrors === '' ? '' : ` · subagents: ${subErrors}`}</Text>
+          </Text>
+          <Text wrap="truncate-end">
+            {label('Server')}
+            {serverNames.length === 0 ? (
+              <Text dimColor>no server-side tool calls (advisor, …)</Text>
+            ) : (
+              <Text>{serverNames.map(([n, v]) => `${n} ${v.count}× · ${duration(v.ms)}`).join('  ')}</Text>
+            )}
+          </Text>
+          {health.lastServerTools !== null && (
+            <Text dimColor wrap="truncate-end">
+              {''.padEnd(10)}last {hhmm(health.lastServerTools.at)}: {health.lastServerTools.calls.map(c => `${c.name} ${c.ms === null ? '–' : duration(c.ms)}`).join(', ')}
+            </Text>
+          )}
+        </Box>
+        <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="column">
+          <Text color="claude" bold>
+            Cache check
+          </Text>
+          {lastCheck === null ? (
+            <Text dimColor wrap="truncate-end">
+              No model switch or resume yet – Claude Code reports its own verdict on the cache then.
+            </Text>
+          ) : (
+            <Box flexDirection="column">
+              <Text wrap="truncate-end">
+                <Text color={health.checks.differed === 0 ? 'success' : 'warning'} bold>
+                  {health.checks.differed === 0
+                    ? `Claude Code agreed ${health.checks.agreed} of ${health.checks.agreed} times`
+                    : `Claude Code differed ${health.checks.differed} of ${health.checks.agreed + health.checks.differed} times`}
+                </Text>
+              </Text>
+              <Text dimColor wrap="truncate-end">
+                last {hhmm(lastCheck.at)} ({lastCheck.source === 'model' ? 'model switch' : 'resume'}): Claude Code {lastCheck.engineWarm ? 'warm' : 'cold'},
+                Cache Meter {lastCheck.ourWarm ? 'warm' : 'cold'}
+              </Text>
+            </Box>
+          )}
+        </Box>
+      </Box>
+    )
+
+    // Clicks reach a pane only in Claude Code's fullscreen renderer, which captures the mouse
+    // (fullscreen › Use the mouse); in the classic renderer the terminal keeps it.
+    const canClick = e.viewport?.isFullscreen === true
+    const tabButton = (id: typeof tab, name: string, hotkey: string, warn = false) => (
+      <Button
+        key={`tab-${id}`}
+        plain
+        hotkey={hotkey}
+        onPress={() => {
+          tab = id
+          $.ui.invalidate('ui.render')
+        }}
+      >
+        <Text bold={tab === id} dimColor={tab !== id} color={warn ? 'warning' : tab === id ? 'claude' : undefined}>
+          {name}
+          {warn ? ' !' : ''}
+        </Text>
+      </Button>
+    )
+
     return (
       <Box flexDirection="column">
         <Box flexDirection="row" justifyContent="space-between">
-          <Text color="claude" bold>
-            ◉ Cache Meter
-          </Text>
+          <Box flexDirection="row" columnGap={2}>
+            <Text color="claude" bold>
+              ◉ Cache Meter
+            </Text>
+            {tabButton('overview', 'Overview', '1')}
+            {tabButton('context', 'Context', '2')}
+            {tabButton('health', 'Health', '3', issues !== '')}
+          </Box>
           <Text dimColor wrap="truncate-end">
-            {tier === 'narrow' ? '' : 'prompt cache · tokens'}
+            {tier === 'wide' ? 'prompt cache · tokens' : ''}
           </Text>
         </Box>
-        {tier === 'wide' ? (
-          <Box key="columns" flexDirection="row" columnGap={1}>
-            <Box flexDirection="column" width={left}>
+        {tab === 'overview' &&
+          (tier === 'wide' ? (
+            <Box key="columns" flexDirection="row" columnGap={1}>
+              <Box flexDirection="column" width={left}>
+                {cacheCard}
+                {keepCard}
+              </Box>
+              <Box flexDirection="column" width={rightW}>
+                {contextCard}
+                {sessionCard}
+              </Box>
+            </Box>
+          ) : (
+            <Box flexDirection="column">
               {cacheCard}
               {keepCard}
-            </Box>
-            <Box flexDirection="column" width={rightW}>
               {contextCard}
               {sessionCard}
             </Box>
-          </Box>
-        ) : (
-          <Box flexDirection="column">
-            {cacheCard}
-            {keepCard}
-            {contextCard}
-            {sessionCard}
-          </Box>
-        )}
-        {requestsCard}
+          ))}
+        {tab === 'overview' && requestsCard}
+        {tab === 'context' && contextView}
+        {tab === 'health' && healthView}
         <Box flexDirection="row" justifyContent="space-between">
           <Text dimColor wrap="truncate-end">
             {tier === 'narrow'
-              ? 'keys: ctrl+x tab'
-              : `keys after ctrl+x tab: ${isKeeping ? 's stop · ' : canKeep ? 'w keep warm · ' : ''}c compact · Esc back`}
+              ? `${canClick ? 'click a tab · ' : ''}/tokens health`
+              : `${canClick ? 'click a tab or ' : ''}/tokens context | health · keys: ctrl+x tab, then 1–3 · ${isKeeping ? 's stop · ' : canKeep ? 'w keep warm · ' : ''}c compact`}
           </Text>
           <Button key="pane-compact" plain hotkey="c" onPress={() => compactNow($)}>
             Compact
@@ -978,4 +1428,24 @@ function hitColor(pct: number | null): string | undefined {
   if (pct >= 50) return 'warning'
 
   return 'error'
+}
+
+/** A home directory as `~`, so paths stay short and screenshots show no user name. */
+function homeShort(path: string): string {
+  return path.replace(/^\/(Users|home)\/[^/]+(?=\/|$)/, '~')
+}
+
+/**
+ * A subscription: Claude Code reports plan limits only there (types: SessionMeasureInput.rateLimits,
+ * "empty off a subscription or before the first reading").
+ */
+function isPlan(measure: Measure | null): boolean {
+  return (measure?.limits.length ?? 0) > 0
+}
+
+/** What the cost figure means here: a comparison value on a plan, real spend on an API key. */
+function costLabel(measure: Measure | null, isLong: boolean): string {
+  if (isPlan(measure)) return isLong ? ' API value (API-key price)' : ' API value'
+
+  return isLong ? ' spent (as /cost)' : ' spent'
 }

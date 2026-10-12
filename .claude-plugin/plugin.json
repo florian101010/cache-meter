@@ -1,7 +1,7 @@
 {
   "name": "cache-meter",
   "displayName": "Cache Meter",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Claude Code mod: keep your prompt cache warm through a break with /keepwarm, and see when it expires, its hit rate, context fill and every request's tokens above the prompt.",
   "author": {
     "name": "Florian Grimmer",
@@ -36,6 +36,16 @@
         "auto",
         "60m",
         "5m"
+      ],
+      "default": "auto"
+    },
+    "autoSidebar": {
+      "type": "string",
+      "title": "Sidebar at start",
+      "description": "auto: in Claude Code's fullscreen renderer (/tui fullscreen), open the /tokens dashboard as a sidebar beside the chat at session start – placed from 144 terminal columns, 110 once you opened it yourself – and leave it closed once you close it. Never opens above the prompt by itself. off: only with /tokens.",
+      "options": [
+        "auto",
+        "off"
       ],
       "default": "auto"
     }
