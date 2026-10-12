@@ -591,10 +591,10 @@ export function expiryText(remainingMs: number, tokens: number): string {
 
 /** A subagent's name in the Health tab: its type and task, else its id. */
 export function agentLabel(entry: { type?: string; description?: string } | undefined, id: string): string {
-  if (entry === undefined) return id.slice(0, 12)
+  if (entry === undefined) return cleanLabel(id.slice(0, 12))
   const what = entry.description?.trim() ?? ''
 
-  return what === '' ? entry.type ?? id.slice(0, 12) : `${entry.type ?? 'agent'}: ${what}`
+  return cleanLabel(what === '' ? entry.type ?? id.slice(0, 12) : `${entry.type ?? 'agent'}: ${what}`)
 }
 
 /** A size in tokens, estimated from characters (÷ 4) – an estimate, labelled as one wherever it is drawn. */
@@ -605,31 +605,57 @@ export function estimateTokens(text: string): number {
 /** A home directory as `~`, so paths stay short and screenshots show no user name. */
 export function homePath(path: string): string {
   return path
-    .replace(/^\/(Users|home)\/[^/]+(?=\/|$)/, '~')
+    .replace(/^\/(?:Users|home|var\/home|export\/home)\/+[^/]+(?=\/|$)/, '~')
+    .replace(/^\/volume\d+\/(?:homes|@home)\/[^/]+(?=\/|$)/, '~')
     .replace(/^\/root(?=\/|$)/, '~')
     .replace(/^\/mnt\/[a-z]\/Users\/[^/]+(?=\/|$)/i, '~')
-    .replace(/^[A-Za-z]:\\Users\\[^\\]+(?=\\|$)/, '~')
+    .replace(/^[A-Za-z]:[\\/]Users[\\/][^\\/]+(?=[\\/]|$)/i, '~')
+}
+
+/** The tools whose `file_path` / `notebook_path` is a file on disk (types: claude-code-tools). */
+const FILE_TOOLS = new Set(['Read', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit'])
+
+/** Words that look like a credential, never shown as a program name. */
+const SECRET_LIKE = /^(gh[poursa]_|github_pat_|sk-|sk_|xox[abprs]-|akia|asia|aiza|glpat-|hf_|npm_|pypi-|dop_v1_|shpat_)/i
+
+/** A label as it is stored and shown: one line, no control characters, at most 80 characters (the end kept). */
+export function cleanLabel(label: string): string {
+  const one = label.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, ' ')
+
+  return one.length > 80 ? `…${one.slice(-79)}` : one
 }
 
 /**
- * A tool call's label: the tool, plus for file tools the home-shortened path and for Bash only the
- * program name (the first word that is not a VAR=value assignment) – a command's arguments can hold secrets.
+ * A tool call's label: the tool, plus for the file tools the home-shortened path and for Bash only the
+ * program name – a command's arguments, a URL or a token never become part of it.
  */
 export function toolLabel(tool: string, input: Readonly<Record<string, unknown>>): string {
   const path = typeof input.file_path === 'string' ? input.file_path : typeof input.notebook_path === 'string' ? input.notebook_path : null
-  if (path !== null) return `${tool} ${homePath(path)}`
-  if (tool === 'Bash' && typeof input.command === 'string') {
-    // Leading VAR=value assignments go, but only plain ones (a value of safe characters, or quoted
-    // without $ or a backtick). The first word left must look like a program name; anything else –
-    // $(…), ;, |, &&, a quote, an option such as -pSECRET – gives just "Bash": never a guess.
-    const rest = input.command.trim().replace(/^(?:[A-Za-z_][A-Za-z0-9_]*=(?:"[^"$`\\]*"|'[^']*'|[A-Za-z0-9_.,:/@%+=-]*)\s+)*/, '')
-    const program = rest.split(/\s+/)[0] ?? ''
-    // Only the last path segment is shown, so only it needs to pass.
-    const name = program.split('/').pop() ?? ''
+  if (path !== null && FILE_TOOLS.has(tool)) {
+    // A path, not a URL: anything with a scheme gives just the tool; a query or fragment is cut off.
+    if (/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(path)) return tool
 
-    return /^[A-Za-z0-9_.+][A-Za-z0-9_.+-]*$/.test(name) ? `${tool} ${name}` : tool
+    // A path segment that looks like a credential (a file named after a token) is shown as "…".
+    const shown = homePath(path.split(/[?#]/)[0] ?? '')
+      .split(/([\\/])/)
+      .map(part => (SECRET_LIKE.test(part) ? '…' : part))
+      .join('')
+
+    return cleanLabel(`${tool} ${shown}`)
   }
+  if (tool === 'Bash' && typeof input.command === 'string') {
+    // Words are split where bash splits them – space, tab, newline – not on every Unicode space: a
+    // no-break space inside an assignment's value must not end the value. Plain VAR=value prefixes go;
+    // the first word left must look like a program name, else just "Bash": never a guess.
+    const rest = input.command.replace(/^[ \t\n]+/, '').replace(/^(?:[A-Za-z_][A-Za-z0-9_]*=(?:"[^"$`\\]*"|'[^']*'|[A-Za-z0-9_.,:/@%+=-]*)[ \t\n]+)*/, '')
+    const program = rest.split(/[ \t\n]+/)[0] ?? ''
+    // A home directory itself is no program name (it would show the user name).
+    if (homePath(program) === '~') return tool
+    const name = program.split('/').pop() ?? ''
+    const isProgram = /^[A-Za-z0-9_.+][A-Za-z0-9_.+-]*$/.test(name) && name.length <= 32 && !SECRET_LIKE.test(name) && !/\d{8}/.test(name)
 
+    return isProgram ? `${tool} ${name}` : tool
+  }
 
   return tool
 }
@@ -690,6 +716,11 @@ export type ReportData = {
   keepwarm: { pings: number; readTokens: number }
 }
 
+/** A label as inline code in the report, so a crafted path or task cannot add Markdown. */
+function code(text: string): string {
+  return `\`${cleanLabel(text).replace(/`/g, "'")}\``
+}
+
 /** The session report `/tokens report` copies: Markdown, the same figures and labels as the pane. */
 export function reportMarkdown(r: ReportData): string {
   const lines: string[] = []
@@ -706,15 +737,15 @@ export function reportMarkdown(r: ReportData): string {
   lines.push(
     `- Fill: ${r.context.percent === null ? '–' : `${r.context.percent}%`}${r.context.tokens === null ? '' : ` (${short(r.context.tokens)} tokens)`}${r.context.autoCompactPct === null ? '' : ` · auto-compact at ${r.context.autoCompactPct}%`}${r.context.promptsLeft === null ? '' : ` · in ≈ ${r.context.promptsLeft} prompts at this pace`}`,
   )
-  if (r.memoryFiles.length > 0) lines.push(`- Memory files: ${r.memoryFiles.map(f => `${f.name} ${short(f.tokens)}`).join(', ')}`)
-  if (r.mcpServers.length > 0) lines.push(`- MCP servers: ${r.mcpServers.map(m => `${m.name} ${short(m.tokens)} (${m.calls} calls)`).join(', ')}`)
+  if (r.memoryFiles.length > 0) lines.push(`- Memory files: ${r.memoryFiles.map(f => `${code(f.name)} ${short(f.tokens)}`).join(', ')}`)
+  if (r.mcpServers.length > 0) lines.push(`- MCP servers: ${r.mcpServers.map(m => `${code(m.name)} ${short(m.tokens)} (${m.calls} calls)`).join(', ')}`)
   if (r.toolsByTool.length > 0) {
     lines.push(`- Tool results (≈ tokens, characters ÷ 4): ${r.toolsByTool.map(t => `${t.tool} ${short(t.tokens)} in ${t.count}`).join(', ')}`)
-    lines.push(`- Largest: ${r.largest.map(l => `${l.label} ${short(l.tokens)}`).join(', ')}`)
+    lines.push(`- Largest: ${r.largest.map(l => `${code(l.label)} ${short(l.tokens)}`).join(', ')}`)
   }
   if (r.agents.length > 0) {
     lines.push('', '## Subagents', '')
-    for (const a of r.agents) lines.push(`- ${a.label}: ${short(a.tokens)} tokens, ${a.steps} requests, ${a.hit === null ? '–' : `${a.hit}%`} hit`)
+    for (const a of r.agents) lines.push(`- ${code(a.label)}: ${short(a.tokens)} tokens, ${a.steps} requests, ${a.hit === null ? '–' : `${a.hit}%`} hit`)
   }
   if (r.limits.length > 0) {
     lines.push('', '## Plan limits', '')

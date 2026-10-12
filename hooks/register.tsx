@@ -30,6 +30,7 @@ import {
   ZERO,
   add,
   addToolResult,
+  cleanLabel,
   compactForecast,
   estimateTokens,
   homePath,
@@ -414,7 +415,8 @@ async function maybeNotify($: EngineInterface) {
     reason = sent.isSent ? null : sent.reason
   } catch (error) {
     // Rejected by a Notification hook's deny or a failed write (types: $.ui.notify): its own words.
-    reason = error instanceof Error ? error.message : String(error)
+    // Stored (other mods can read the state) and drawn: one line, cut to 80 characters.
+    reason = cleanLabel(error instanceof Error ? error.message : String(error))
   }
   await update($, healthA, health => {
     const n = health.notice ?? { sent: 0, lastReason: null }
@@ -786,7 +788,8 @@ export const register: Register = (on, options) => {
     const { [e.turnId]: _done, ...rest } = openTurns
     openTurns = rest
     const result = await next(e)
-    if (!isMain || !showTurnLine || e.isAborted || !e.usage || open === undefined || open.requests === 0) return result
+    // Only where a person reads it: under -p and the SDK nothing of Cache Meter's is drawn (README › Requirements).
+    if (!isMain || !showTurnLine || !isInteractive || e.isAborted || !e.usage || open === undefined || open.requests === 0) return result
     let usd: number | null = null
     try {
       const now = (await $.session.usage()).cost?.usd ?? null

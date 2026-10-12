@@ -250,7 +250,7 @@ With `auto`, Cache Meter follows Claude Code's own TTL controls and your plan st
 ## Privacy, cost and permissions
 
 > [!NOTE]
-> **Local and read-only.** Cache Meter never changes your prompts, answers or tool calls, never reads your prompts and never keeps the text of Claude's answers. Of a tool call it reads the tool's name, a short label (the file path, or a Bash command's program name – never its arguments) and the length of the result, to show what fills your context; the result's text is not kept. It writes nothing to disk and sends nothing on its own. Full details: [PRIVACY.md](PRIVACY.md) · [SECURITY.md](SECURITY.md).
+> **Local and read-only.** Cache Meter never changes your prompts, answers or tool calls, never reads your prompts and never keeps the text of Claude's answers. Of a tool call it reads the tool's name, a short label (a file tool's path, or a Bash command's program name – never its arguments, a URL or a token) and the length of the result, to show what fills your context; the result's text is not kept. It writes nothing to disk and sends nothing on its own. Full details: [PRIVACY.md](PRIVACY.md) · [SECURITY.md](SECURITY.md).
 
 | | | Source |
 |---|---|---|
@@ -353,7 +353,7 @@ In the Claude Code terminal and the Code tab of the Desktop app. In the VS Code 
 
 ## Contributing
 
-Issues and pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) first – above all the rule that the **official documentation is the single source of truth** for the mods API, not memory. CI runs `claude plugin validate --strict` and every test on every push and pull request.
+Issues and pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) first – above all the rule that the **official documentation is the single source of truth** for the mods API, not memory. CI runs `claude plugin validate --strict` and every test on every push and pull request. The files under `.github/` (workflows and their scripts, which fetch the official docs and open issues with GitHub's own token) run only in GitHub Actions – they are not part of the mod and never run in your session.
 
 ## Learn more
 
