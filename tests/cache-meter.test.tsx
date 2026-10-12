@@ -58,7 +58,26 @@ function usageValue(tokens: number | undefined, window: number, threshold: numbe
         tokens,
         window,
         percent: tokens === undefined ? undefined : Math.round((tokens / window) * 100),
-        breakdown: { autoCompactThreshold: threshold, isAutoCompactEnabled: threshold !== undefined },
+        breakdown: {
+          autoCompactThreshold: threshold,
+          isAutoCompactEnabled: threshold !== undefined,
+          categories: [
+            { name: 'System prompt', tokens: 3_000, kind: 'used' },
+            { name: 'Messages', tokens: 80_000, kind: 'used' },
+            { name: 'Free space', tokens: 800_000, kind: 'free' },
+          ],
+          memoryFiles: [
+            { path: '/work/CLAUDE.md', type: 'Project', tokens: 4_000 },
+            { path: '/home/u/.claude/CLAUDE.md', type: 'User', tokens: 9_000 },
+          ],
+          mcpTools: [
+            { name: 'a', serverName: 'github', tokens: 1_000, isLoaded: true },
+            { name: 'b', serverName: 'github', tokens: 2_000, isLoaded: true },
+            { name: 'c', serverName: 'memory', tokens: 500, isLoaded: false },
+          ],
+          agents: [],
+          skills: { totalSkills: 154, includedSkills: 120, tokens: 4_200, skillFrontmatter: [] },
+        },
       },
       rateLimits,
       cost: { usd: 1.5 },
@@ -73,7 +92,15 @@ function world(on: On, opts: { env?: Record<string, string>; forkRead?: number; 
   const toasts: string[] = []
   const forks: string[] = []
   // What the next main request writes to the cache; a test raises it to stage a cold rewrite.
-  const next = { write: 6_000, read: 93_000, slowMs: 0 }
+  const next = {
+    write: 6_000,
+    read: 93_000,
+    slowMs: 0,
+    stop: 'end_turn' as string | null,
+    server: [] as { id: string; name: string; input: unknown; startedAt: number; endedAt?: number }[],
+  }
+  // The breakdown detail of each $.session.usage call, to tell the free estimate from the exact count.
+  const usageDetails: (string | undefined)[] = []
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['drawn below'] }))
   on('ui.toast', ($, e) => {
     toasts.push(e.text)
@@ -98,7 +125,12 @@ function world(on: On, opts: { env?: Record<string, string>; forkRead?: number; 
   on('prompt.submit', ($, e) => ({ text: e.text }))
   on('command.register', () => ({ value: undefined }) as never)
   on('settings.read', () => ({ value: {} }))
-  on('session.usage', () => usageValue(100_000, 1_000_000, 970_000))
+  on('session.usage', ($, e) => {
+    usageDetails.push((e as { breakdown?: string }).breakdown)
+    return usageValue(100_000, 1_000_000, 970_000)
+  })
+  on('session.turns', () => ({ value: 4 }))
+  on('classic.StopFailure', () => ({}))
   on('session.start', () => ({ cwd: '/work' }))
   on('classic.SessionStart', () => ({}))
   on('classic.PostModelSwitch', () => ({}))
@@ -126,12 +158,13 @@ function world(on: On, opts: { env?: Record<string, string>; forkRead?: number; 
       index: e.index,
       answer: 'ok',
       toolUses: [],
-      stopReason: 'end_turn',
+      stopReason: next.stop,
+      ...(next.server.length > 0 ? { serverToolUses: next.server } : {}),
       usage: { model: 'claude-test', input_tokens: 1_000, output_tokens: 500, cache_read_input_tokens: next.read, cache_creation_input_tokens: next.write },
     } as never
   })
 
-  return { clock, toasts, forks, next, pane }
+  return { clock, toasts, forks, next, pane, usageDetails }
 }
 
 /** Runs a slash command; the kit fills origin and presentation (test § Write a test). */
@@ -604,14 +637,140 @@ test('pane widths: a narrow dock drops secondary text, from 110 columns two colu
   await ui.unmount()
 
   ui = await at(90)
-  expect(await ui.find({ type: 'Text', text: 'prompt cache · tokens' })).toBeDefined()
+  // The header holds the tabs; the subtitle shows only in the wide layout.
+  expect(await ui.find({ type: 'Text', text: 'prompt cache · tokens' })).toBeUndefined()
   expect(await ui.find({ key: 'columns' })).toBeUndefined()
   await ui.unmount()
 
   ui = await at(140)
+  expect(await ui.find({ type: 'Text', text: 'prompt cache · tokens' })).toBeDefined()
   expect(await ui.find({ key: 'columns' })).toBeDefined()
   // The countdown spans one column of two: (140 - 1) / 2 = 69, minus 4 of card chrome.
   expect((await ui.find({ type: 'Raster', key: 'countdown' }))?.props.columns).toBe(65)
   expect((await ui.find({ type: 'Raster', key: 'requests' }))?.props.columns).toBe(136)
+  await ui.unmount()
+})
+
+test('health tab: unusual stops, API errors, server-side tools, rates', async ($, on) => {
+  const { next, clock } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  next.stop = 'max_tokens'
+  next.server = [{ id: 's1', name: 'advisor', input: {}, startedAt: T0, endedAt: T0 + 12_000 }]
+  await step($)
+  next.stop = 'tool_use'
+  next.server = []
+  await step($)
+  // A subagent's unusual stop is not counted.
+  next.stop = 'refusal'
+  await step($, 'agent-1')
+  await $.classic.StopFailure({ hook_event_name: 'StopFailure', error: 'overloaded' } as never)
+  await $.classic.StopFailure({ hook_event_name: 'StopFailure', error: 'overloaded' } as never)
+  await $.classic.StopFailure({ hook_event_name: 'StopFailure', error: 'rate_limit', agent_id: 'agent-1' } as never)
+  await clock.advance(2 * 60 * 60_000)
+  await $.session.measure({ context: { tokens: 100_000, window: 1_000_000, percent: 10 }, rateLimits: [], cost: { usd: 4 }, changed: ['context', 'cost'] })
+
+  const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  // Names each check, so a failure says which text is missing.
+  const has = async (text: string | RegExp) => expect([String(text), (await ui.find({ type: 'Text', text })) !== undefined]).toEqual([String(text), true])
+  // The overview points at the problems; the Health tab is marked.
+  await has(/^2 API errors · 1 unusual stop/)
+  await ui.press({ key: 'tab-health' })
+  await has('output limit 1×')
+  await has('overloaded 2×')
+  await has(' · subagents: rate limit 1×')
+  await has(/^advisor 1× · 12s/)
+  // $4 over two hours and four prompts.
+  await has(/ · \$2\.00\/h · \$1\.00\/prompt$/)
+  await has(/No model switch or resume yet/)
+  await ui.press({ key: 'tab-overview' })
+  // Two hours on, the one-hour cache has expired: back on the overview.
+  await has('EXPIRED')
+  await ui.unmount()
+})
+
+test('context tab: heaviest items from the free estimate, exact count only on a press', async ($, on) => {
+  const { usageDetails } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  await $.session.measure({ context: { tokens: 100_000, window: 1_000_000, percent: 10 }, rateLimits: [], changed: ['context'] })
+  expect(usageDetails.every(d => d === 'summary')).toBe(true)
+
+  const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  await ui.press({ key: 'tab-context' })
+  expect(await ui.find({ type: 'Text', text: /^estimate · / })).toBeDefined()
+  // Used categories only, heaviest first; free space is not a share of the context.
+  expect(await ui.find({ type: 'Text', text: 'Messages' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'Free space' })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: '/home/u/.claude/CLAUDE.md' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ' · 2 tools' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /1 more tools behind tool search/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '120 of 154' })).toBeDefined()
+
+  await ui.press({ key: 'context-exact' })
+  expect(usageDetails.at(-1)).toBe('full')
+  expect(usageDetails.filter(d => d === 'full')).toHaveLength(1)
+  expect(await ui.find({ type: 'Text', text: /^exact · / })).toBeDefined()
+  await ui.unmount()
+})
+
+test('cache check: Claude Code\'s verdict against the clock at resume and model switch', async ($, on) => {
+  world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  // Warm by the clock, and Claude Code agrees.
+  await $.classic.PostModelSwitch({
+    hook_event_name: 'PostModelSwitch',
+    from_model: 'a',
+    to_model: 'a',
+    requested_model: null,
+    source: 'command',
+    context_tokens: 100_000,
+    prompt_cache_warm: true,
+    cache_ttl: '1h',
+    estimated_cache_write_usd: 0.4,
+    pricing: 'catalog',
+  } as never)
+  // A resume Claude Code calls expired, while the clock (10 minutes) says warm: they differ.
+  await $.classic.SessionStart({ source: 'resume', seconds_since_last_response: 600, prompt_cache_likely_expired: true, context_tokens: 100_000 } as never)
+
+  const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  await ui.press({ key: 'tab-health' })
+  expect(await ui.find({ type: 'Text', text: 'Claude Code differed 1 of 2 times' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /\(resume\): Claude Code cold,/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('first write of a cache is blue in the request chart, a warm request green', async ($, on) => {
+  world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  await step($)
+  const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  const chart = await ui.find({ type: 'Raster', key: 'requests' })
+  const cells = Array.from(atob(String(chart?.props.cells)), c => c.charCodeAt(0))
+  // u32 little-endian triplets; the bottom row's last four cells are the two requests.
+  const words: number[] = []
+  for (let i = 0; i < cells.length; i += 4) words.push(cells[i]! | (cells[i + 1]! << 8) | (cells[i + 2]! << 16) | (cells[i + 3]! << 24))
+  const columns = Number(chart?.props.columns)
+  const bottom = words.slice(-columns * 3)
+  const fg = (x: number) => bottom[x * 3 + 1]
+  expect(fg(columns - 4)).toBe(0x7088f0)
+  expect(fg(columns - 1)).toBe(0x40c070)
+  await ui.unmount()
+})
+
+test('band: the API value shows when there is room and is dropped first', async ($, on) => {
+  world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  await $.session.measure({ context: { tokens: 100_000, window: 1_000_000, percent: 10 }, rateLimits: [], cost: { usd: 2.5 }, changed: ['context', 'cost'] })
+  let ui = await $.ui.mount({ surface: 'terminal', ...band(130) })
+  expect(await ui.find({ type: 'Text', text: ' · API $2.50' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ' (auto-compact 97%)' })).toBeDefined()
+  await ui.unmount()
+  ui = await $.ui.mount({ surface: 'terminal', ...band(80) })
+  expect(await ui.find({ type: 'Text', text: ' · API $2.50' })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: ' (auto-compact 97%)' })).toBeDefined()
   await ui.unmount()
 })

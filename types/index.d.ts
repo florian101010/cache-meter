@@ -1,7 +1,7 @@
 export type Usage4 = { input: number; read: number; write: number; output: number }
 
 /** One main-thread model request as the API counted it, timed at the request's start. */
-export type Step = Usage4 & { at: number; model: string }
+export type Step = Usage4 & { at: number; model: string; kind?: 'first' | 'cold' }
 
 /** The main thread's prompt cache: when a request last touched it, and how well the last one hit it. */
 export type CacheInfo = {
@@ -34,6 +34,10 @@ export type Measure = {
   history: number[]
   limits: Limit[]
   usd: number | null
+  /** When this session's usage began ($.session.usage().startedAt; /clear starts it over). */
+  startedAt: number | null
+  /** Prompts the user has sent this session ($.session.turns()). */
+  prompts: number | null
 }
 
 /** Session sums; the cold-rewrite count and tokens are kept apart from the (capped) list of cold rewrites. */
@@ -43,6 +47,43 @@ export type KeepWarm = { until: number | null; pings: number; readTokens: number
 
 /** A main request that found the cache expired and wrote it anew: after a pause, a model switch, or a resume. */
 export type ColdWrite = { at: number; written: number; cause: 'pause' | 'model' | 'resume'; idleMs: number | null }
+
+/** A named share of the context, in tokens. */
+export type ContextItem = { name: string; tokens: number }
+
+/** Where the context goes, from $.session.usage's breakdown: the heaviest items, and how they were counted. */
+export type ContextMap = {
+  /** 'summary' = Claude Code's local estimate (free); 'full' = counted by the API on request, as /context does. */
+  detail: 'summary' | 'full'
+  at: number
+  /** Categories that hold tokens (kind 'used'), heaviest first. */
+  categories: ContextItem[]
+  memoryFiles: ContextItem[]
+  /** Loaded MCP tools summed per server; `tools` counts them. */
+  mcpServers: (ContextItem & { tools: number })[]
+  /** MCP tools behind tool search, not in the context until loaded. */
+  deferredMcpTools: number
+  agents: ContextItem[]
+  skills: { total: number; included: number; tokens: number } | null
+}
+
+/** One server-side tool call (the API ran it, e.g. the advisor): no tool.call fires for these. */
+export type ServerToolCall = { name: string; ms: number | null }
+
+/** What went wrong or out of the ordinary this session, beyond the cache. */
+export type Health = {
+  /** Main requests by stop reason, only the ones that are not a normal end (end_turn, tool_use). */
+  stops: Record<string, number>
+  /** Errors a turn ended on (classic StopFailure), main conversation and subagents apart. */
+  errors: Record<string, number>
+  subErrors: Record<string, number>
+  /** Server-side tool calls of the main conversation, summed per tool name. */
+  serverTools: Record<string, { count: number; ms: number }>
+  /** The server-side tool calls of the last main request that had any. */
+  lastServerTools: { at: number; calls: ServerToolCall[] } | null
+  /** Claude Code's own verdict on the cache against Cache Meter's, at model switches and resumes. */
+  checks: { agreed: number; differed: number; last: { at: number; engineWarm: boolean; ourWarm: boolean; source: 'model' | 'resume' } | null }
+}
 
 /** The TTL controls Claude Code documents (prompt-caching § Choose the TTL yourself), read at start. */
 export type TtlConfig = { force5m: boolean; envTtl: string | null; settingTtl: string | null; enable1h: boolean }
@@ -58,6 +99,8 @@ declare module 'claude-code' {
       keepWarm: KeepWarm
       ttlConfig: TtlConfig
       coldWrites: ColdWrite[]
+      contextMap: ContextMap | null
+      health: Health
     }
   }
 }

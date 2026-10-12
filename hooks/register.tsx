@@ -18,7 +18,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { CacheInfo, ColdWrite, KeepWarm, Measure, Totals, TtlConfig, Usage4 } from '../types'
+import type { CacheInfo, ColdWrite, Health, KeepWarm, Measure, ServerToolCall, Totals, TtlConfig, Usage4 } from '../types'
 import {
   COLD_MIN,
   HOUR,
@@ -52,8 +52,14 @@ import {
   sparkline,
   stack,
   tall,
+  contextMapOf,
+  isNormalStop,
+  bump,
+  tally,
+  stopLabel,
+  errorLabel,
 } from './lib'
-import type { Mark } from './lib'
+import type { BreakdownLike, Mark } from './lib'
 
 const PANE = 'cache-meter'
 const TICK_MS = 15_000
@@ -78,6 +84,15 @@ const keepA = atom({ plugin: 'cache-meter', key: 'keepWarm' } as const, {
   lastPingAt: null,
 })
 const coldA = atom({ plugin: 'cache-meter', key: 'coldWrites' } as const, [])
+const contextMapA = atom({ plugin: 'cache-meter', key: 'contextMap' } as const, null)
+const healthA = atom({ plugin: 'cache-meter', key: 'health' } as const, {
+  stops: {},
+  errors: {},
+  subErrors: {},
+  serverTools: {},
+  lastServerTools: null,
+  checks: { agreed: 0, differed: 0, last: null },
+})
 const ttlConfigA = atom({ plugin: 'cache-meter', key: 'ttlConfig' } as const, {
   force5m: false,
   envTtl: null,
@@ -94,6 +109,8 @@ let isPinging = false
 let mainRequests = 0
 // Where the surface last seated the pane: beside a fullscreen transcript (dock) or above the prompt (inline).
 let seat: 'dock' | 'inline' | null = null
+// The pane's open tab; a reload starts on the overview again.
+let tab: 'overview' | 'context' | 'health' = 'overview'
 
 async function ttlNow($: EngineInterface) {
   const measure = await read($, measureA)
@@ -136,10 +153,58 @@ async function measureNow($: EngineInterface) {
       history: m?.history ?? [],
       limits: usage.rateLimits.map(l => ({ kind: l.kind, percentUsed: l.percentUsed, resetsAt: l.resetsAt })),
       usd: usage.cost?.usd ?? null,
+      startedAt: usage.startedAt,
+      prompts: m?.prompts ?? null,
     }))
+    await mapContext($, usage.context.breakdown, 'summary')
   } catch {
     // No reading: the band waits for the first session.measure.
   }
+}
+
+// Where the context goes, from a breakdown of $.session.usage (types: SessionContextBreakdown).
+// 'summary' is Claude Code's local estimate and sends no request; 'full' counts with the API.
+async function mapContext($: EngineInterface, breakdown: unknown, detail: 'summary' | 'full') {
+  if (breakdown === undefined || breakdown === null) return
+  try {
+    const at = await $.clock.now()
+    const map = contextMapOf(breakdown as BreakdownLike, detail, at)
+    await update($, contextMapA, () => map)
+  } catch {
+    // A breakdown of another shape: keep the last map.
+  }
+}
+
+// The exact count behind the Context tab's button: one token-count request per tool and memory
+// file, as /context does (types: SessionUsageArgs.breakdown), so only on a press.
+let isCounting = false
+async function countExactly($: EngineInterface) {
+  if (isCounting) return
+  isCounting = true
+  $.ui.invalidate('ui.render')
+  try {
+    const usage = await $.session.usage({ breakdown: 'full' })
+    await mapContext($, usage.context.breakdown, 'full')
+  } catch (error) {
+    $.ui.toast(`Exact count failed: ${error instanceof Error ? error.message : String(error)}`)
+  } finally {
+    isCounting = false
+    $.ui.invalidate('ui.render')
+  }
+}
+
+// Claude Code's own verdict on the cache against Cache Meter's clock, taken before either is acted on.
+async function recordCheck($: EngineInterface, engineWarm: boolean, source: 'model' | 'resume') {
+  const now = await $.clock.now()
+  const ourWarm = cacheStatus(await read($, cacheA), now, (await ttlNow($)).ms).kind === 'warm'
+  await update($, healthA, h => ({
+    ...h,
+    checks: {
+      agreed: h.checks.agreed + (engineWarm === ourWarm ? 1 : 0),
+      differed: h.checks.differed + (engineWarm === ourWarm ? 0 : 1),
+      last: { at: now, engineWarm, ourWarm, source },
+    },
+  }))
 }
 
 async function tick($: EngineInterface) {
@@ -289,6 +354,7 @@ export const register: Register = (on, options) => {
     await loadTtlConfig($)
     await measureNow($)
     if ((e.source === 'resume' || e.source === 'fork') && e.seconds_since_last_response !== undefined) {
+      if (e.prompt_cache_likely_expired !== undefined) await recordCheck($, !e.prompt_cache_likely_expired, 'resume')
       const now = await $.clock.now()
       // seconds_since_last_response counts from the last response's end; Claude Code's own verdict
       // prompt_cache_likely_expired wins over that clock (classic SessionStart input, types).
@@ -338,7 +404,12 @@ export const register: Register = (on, options) => {
       if (e.agentId !== undefined) {
         await update($, totalsA, t => ({ ...t, sub: add(t.sub, u), subSteps: t.subSteps + 1 }))
       } else {
-        await update($, stepsA, list => [...list, { ...u, at: startedAt, model: usage.model }].slice(-STEPS_KEPT))
+        // Cold by the clock AND by the counts (more written than read), so a wrong TTL assumption
+        // cannot turn a warm request into a "cold" one. A request with no cache before it (session
+        // start, after /compact or /clear) writes the cache for the first time: not a loss.
+        const isCold = wasCold && before !== null && u.write >= COLD_MIN && u.read < u.write
+        const kind = isCold ? ('cold' as const) : before === null ? ('first' as const) : undefined
+        await update($, stepsA, list => [...list, { ...u, at: startedAt, model: usage.model, ...(kind ? { kind } : {}) }].slice(-STEPS_KEPT))
         await update($, totalsA, t => ({ ...t, main: add(t.main, u), mainSteps: t.mainSteps + 1 }))
         await update($, cacheA, () => ({
           lastAt: startedAt,
@@ -348,9 +419,7 @@ export const register: Register = (on, options) => {
           coldReason: null,
           idleBeforeMs: null,
         }))
-        // Cold by the clock AND by the counts (more written than read), so a wrong TTL assumption
-        // cannot turn a warm request into a "cold" one.
-        if (wasCold && before !== null && u.write >= COLD_MIN && u.read < u.write) {
+        if (isCold && before !== null) {
           const cause: ColdWrite['cause'] = before.lastAt > 0 ? 'pause' : before.coldReason ?? 'model'
           const idleMs = cause === 'pause' ? startedAt - before.lastAt : before.idleBeforeMs
           const cold: ColdWrite = { at: startedAt, written: u.write, cause, idleMs }
@@ -367,6 +436,42 @@ export const register: Register = (on, options) => {
         }
       }
     }
+    if (isMain) {
+      // Why the request stopped, when not normally, and the tool calls the API ran itself
+      // (events › Follow a turn: serverToolUses, v2.1.290+; no tool.call fires for these).
+      const stop = result.stopReason
+      const calls: ServerToolCall[] = (result.serverToolUses ?? []).map(t => ({
+        name: t.name,
+        ms: t.endedAt === undefined ? null : Math.max(0, t.endedAt - t.startedAt),
+      }))
+      if (!isNormalStop(stop) || calls.length > 0) {
+        await update($, healthA, h => {
+          const serverTools = { ...h.serverTools }
+          for (const c of calls) {
+            const sum = serverTools[c.name] ?? { count: 0, ms: 0 }
+            serverTools[c.name] = { count: sum.count + 1, ms: sum.ms + (c.ms ?? 0) }
+          }
+
+          return {
+            ...h,
+            stops: stop !== null && !isNormalStop(stop) ? bump(h.stops, stop) : h.stops,
+            serverTools,
+            lastServerTools: calls.length > 0 ? { at: startedAt, calls } : h.lastServerTools,
+          }
+        })
+      }
+    }
+
+    return result
+  })
+
+  // A turn ended on an error (settings hook event StopFailure, observed only): counted by kind,
+  // the main conversation and subagents apart (agent_id is set for a subagent).
+  on('classic.StopFailure', async ($, e, next) => {
+    const result = await next(e)
+    await update($, healthA, h =>
+      e.agent_id === undefined ? { ...h, errors: bump(h.errors, e.error) } : { ...h, subErrors: bump(h.subErrors, e.error) },
+    )
 
     return result
   })
@@ -384,15 +489,23 @@ export const register: Register = (on, options) => {
   on('session.measure', async ($, e, next) => {
     const result = await next(e)
     const before = await read($, measureA)
-    // The auto-compact point changes only with the window (or the model): compute it once per window.
+    // A summary reading after each turn: Claude Code estimates it locally and sends no request
+    // (types: SessionUsageArgs). It gives the auto-compact point, the context map and the start time.
     let auto: { pct: number | null; isOff: boolean; isKnown: boolean } | null = null
-    if (before === null || before.autoCompactWindow !== e.context.window) {
-      try {
-        const usage = await $.session.usage({ breakdown: 'summary' })
-        auto = autoCompactOf(usage.context.breakdown, e.context.window)
-      } catch {
-        auto = null
-      }
+    let startedAt: number | null = null
+    let prompts: number | null = null
+    try {
+      const usage = await $.session.usage({ breakdown: 'summary' })
+      if (before === null || before.autoCompactWindow !== e.context.window) auto = autoCompactOf(usage.context.breakdown, e.context.window)
+      startedAt = usage.startedAt
+      await mapContext($, usage.context.breakdown, 'summary')
+    } catch {
+      auto = null
+    }
+    try {
+      prompts = await $.session.turns()
+    } catch {
+      prompts = null
     }
     await update($, measureA, m => {
       const tokens = e.context.tokens ?? null
@@ -408,6 +521,8 @@ export const register: Register = (on, options) => {
         history,
         limits: e.rateLimits.map(l => ({ kind: l.kind, percentUsed: l.percentUsed, resetsAt: l.resetsAt })),
         usd: e.cost?.usd ?? m?.usd ?? null,
+        startedAt: startedAt ?? m?.startedAt ?? null,
+        prompts: prompts ?? m?.prompts ?? null,
       }
 
       return measured
@@ -429,6 +544,8 @@ export const register: Register = (on, options) => {
   // A real model switch starts a cold cache; the event carries the engine's own TTL and estimate.
   on('classic.PostModelSwitch', async ($, e, next) => {
     const result = await next(e)
+    // Before the cache is set cold below: what Claude Code and Cache Meter each thought of it.
+    await recordCheck($, e.prompt_cache_warm, e.source === 'resume' ? 'resume' : 'model')
     await update($, ttlA, () => e.cache_ttl)
     if (e.source !== 'resume' && e.from_model !== e.to_model) {
       const cold: CacheInfo = {
@@ -520,10 +637,16 @@ export const register: Register = (on, options) => {
       'context '.length +
       pct.length +
       (showButton ? '[ Compact ]'.length + 1 : 0)
+    // What the session would cost at API prices: Claude Code's own figure, the one /cost shows.
+    const costText = measure?.usd == null ? '' : ` · API $${measure.usd.toFixed(2)}`
     const minBar = 6
     const showRewrite = rewriteText !== '' && base + rewriteText.length + autoText.length + minBar < cols
     const showAuto = autoText !== '' && base + autoText.length + (showRewrite ? rewriteText.length : 0) + minBar < cols
-    const free = cols - base - (showAuto ? autoText.length : 0) - (showRewrite ? rewriteText.length : 0) - 1
+    // Dropped first when the row gets narrow: after it the auto-compact point, then the bar.
+    const showCost =
+      costText !== '' && base + costText.length + (showAuto ? autoText.length : 0) + (showRewrite ? rewriteText.length : 0) + minBar < cols
+    const free =
+      cols - base - (showAuto ? autoText.length : 0) - (showRewrite ? rewriteText.length : 0) - (showCost ? costText.length : 0) - 1
     const cells = free >= minBar ? Math.min(20, free) : 0
     const lit = status.kind === 'warm' ? litCells(status.remaining, ttl.ms, cells) : 0
 
@@ -547,6 +670,7 @@ export const register: Register = (on, options) => {
         <Text dimColor>context </Text>
         <Text bold>{pct}</Text>
         {showAuto && <Text dimColor>{autoText}</Text>}
+        {showCost && <Text dimColor>{costText}</Text>}
         {showRewrite && (
           <Text color={status.kind === 'expired' ? 'warning' : 'claude'} wrap="truncate-end">
             {rewriteText}
@@ -576,6 +700,8 @@ export const register: Register = (on, options) => {
     const cache = await read($, cacheA)
     const keep: KeepWarm = await read($, keepA)
     const colds = await read($, coldA)
+    const map = await read($, contextMapA)
+    const health: Health = await read($, healthA)
     const ttl = await ttlNow($)
     const now = await $.clock.now()
     const status = cacheStatus(cache, now, ttl.ms)
@@ -757,6 +883,14 @@ export const register: Register = (on, options) => {
     // What caching saved: every input token at the base price against what reads and writes cost,
     // with the last request's model and the current TTL for the whole session (README › Pane).
     const saving = cacheSaving(totals.main, readMultiplier(steps.at(-1)?.model ?? ''), writeMultiplier(ttl.ms))
+    const errorCount = Object.values(health.errors).reduce((a, n) => a + n, 0)
+    const stopCount = Object.values(health.stops).reduce((a, n) => a + n, 0)
+    const issues = [
+      errorCount > 0 ? `${errorCount} API error${errorCount === 1 ? '' : 's'}` : '',
+      stopCount > 0 ? `${stopCount} unusual stop${stopCount === 1 ? '' : 's'}` : '',
+    ]
+      .filter(Boolean)
+      .join(' · ')
     const limits = measure?.limits ?? []
     // Name (11) + bar + ' 100%' (5) + ' · resets Mon 17:10' (19): the bar takes what the column leaves.
     const limitBar = Math.max(6, Math.min(24, rightIn - 35))
@@ -777,12 +911,17 @@ export const register: Register = (on, options) => {
         </Text>
         <Text wrap="truncate-end">
           <Text dimColor>{totals.mainSteps} requests · </Text>
-          <Text bold>{measure?.usd == null ? '–' : `$${measure.usd.toFixed(2)}`}</Text>
-          <Text dimColor> list price</Text>
+          <Text bold>{measure?.usd == null ? '–' : `≈ $${measure.usd.toFixed(2)}`}</Text>
+          <Text dimColor> at API prices{tier === 'narrow' ? '' : ' (as /cost)'}</Text>
         </Text>
         {totals.subSteps > 0 && (
           <Text dimColor wrap="truncate-end">
             subagents {usageLine(totals.sub)} · {totals.subSteps} requests
+          </Text>
+        )}
+        {issues !== '' && (
+          <Text color="warning" wrap="truncate-end">
+            {issues} – see 3: Health
           </Text>
         )}
         {totals.mainSteps === 0 ? null : colds.length === 0 ? (
@@ -849,7 +988,10 @@ export const register: Register = (on, options) => {
       const all = s.input + s.read + s.write
       const hit = hitPct(s) ?? 100
 
-      return { share: all > 0 ? (s.input + s.write) / all : 0, color: hit >= 80 ? HEALTH.good : hit >= 50 ? HEALTH.fair : HEALTH.poor }
+      // The first write of a cache (session start, after /compact) is not a loss: drawn in blue.
+      const color = s.kind === 'first' ? FILL.context : hit >= 80 ? HEALTH.good : hit >= 50 ? HEALTH.fair : HEALTH.poor
+
+      return { share: all > 0 ? (s.input + s.write) / all : 0, color }
     })
     const requestsCard = (
       <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="column">
@@ -858,7 +1000,7 @@ export const register: Register = (on, options) => {
             Requests
           </Text>
           <Text dimColor wrap="truncate-end">
-            {tier === 'narrow' ? 'not from cache' : 'height = share not read from the cache · newest right'}
+            {tier === 'narrow' ? 'not from cache' : 'height = share not from cache · blue = first write · newest right'}
           </Text>
         </Box>
         {steps.length === 0 && <Text dimColor>No request measured yet.</Text>}
@@ -895,41 +1037,256 @@ export const register: Register = (on, options) => {
       </Box>
     )
 
+    // --- context tab: where the context goes ---------------------------------------------------
+    const itemRow = (name: string, tokens: number, top: number, nameW: number, note = '') => {
+      const barW = Math.max(4, Math.min(24, fullIn - nameW - 20))
+      const lit = top > 0 ? Math.max(tokens > 0 ? 1 : 0, Math.round((tokens / top) * barW)) : 0
+
+      return (
+        <Box flexDirection="row">
+          <Box width={nameW}>
+            <Text wrap="truncate-start">{name}</Text>
+          </Box>
+          <Text color="suggestion"> {'█'.repeat(lit)}</Text>
+          <Text color="inactive">{'░'.repeat(barW - lit)}</Text>
+          <Text bold> {right(short(tokens), 7)}</Text>
+          <Text dimColor wrap="truncate-end">
+            {note}
+          </Text>
+        </Box>
+      )
+    }
+    const window = measure?.window ?? 0
+    const pctOf = (tokens: number) => (window > 0 ? ` ${Math.round((tokens / window) * 100)}%` : '')
+    const nameW = Math.max(12, Math.min(34, Math.floor(fullIn * 0.4)))
+    const topCat = map?.categories[0]?.tokens ?? 0
+    const topFile = map?.memoryFiles[0]?.tokens ?? 0
+    const topServer = map?.mcpServers[0]?.tokens ?? 0
+    const contextView = (
+      <Box flexDirection="column">
+        {contextCard}
+        <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="column">
+          <Box flexDirection="row" justifyContent="space-between">
+            <Text color="claude" bold>
+              Where it goes
+            </Text>
+            <Text dimColor wrap="truncate-end">
+              {map === null ? 'no reading yet' : `${map.detail === 'full' ? 'exact' : 'estimate'} · ${hhmm(map.at)}`}
+            </Text>
+          </Box>
+          {map === null && <Text dimColor>Claude Code reports it after the first answer.</Text>}
+          {map !== null && map.categories.slice(0, 8).map(c => itemRow(c.name, c.tokens, topCat, nameW, pctOf(c.tokens)))}
+          <Box flexDirection="row" justifyContent="space-between">
+            <Text dimColor wrap="truncate-end">
+              {tier === 'narrow' ? 'exact: 1 request per item' : 'Exact count: one API request per tool and memory file, as /context'}
+            </Text>
+            {isCounting ? (
+              <Text color="claude">counting…</Text>
+            ) : (
+              <Button key="context-exact" plain hotkey="x" onPress={() => countExactly($)}>
+                <Text color="claude" bold>
+                  Count exactly
+                </Text>
+              </Button>
+            )}
+          </Box>
+        </Box>
+        {map !== null && (
+          <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="column">
+            <Text color="claude" bold>
+              Heaviest items
+            </Text>
+            <Text dimColor>Memory files (CLAUDE.md and rules)</Text>
+            {map.memoryFiles.length === 0 && <Text dimColor> none</Text>}
+            {map.memoryFiles.slice(0, 5).map(f => itemRow(f.name, f.tokens, topFile, nameW))}
+            <Text dimColor wrap="truncate-end">
+              MCP servers{map.deferredMcpTools > 0 ? ` · ${map.deferredMcpTools} more tools behind tool search, not loaded` : ''}
+            </Text>
+            {map.mcpServers.length === 0 && <Text dimColor> none loaded</Text>}
+            {map.mcpServers.slice(0, 5).map(m => itemRow(m.name, m.tokens, topServer, nameW, ` · ${m.tools} tools`))}
+            <Text wrap="truncate-end">
+              <Text dimColor>Skills </Text>
+              {map.skills === null ? (
+                <Text dimColor>–</Text>
+              ) : (
+                <Text>
+                  <Text bold color={map.skills.included < map.skills.total ? 'warning' : undefined}>
+                    {map.skills.included} of {map.skills.total}
+                  </Text>
+                  <Text dimColor> listed · {short(map.skills.tokens)} tokens</Text>
+                  {map.skills.included < map.skills.total && <Text dimColor> · the rest did not fit the listing budget</Text>}
+                </Text>
+              )}
+            </Text>
+            {map.agents.length > 0 && (
+              <Text dimColor wrap="truncate-end">
+                Agents {map.agents.slice(0, 4).map(a => `${a.name} ${short(a.tokens)}`).join(' · ')}
+              </Text>
+            )}
+          </Box>
+        )}
+      </Box>
+    )
+
+    // --- health tab: rates, stops, errors, server-side tools, Claude Code's cache verdict ---------
+    const label = (text: string) => <Text dimColor>{text.padEnd(10)}</Text>
+    const age = measure?.startedAt == null ? null : Math.max(0, now - measure.startedAt)
+    const hours = age === null ? 0 : age / HOUR
+    const prompts = measure?.prompts ?? null
+    const usd = measure?.usd ?? null
+    const tokensAll = totals.main.input + totals.main.read + totals.main.write + totals.main.output
+    const subErrors = tally(health.subErrors, errorLabel)
+    const serverNames = Object.entries(health.serverTools).sort((a, b) => b[1].ms - a[1].ms)
+    const lastCheck = health.checks.last
+    const healthView = (
+      <Box flexDirection="column">
+        <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="column">
+          <Text color="claude" bold>
+            Session
+          </Text>
+          <Text wrap="truncate-end">
+            {label('Age')}
+            <Text bold>{age === null ? '–' : duration(age)}</Text>
+            <Text dimColor>{measure?.startedAt == null ? '' : ` · since ${hhmm(measure.startedAt)}`}</Text>
+          </Text>
+          <Text wrap="truncate-end">
+            {label('Prompts')}
+            <Text bold>{prompts ?? '–'}</Text>
+            <Text dimColor> · {totals.mainSteps} requests</Text>
+          </Text>
+          <Text wrap="truncate-end">
+            {label('Cost')}
+            <Text bold>{usd === null ? '–' : `≈ $${usd.toFixed(2)}`}</Text>
+            <Text dimColor>
+              {usd === null ? '' : ' at API prices'}
+              {usd !== null && hours >= 0.05 ? ` · $${(usd / hours).toFixed(2)}/h` : ''}
+              {usd !== null && prompts ? ` · $${(usd / prompts).toFixed(2)}/prompt` : ''}
+            </Text>
+          </Text>
+          <Text wrap="truncate-end">
+            {label('Tokens')}
+            <Text bold>{prompts ? short(Math.round(tokensAll / prompts)) : '–'}</Text>
+            <Text dimColor> per prompt (main conversation, in + out)</Text>
+          </Text>
+        </Box>
+        <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="column">
+          <Text color="claude" bold>
+            Requests
+          </Text>
+          <Text wrap="truncate-end">
+            {label('Stops')}
+            {stopCount === 0 ? (
+              <Text color="success">all normal</Text>
+            ) : (
+              <Text color="warning">{tally(health.stops, stopLabel)}</Text>
+            )}
+          </Text>
+          <Text wrap="truncate-end">
+            {label('Errors')}
+            {errorCount === 0 ? <Text color="success">none</Text> : <Text color="error">{tally(health.errors, errorLabel)}</Text>}
+            <Text dimColor>{subErrors === '' ? '' : ` · subagents: ${subErrors}`}</Text>
+          </Text>
+          <Text wrap="truncate-end">
+            {label('Server')}
+            {serverNames.length === 0 ? (
+              <Text dimColor>no server-side tool calls (advisor, …)</Text>
+            ) : (
+              <Text>{serverNames.map(([n, v]) => `${n} ${v.count}× · ${duration(v.ms)}`).join('  ')}</Text>
+            )}
+          </Text>
+          {health.lastServerTools !== null && (
+            <Text dimColor wrap="truncate-end">
+              {''.padEnd(10)}last {hhmm(health.lastServerTools.at)}: {health.lastServerTools.calls.map(c => `${c.name} ${c.ms === null ? '–' : duration(c.ms)}`).join(', ')}
+            </Text>
+          )}
+        </Box>
+        <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="column">
+          <Text color="claude" bold>
+            Cache check
+          </Text>
+          {lastCheck === null ? (
+            <Text dimColor wrap="truncate-end">
+              No model switch or resume yet – Claude Code reports its own verdict on the cache then.
+            </Text>
+          ) : (
+            <Box flexDirection="column">
+              <Text wrap="truncate-end">
+                <Text color={health.checks.differed === 0 ? 'success' : 'warning'} bold>
+                  {health.checks.differed === 0
+                    ? `Claude Code agreed ${health.checks.agreed} of ${health.checks.agreed} times`
+                    : `Claude Code differed ${health.checks.differed} of ${health.checks.agreed + health.checks.differed} times`}
+                </Text>
+              </Text>
+              <Text dimColor wrap="truncate-end">
+                last {hhmm(lastCheck.at)} ({lastCheck.source === 'model' ? 'model switch' : 'resume'}): Claude Code {lastCheck.engineWarm ? 'warm' : 'cold'},
+                Cache Meter {lastCheck.ourWarm ? 'warm' : 'cold'}
+              </Text>
+            </Box>
+          )}
+        </Box>
+      </Box>
+    )
+
+    const tabButton = (id: typeof tab, name: string, hotkey: string, warn = false) => (
+      <Button
+        key={`tab-${id}`}
+        plain
+        hotkey={hotkey}
+        onPress={() => {
+          tab = id
+          $.ui.invalidate('ui.render')
+        }}
+      >
+        <Text bold={tab === id} dimColor={tab !== id} color={warn ? 'warning' : tab === id ? 'claude' : undefined}>
+          {name}
+          {warn ? ' !' : ''}
+        </Text>
+      </Button>
+    )
+
     return (
       <Box flexDirection="column">
         <Box flexDirection="row" justifyContent="space-between">
-          <Text color="claude" bold>
-            ◉ Cache Meter
-          </Text>
+          <Box flexDirection="row" columnGap={2}>
+            <Text color="claude" bold>
+              ◉ Cache Meter
+            </Text>
+            {tabButton('overview', 'Overview', '1')}
+            {tabButton('context', 'Context', '2')}
+            {tabButton('health', 'Health', '3', issues !== '')}
+          </Box>
           <Text dimColor wrap="truncate-end">
-            {tier === 'narrow' ? '' : 'prompt cache · tokens'}
+            {tier === 'wide' ? 'prompt cache · tokens' : ''}
           </Text>
         </Box>
-        {tier === 'wide' ? (
-          <Box key="columns" flexDirection="row" columnGap={1}>
-            <Box flexDirection="column" width={left}>
+        {tab === 'overview' &&
+          (tier === 'wide' ? (
+            <Box key="columns" flexDirection="row" columnGap={1}>
+              <Box flexDirection="column" width={left}>
+                {cacheCard}
+                {keepCard}
+              </Box>
+              <Box flexDirection="column" width={rightW}>
+                {contextCard}
+                {sessionCard}
+              </Box>
+            </Box>
+          ) : (
+            <Box flexDirection="column">
               {cacheCard}
               {keepCard}
-            </Box>
-            <Box flexDirection="column" width={rightW}>
               {contextCard}
               {sessionCard}
             </Box>
-          </Box>
-        ) : (
-          <Box flexDirection="column">
-            {cacheCard}
-            {keepCard}
-            {contextCard}
-            {sessionCard}
-          </Box>
-        )}
-        {requestsCard}
+          ))}
+        {tab === 'overview' && requestsCard}
+        {tab === 'context' && contextView}
+        {tab === 'health' && healthView}
         <Box flexDirection="row" justifyContent="space-between">
           <Text dimColor wrap="truncate-end">
             {tier === 'narrow'
               ? 'keys: ctrl+x tab'
-              : `keys after ctrl+x tab: ${isKeeping ? 's stop · ' : canKeep ? 'w keep warm · ' : ''}c compact · Esc back`}
+              : `keys after ctrl+x tab: 1–3 tabs · ${isKeeping ? 's stop · ' : canKeep ? 'w keep warm · ' : ''}c compact · Esc back`}
           </Text>
           <Button key="pane-compact" plain hotkey="c" onPress={() => compactNow($)}>
             Compact

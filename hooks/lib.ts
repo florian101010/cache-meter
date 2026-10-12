@@ -1,6 +1,6 @@
 // Pure helpers of cache-meter: no `$`, so the tests call them directly.
 
-import type { CacheInfo, Limit, Usage4 } from '../types'
+import type { CacheInfo, ContextMap, Limit, Usage4 } from '../types'
 
 export const HOUR = 3_600_000
 export const FIVE_MIN = 300_000
@@ -368,4 +368,86 @@ export function cacheSaving(u: Usage4, readMult: number, writeMult: number): num
 /** Right-aligns `text` in `width` columns. */
 export function right(text: string, width: number): string {
   return text.length >= width ? text : ' '.repeat(width - text.length) + text
+}
+
+/** The parts of `$.session.usage`'s breakdown a context map reads (types: SessionContextBreakdown). */
+export type BreakdownLike = {
+  categories: readonly { name: string; tokens: number; kind: string }[]
+  memoryFiles: readonly { path: string; tokens: number }[]
+  mcpTools: readonly { serverName: string; tokens: number; isLoaded: boolean }[]
+  agents: readonly { agentType: string; tokens: number }[]
+  skills?: { totalSkills: number; includedSkills: number; tokens: number }
+}
+
+const heaviest = <T extends { tokens: number }>(items: readonly T[]): T[] =>
+  [...items].filter(i => i.tokens > 0).sort((a, b) => b.tokens - a.tokens)
+
+/** The heaviest shares of the context, from a breakdown: categories in use, memory files, MCP servers, agents, skills. */
+export function contextMapOf(b: BreakdownLike, detail: ContextMap['detail'], at: number): ContextMap {
+  const servers = new Map<string, { tokens: number; tools: number }>()
+  for (const tool of b.mcpTools) {
+    if (!tool.isLoaded) continue
+    const s = servers.get(tool.serverName) ?? { tokens: 0, tools: 0 }
+    servers.set(tool.serverName, { tokens: s.tokens + tool.tokens, tools: s.tools + 1 })
+  }
+
+  return {
+    detail,
+    at,
+    categories: heaviest(b.categories.filter(c => c.kind === 'used')).map(c => ({ name: c.name, tokens: c.tokens })),
+    memoryFiles: heaviest(b.memoryFiles).map(f => ({ name: f.path, tokens: f.tokens })),
+    mcpServers: heaviest([...servers].map(([name, s]) => ({ name, ...s }))),
+    deferredMcpTools: b.mcpTools.filter(t => !t.isLoaded).length,
+    agents: heaviest(b.agents).map(a => ({ name: a.agentType, tokens: a.tokens })),
+    skills: b.skills ? { total: b.skills.totalSkills, included: b.skills.includedSkills, tokens: b.skills.tokens } : null,
+  }
+}
+
+/** A request that ended normally: its answer was complete, or it stopped to run tools. */
+export function isNormalStop(reason: string | null): boolean {
+  return reason === null || reason === 'end_turn' || reason === 'tool_use'
+}
+
+const STOP_LABELS: Readonly<Record<string, string>> = {
+  max_tokens: 'output limit',
+  model_context_window_exceeded: 'context full',
+  compaction: 'compaction',
+  refusal: 'refusal',
+  pause_turn: 'paused',
+  stop_sequence: 'stop sequence',
+}
+
+/** The stop reason in words (types: TurnStopReason). */
+export function stopLabel(reason: string): string {
+  return STOP_LABELS[reason] ?? reason
+}
+
+const ERROR_LABELS: Readonly<Record<string, string>> = {
+  rate_limit: 'rate limit',
+  overloaded: 'overloaded',
+  max_output_tokens: 'output limit',
+  server_error: 'server error',
+  billing_error: 'billing',
+  authentication_failed: 'authentication',
+  invalid_request: 'invalid request',
+  model_not_found: 'model not found',
+}
+
+/** The error a turn ended on, in words (types: SDKAssistantMessageError). */
+export function errorLabel(error: string): string {
+  return ERROR_LABELS[error] ?? error.replace(/_/g, ' ')
+}
+
+/** `{ a: 2, b: 1 }` → `a 2× · b 1×`, largest first; '' when empty. */
+export function tally(counts: Readonly<Record<string, number>>, label: (key: string) => string = k => k): string {
+  return Object.entries(counts)
+    .filter(([, n]) => n > 0)
+    .sort((a, b) => b[1] - a[1])
+    .map(([k, n]) => `${label(k)} ${n}×`)
+    .join(' · ')
+}
+
+/** Adds one to `key`. */
+export function bump(counts: Readonly<Record<string, number>>, key: string): Record<string, number> {
+  return { ...counts, [key]: (counts[key] ?? 0) + 1 }
 }
