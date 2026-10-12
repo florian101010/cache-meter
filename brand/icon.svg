@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024"><defs>
+<radialGradient id="bg" cx="0.5" cy="0.42" r="0.75"><stop offset="0" stop-color="#2a2540"/><stop offset="0.6" stop-color="#17151f"/><stop offset="1" stop-color="#0b0a10"/></radialGradient>
+<linearGradient id="ring" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#2fbf71"/><stop offset="1" stop-color="#9af2b8"/></linearGradient>
+<linearGradient id="steam" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="#d97757"/><stop offset="1" stop-color="#ffb38a"/></linearGradient>
+<linearGradient id="cup" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#d9dbe6"/></linearGradient>
+<filter id="glow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="22" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+<filter id="soft" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="10" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+</defs><rect width="1024" height="1024" rx="224" fill="url(#bg)"/>
+<circle cx="512" cy="470" r="300" fill="#d97757" opacity="0.07"/>
+<line x1="236.9" y1="839.9" x2="225.3" y2="853.7" stroke="#585b70" stroke-width="8" stroke-linecap="round"/><line x1="115.2" y1="672.3" x2="98.5" y2="679.1" stroke="#585b70" stroke-width="8" stroke-linecap="round"/><line x1="86.3" y1="467.3" x2="68.4" y2="465.4" stroke="#585b70" stroke-width="8" stroke-linecap="round"/><line x1="157.2" y1="272.7" x2="142.2" y2="262.6" stroke="#585b70" stroke-width="8" stroke-linecap="round"/><line x1="311.1" y1="134.1" x2="302.6" y2="118.2" stroke="#585b70" stroke-width="8" stroke-linecap="round"/><line x1="512.0" y1="84.0" x2="512.0" y2="66.0" stroke="#585b70" stroke-width="8" stroke-linecap="round"/><line x1="712.9" y1="134.1" x2="721.4" y2="118.2" stroke="#585b70" stroke-width="8" stroke-linecap="round"/><line x1="866.8" y1="272.7" x2="881.8" y2="262.6" stroke="#585b70" stroke-width="8" stroke-linecap="round"/><line x1="937.7" y1="467.3" x2="955.6" y2="465.4" stroke="#585b70" stroke-width="8" stroke-linecap="round"/><line x1="908.8" y1="672.3" x2="925.5" y2="679.1" stroke="#585b70" stroke-width="8" stroke-linecap="round"/><line x1="787.1" y1="839.9" x2="798.7" y2="853.7" stroke="#585b70" stroke-width="8" stroke-linecap="round"/>
+<path d="M 287.0 780.1 A 350 350 0 1 1 737.0 780.1" fill="none" stroke="#2c2b3c" stroke-width="58" stroke-linecap="round"/>
+<path d="M 287.0 780.1 A 350 350 0 1 1 834.7 376.4" fill="none" stroke="url(#ring)" stroke-width="58" stroke-linecap="round" filter="url(#glow)"/>
+<line x1="212.3" y1="524.6" x2="112.4" y2="528.8" stroke="#ff8a5c" stroke-width="20" stroke-linecap="round" filter="url(#soft)"/><g transform="translate(0,30)">
+<path d="M 392 470 C 380 470 372 478 372 490 L 382 600 C 388 650 430 690 482 690 L 526 690 C 578 690 620 650 626 600 L 636 490 C 636 478 628 470 616 470 Z" fill="url(#cup)"/>
+<path d="M 632 512 C 712 512 716 618 618 626" fill="none" stroke="url(#cup)" stroke-width="30" stroke-linecap="round"/>
+<rect x="352" y="704" width="304" height="26" rx="13" fill="#d9dbe6" opacity="0.9"/>
+<g fill="none" stroke="url(#steam)" stroke-width="22" stroke-linecap="round" filter="url(#soft)">
+<path d="M 446 440 C 418 404 474 376 446 330"/>
+<path d="M 504 440 C 476 396 536 364 504 300"/>
+<path d="M 562 440 C 534 404 590 376 562 330"/>
+</g></g><rect x="6" y="6" width="1012" height="1012" rx="220" fill="none" stroke="#ffffff" stroke-opacity="0.07" stroke-width="12"/></svg>

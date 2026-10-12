@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="400" viewBox="0 0 1280 400" role="img" aria-label="Cache Meter – Never lose your prompt cache to a coffee break again.">
+<defs>
+<radialGradient id="bg" cx="0.18" cy="0.35" r="0.95"><stop offset="0" stop-color="#2b2540"/><stop offset="0.55" stop-color="#16141f"/><stop offset="1" stop-color="#0c0b12"/></radialGradient>
+<linearGradient id="cup" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#d6d8e4"/></linearGradient>
+<linearGradient id="steam" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="#d97757"/><stop offset="1" stop-color="#ffc09a"/></linearGradient>
+<linearGradient id="claim" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#ff9a6b"/><stop offset="1" stop-color="#d97757"/></linearGradient>
+<filter id="glow" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="9" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+<filter id="soft" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+<pattern id="dots" width="22" height="22" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1.2" fill="#ffffff" opacity="0.045"/></pattern>
+</defs>
+<rect width="1280" height="400" rx="28" fill="url(#bg)"/>
+<rect width="1280" height="400" rx="28" fill="url(#dots)"/>
+<circle cx="210" cy="205" r="190" fill="#d97757" opacity="0.06"/>
+<line x1="91.7" y1="346.0" x2="85.3" y2="353.6" stroke="#4a4860" stroke-width="4" stroke-linecap="round"/><line x1="39.4" y1="273.9" x2="30.1" y2="277.7" stroke="#4a4860" stroke-width="4" stroke-linecap="round"/><line x1="27.0" y1="185.8" x2="17.1" y2="184.7" stroke="#4a4860" stroke-width="4" stroke-linecap="round"/><line x1="57.5" y1="102.1" x2="49.2" y2="96.5" stroke="#4a4860" stroke-width="4" stroke-linecap="round"/><line x1="123.6" y1="42.5" x2="118.9" y2="33.7" stroke="#4a4860" stroke-width="4" stroke-linecap="round"/><line x1="210.0" y1="21.0" x2="210.0" y2="11.0" stroke="#4a4860" stroke-width="4" stroke-linecap="round"/><line x1="296.4" y1="42.5" x2="301.1" y2="33.7" stroke="#4a4860" stroke-width="4" stroke-linecap="round"/><line x1="362.5" y1="102.1" x2="370.8" y2="96.5" stroke="#4a4860" stroke-width="4" stroke-linecap="round"/><line x1="393.0" y1="185.8" x2="402.9" y2="184.7" stroke="#4a4860" stroke-width="4" stroke-linecap="round"/><line x1="380.6" y1="273.9" x2="389.9" y2="277.7" stroke="#4a4860" stroke-width="4" stroke-linecap="round"/><line x1="328.3" y1="346.0" x2="334.7" y2="353.6" stroke="#4a4860" stroke-width="4" stroke-linecap="round"/>
+<circle cx="210" cy="205" r="140" fill="none" stroke="#2a2939" stroke-width="26" stroke-linecap="round" stroke-dasharray="684.2 879.6" transform="rotate(130 210 205)"/>
+<circle cx="210" cy="205" r="140" fill="none" stroke="#3ddc84" stroke-width="26" stroke-linecap="round" stroke-dasharray="659.7 879.6" transform="rotate(130 210 205)" filter="url(#glow)"><animate attributeName="stroke-dasharray" dur="9s" repeatCount="indefinite" keyTimes="0;0.72;0.80;0.92;1" values="659.7 879.6;151.5 879.6;151.5 879.6;659.7 879.6;659.7 879.6" calcMode="spline" keySplines="0.4 0 0.6 1;0 0 1 1;0.3 0 0.2 1;0 0 1 1"/><animate attributeName="stroke" dur="9s" repeatCount="indefinite" keyTimes="0;0.45;0.6;0.84;0.92;1" values="#3ddc84;#3ddc84;#f0a050;#f0a050;#3ddc84;#3ddc84"/></circle>
+<line x1="100.1" y1="209.6" x2="40.1" y2="212.1" stroke="#ff8a5c" stroke-width="9" stroke-linecap="round"/>
+<circle cx="70.1" cy="210.9" r="16" fill="#ff8a5c" opacity="0" filter="url(#glow)"><animate attributeName="opacity" dur="9s" repeatCount="indefinite" keyTimes="0;0.74;0.78;0.86;1" values="0;0;0.9;0;0"/><animate attributeName="r" dur="9s" repeatCount="indefinite" keyTimes="0;0.74;0.86;1" values="10;10;34;10"/></circle>
+<g transform="translate(-5.0,-30.2) scale(0.42)">
+<path d="M 392 470 C 380 470 372 478 372 490 L 382 600 C 388 650 430 690 482 690 L 526 690 C 578 690 620 650 626 600 L 636 490 C 636 478 628 470 616 470 Z" fill="url(#cup)"/>
+<path d="M 632 512 C 712 512 716 618 618 626" fill="none" stroke="url(#cup)" stroke-width="30" stroke-linecap="round"/>
+<rect x="352" y="704" width="304" height="26" rx="13" fill="#d6d8e4" opacity="0.9"/>
+</g>
+<g fill="none" stroke="url(#steam)" stroke-width="9" stroke-linecap="round" filter="url(#soft)"><path d="M 176 205 C 158 180 194 162 176 136" opacity="0.35"><animate attributeName="opacity" dur="9s" repeatCount="indefinite" keyTimes="0;0.70;0.80;0.95;1" values="0.35;0.35;1;0.35;0.35"/><animateTransform attributeName="transform" type="translate" dur="3s" begin="0.0s" repeatCount="indefinite" values="0 6;0 -10;0 6"/></path><path d="M 210 205 C 192 180 228 162 210 136" opacity="0.35"><animate attributeName="opacity" dur="9s" repeatCount="indefinite" keyTimes="0;0.70;0.80;0.95;1" values="0.35;0.35;1;0.35;0.35"/><animateTransform attributeName="transform" type="translate" dur="3s" begin="0.15s" repeatCount="indefinite" values="0 6;0 -10;0 6"/></path><path d="M 244 205 C 226 180 262 162 244 136" opacity="0.35"><animate attributeName="opacity" dur="9s" repeatCount="indefinite" keyTimes="0;0.70;0.80;0.95;1" values="0.35;0.35;1;0.35;0.35"/><animateTransform attributeName="transform" type="translate" dur="3s" begin="0.3s" repeatCount="indefinite" values="0 6;0 -10;0 6"/></path></g>
+
+<g opacity="0"><animate attributeName="opacity" from="0" to="1" dur="0.9s" begin="0.1s" fill="freeze"/><animateTransform attributeName="transform" type="translate" from="0 14" to="0 0" dur="0.9s" begin="0.1s" fill="freeze"/>
+<rect x="440" y="92" width="196" height="32" rx="16" fill="#d97757" fill-opacity="0.14" stroke="#d97757" stroke-opacity="0.55"/>
+<text x="538" y="113" text-anchor="middle" font-family="'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" font-weight="700" letter-spacing="1.6" fill="#ff9a6b">CLAUDE CODE MOD</text>
+</g>
+<g opacity="0"><animate attributeName="opacity" from="0" to="1" dur="0.9s" begin="0.25s" fill="freeze"/><animateTransform attributeName="transform" type="translate" from="0 14" to="0 0" dur="0.9s" begin="0.25s" fill="freeze"/>
+<text x="440" y="184" font-family="'Helvetica Neue', 'Segoe UI', Roboto, Arial, sans-serif" font-size="64" font-weight="700" fill="#f5f5f7" letter-spacing="-1">Cache Meter</text>
+</g>
+<g opacity="0"><animate attributeName="opacity" from="0" to="1" dur="0.9s" begin="0.45s" fill="freeze"/><animateTransform attributeName="transform" type="translate" from="0 14" to="0 0" dur="0.9s" begin="0.45s" fill="freeze"/>
+<text x="442" y="240" font-family="'Helvetica Neue', 'Segoe UI', Roboto, Arial, sans-serif" font-size="34" fill="#cdd6f4">Never lose your prompt cache</text>
+<text x="442" y="282" font-family="'Helvetica Neue', 'Segoe UI', Roboto, Arial, sans-serif" font-size="34" fill="#cdd6f4">to a coffee break <tspan fill="url(#claim)" font-weight="700">again.</tspan></text>
+</g>
+<g opacity="0"><animate attributeName="opacity" from="0" to="1" dur="0.9s" begin="0.7s" fill="freeze"/><animateTransform attributeName="transform" type="translate" from="0 14" to="0 0" dur="0.9s" begin="0.7s" fill="freeze"/>
+<text x="442" y="336" font-family="'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="17" fill="#7f849c">live countdown · /keepwarm · /tokens dashboard</text>
+</g>
+<rect x="1" y="1" width="1278" height="398" rx="27" fill="none" stroke="#ffffff" stroke-opacity="0.06" stroke-width="2"/>
+</svg>

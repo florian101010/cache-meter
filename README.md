@@ -1,3 +1,36 @@
-# Cache Meter – images
+# Cache Meter – brand assets
 
-Images for the README, the social preview and the plugin icon (sources as SVG). Kept on this branch so the plugin branch `main` holds no image files.
+Images for the README, the GitHub social preview and the plugin icon, with their sources. They live on this branch so that `main` – the plugin the directory scans – holds no image files. The README on `main` links them with absolute URLs to this branch.
+
+## Files
+
+| Path | What it is | Where it is used |
+|---|---|---|
+| `brand/header.svg` | Animated README header (SMIL, 9-second loop): the cup in the countdown ring drains, turns orange, pings at the marker and refills; the claim fades in | Top of the README |
+| `brand/header-still.png` | Still of the header (1280×400) | Fallback, slides |
+| `brand/icon.svg`, `brand/icon.png` | Plugin icon: coffee cup in the countdown ring (1024×1024, static) | `.claude-plugin/icon.png` on `main` (directory listing) |
+| `brand/icon-60.svg`, `brand/icon-60.png` | Alternative icon: "60 MIN" in the ring | Not used |
+| `brand/social-preview.svg`, `brand/social-preview.png` | GitHub social preview (1280×640) | Repository settings → Social preview |
+| `screenshots/*.png` | Band, overview, Context and Health tabs from a real session, cropped to the mod's own drawing | README |
+
+## Regenerate
+
+```bash
+python3 brand/gen-icon.py brand && rsvg-convert -w 1024 -h 1024 brand/icon.svg -o brand/icon.png
+python3 brand/gen-header.py brand && rsvg-convert -w 1280 brand/frame-00.svg -o brand/header-still.png && rm brand/frame-*.svg
+```
+
+Both scripts reproduce the committed SVGs byte for byte. `rsvg-convert` (librsvg) does not run animations and ignores `pathLength`, so lengths in the header are in user units. In an SVG shown as an image on GitHub, web fonts don't load: text uses the viewer's system font (stack: Helvetica Neue, Segoe UI, Roboto, Arial; mono: SF Mono, Menlo, Consolas).
+
+## Look
+
+| Role | Colour |
+|---|---|
+| Background | radial `#2a2540` → `#17151f` → `#0b0a10` |
+| Accent (Claude orange), marker, steam | `#d97757`, light `#ff9a6b` / `#ffb38a`, marker `#ff8a5c` |
+| Warm cache (ring) | `#2fbf71` → `#9af2b8`, mod fill `#40c070` |
+| Low TTL | `#f0a050` |
+| Text | `#f5f5f7`, secondary `#cdd6f4`, muted `#7f849c` |
+| Track, ticks | `#2c2b3c`, `#585b70` |
+
+Claim: **Never lose your prompt cache to a coffee break again.** Icons: single-width shapes, no emoji in the drawings. The listing icon stays a static PNG (the directory takes PNG or JPEG only).
