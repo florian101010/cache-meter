@@ -42,6 +42,8 @@ Type **`/keepwarm`** before lunch or a meeting. Shortly before expiry one ping â
 </tr>
 </table>
 
+<p align="center"><img src="https://raw.githubusercontent.com/florian101010/cache-meter/assets/brand/feature-why.svg" width="100%" alt="Why Cache Meter â€“ stop wasting tokens: a re-write after a break costs about $1.20 for a 150k-token conversation on Opus 5.5 at API prices, a keepwarm ping about $0.03. Twelve everyday problems it solves follow."></p>
+
 ## Why you'll want it
 
 | | The problem | What Cache Meter does | How |

@@ -13,7 +13,7 @@ Every break, by itself.
 - Each command is registered on its own: a name another plugin took fails only that one, with a debug-log line.
 - `/keepwarm` shows `auto` in its argument hint; the cold-rewrite tip mentions `/keepwarm auto`; `/tokens report` names an auto run.
 - README: `/tokens report` is described as *session stats* – never the conversation – instead of *the whole session*, which read as a copy of the chat (README, banner).
-- README: **Why you'll want it** at the top – each feature as the problem it solves, in the reader's words, what Cache Meter does and where.
+- README: **Why you'll want it** at the top, under a new *WHY CACHE METER – Stop wasting tokens* banner ($1.20 re-write against a $0.03 ping) – each feature as the problem it solves, in the reader's words, what Cache Meter does and where.
 - Docs: *sends nothing you have not switched on* – with `/keepwarm auto` on, its pings go out by themselves (README, PRIVACY, SECURITY, AGENTS). The README's `/keepwarm` range is 10m–8h, as the command takes it (it said 30m).
 
 ## [0.11.0] – 2026-10-12
