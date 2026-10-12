@@ -53,6 +53,8 @@ const totalsA = atom({ plugin: 'cache-meter', key: 'totals' } as const, {
   sub: ZERO,
   mainSteps: 0,
   subSteps: 0,
+  coldCount: 0,
+  coldWritten: 0,
 })
 const measureA = atom({ plugin: 'cache-meter', key: 'measure' } as const, null)
 const ttlA = atom({ plugin: 'cache-meter', key: 'reportedTtl' } as const, null)
@@ -70,10 +72,13 @@ const ttlConfigA = atom({ plugin: 'cache-meter', key: 'ttlConfig' } as const, {
   enable1h: false,
 })
 
-// Module values the top-level helpers read: the option (fixed per load) and a ping in flight.
-// Neither is drawn, so losing them on a reload costs nothing (interface § Keep state).
+// Module values the top-level helpers read: the option (fixed per load), whether a person is at the
+// prompt, a ping in flight, and how many main-thread requests are running. None is drawn, and a reload
+// runs session.start again, so losing them costs nothing (interface § Keep state).
 let setting = 'auto'
+let isInteractive = false
 let isPinging = false
+let mainRequests = 0
 
 async function ttlNow($: EngineInterface) {
   const measure = await read($, measureA)
@@ -125,7 +130,8 @@ async function measureNow($: EngineInterface) {
 async function tick($: EngineInterface) {
   $.ui.invalidate('ui.render')
   const keep = await read($, keepA)
-  if (keep.until === null || isPinging) return
+  // No ping while a main request runs: that request touches the cache anyway.
+  if (keep.until === null || isPinging || mainRequests > 0) return
   const now = await $.clock.now()
   if (now > keep.until || keep.pings >= MAX_PINGS) {
     await update($, keepA, k => ({ ...k, until: null }))
@@ -151,7 +157,7 @@ async function tick($: EngineInterface) {
   if (status.remaining > ttl.ms * PING_SHARE) return
   isPinging = true
   try {
-    // The lifetime counts from the start of the request that reads the entry (prompt-caching).
+    // Timed at the request's start: the conservative end of the window (an assumption, see README).
     const startedAt = await $.clock.now()
     const reply = await $.model.fork({ prompt: 'Antworte nur mit dem Wort: warm' })
     if (!reply.isAnswered) {
@@ -203,12 +209,14 @@ async function compactNow($: EngineInterface) {
 export const register: Register = (on, options) => {
   setting = typeof options.cacheTtl === 'string' ? options.cacheTtl : 'auto'
   isPinging = false
+  mainRequests = 0
 
   on('session.start', async ($, e, next) => {
     const result = await next(e)
     await loadTtlConfig($)
     await measureNow($)
     // Hooks also run under -p and the SDK, where nothing draws (overview § Where mods run).
+    isInteractive = e.isInteractive
     if (e.isInteractive) {
       // Returning the promise lets a mock clock await the tick (test § Test a timer).
       $.clock.every(TICK_MS, () => tick($))
@@ -218,7 +226,7 @@ export const register: Register = (on, options) => {
       await $.command.register({
         name: 'keepwarm',
         description: 'Prompt-Cache warmhalten (kostet je Ping eine Cache-Lesung des Kontexts)',
-        argumentHint: '[2h | 30m | aus]',
+        argumentHint: '[2h | 30m | aus]  (10m … 8h)',
       })
     } catch {
       // Without the commands the band still works.
@@ -236,8 +244,10 @@ export const register: Register = (on, options) => {
     await measureNow($)
     if ((e.source === 'resume' || e.source === 'fork') && e.seconds_since_last_response !== undefined) {
       const now = await $.clock.now()
+      // seconds_since_last_response counts from the last response's end; Claude Code's own verdict
+      // prompt_cache_likely_expired wins over that clock (classic SessionStart input, types).
       const cache: CacheInfo = {
-        lastAt: now - e.seconds_since_last_response * 1000,
+        lastAt: e.prompt_cache_likely_expired === true ? 0 : now - e.seconds_since_last_response * 1000,
         hitPct: null,
         contextTokens: e.context_tokens ?? 0,
         rewriteUsd: e.estimated_cache_write_usd ?? null,
@@ -249,15 +259,23 @@ export const register: Register = (on, options) => {
   })
 
   // Each model request: the four token counts as the API reported them (events § Follow a turn).
+  // A keepwarm fork never reaches this hook: no hook runs beneath a call of its own (types,
+  // HookError kind 're-entry'), so no request is filtered out here.
   on('turn.step', async function* ($, e, next) {
     const startedAt = await $.clock.now()
+    const isMain = e.agentId === undefined
     // Was the main cache already expired when this request started? (read before the request)
-    const before = e.agentId === undefined ? await read($, cacheA) : null
+    const before = isMain ? await read($, cacheA) : null
     const wasCold = before !== null && cacheStatus(before, startedAt, (await ttlNow($)).ms).kind === 'expired'
-    const result = yield* next(e)
+    if (isMain) mainRequests += 1
+    let result
+    try {
+      result = yield* next(e)
+    } finally {
+      if (isMain) mainRequests = Math.max(0, mainRequests - 1)
+    }
     const usage = result.usage
-    // Whether a keepwarm fork raises turn.step is undocumented: leave its request out either way.
-    if (usage !== null && !isPinging) {
+    if (usage !== null) {
       const u: Usage4 = {
         input: usage.input_tokens,
         read: usage.cache_read_input_tokens,
@@ -275,13 +293,20 @@ export const register: Register = (on, options) => {
           contextTokens: u.input + u.read + u.write + u.output,
           rewriteUsd: null,
         }))
-        if (wasCold && before !== null && u.write >= COLD_MIN) {
-          const cold: ColdWrite = { at: startedAt, written: u.write, idleMs: before.lastAt > 0 ? startedAt - before.lastAt : null }
+        // Cold by the clock AND by the counts (more written than read), so a wrong TTL assumption
+        // cannot turn a warm request into a "cold" one.
+        if (wasCold && before !== null && u.write >= COLD_MIN && u.read < u.write) {
+          const idleMs = before.lastAt > 0 ? startedAt - before.lastAt : null
+          const cold: ColdWrite = { at: startedAt, written: u.write, idleMs }
           await update($, coldA, list => [...list, cold].slice(-20))
+          await update($, totalsA, t => ({ ...t, coldCount: t.coldCount + 1, coldWritten: t.coldWritten + u.write }))
           const keep = await read($, keepA)
-          if (keep.until === null) {
-            // A hint, not an action: cache-tax arms keepwarm by itself here, which spends quota unasked.
-            $.ui.toast(`Cache war kalt: ${short(u.write)} Tokens neu geschrieben – vor der nächsten Pause /keepwarm?`)
+          // A hint, not an action (cache-tax arms keepwarm by itself here, which spends quota unasked).
+          // Not after a model switch (idleMs null): keepwarm would not have helped there.
+          if (idleMs !== null && isInteractive && !(keep.until !== null && keep.until > startedAt)) {
+            $.ui.toast(`Cache war kalt: ${short(u.write)} Tokens neu geschrieben – vor der nächsten Pause /keepwarm?`, {
+              timeoutMs: 10_000,
+            })
           }
         }
       }
@@ -362,12 +387,15 @@ export const register: Register = (on, options) => {
 
   on('command.run', { command: 'keepwarm' }, async ($, e) => {
     const ms = parseKeepWarm(e.args)
-    if (ms === undefined) return { text: 'Aufruf: /keepwarm [30m … 8h | aus] – ohne Angabe 2h.' }
+    if (ms === undefined) return { text: 'Aufruf: /keepwarm [10m … 8h | aus] – ohne Angabe 2h.' }
     if (ms === null) {
       const keep = await read($, keepA)
       await update($, keepA, k => ({ ...k, until: null }))
 
       return { text: `Warmhalten aus (${keep.pings} Pings, ${short(keep.readTokens)} Tokens aus dem Cache gelesen).` }
+    }
+    if (!isInteractive) {
+      return { text: 'Warmhalten geht nur in einer interaktiven Session (hier läuft kein Timer). Nicht gestartet.' }
     }
     const now = await $.clock.now()
     const ttl = await ttlNow($)
@@ -487,7 +515,8 @@ export const register: Register = (on, options) => {
     const cols = e.props.bodyColumns
     const rows = e.props.scroll.bodyRows
 
-    const shown = steps.slice(-Math.max(3, rows - 30))
+    // Rows the other sections take (about 32, cold rewrites up to 7 of them) plus one per limit.
+    const shown = steps.slice(-Math.max(3, rows - 32 - (measure?.limits.length ?? 0)))
     const barWidth = Math.max(10, cols - 34)
     const top = Math.max(1, ...shown.map(s => s.input + s.read + s.write))
     const sessionHit = hitPct(totals.main)
@@ -592,9 +621,11 @@ export const register: Register = (on, options) => {
             <Text dimColor> neu geschrieben{c.idleMs === null ? ' (nach Modellwechsel)' : ` nach ${duration(c.idleMs)} Pause`}</Text>
           </Text>
         ))}
-        {colds.length > 0 && (
+        {totals.coldCount > 0 && (
           <Text dimColor>
-            Zusammen {colds.length}× · {short(colds.reduce((n, c) => n + c.written, 0))} Tokens · /keepwarm vor Pausen verhindert das
+            Zusammen {totals.coldCount}× · {short(totals.coldWritten)} Tokens
+            {colds.some(c => c.idleMs !== null) ? ' · /keepwarm vor Pausen verhindert das' : ''}
+            {totals.coldCount > 5 ? ' · gezeigt: die letzten 5' : ''}
           </Text>
         )}
         <Text> </Text>

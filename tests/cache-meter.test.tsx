@@ -56,7 +56,7 @@ function world(on: On, opts: { env?: Record<string, string>; forkRead?: number; 
   const toasts: string[] = []
   const forks: string[] = []
   // What the next main request writes to the cache; a test raises it to stage a cold rewrite.
-  const next = { write: 6_000 }
+  const next = { write: 6_000, read: 93_000, slowMs: 0 }
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['drawn below'] }))
   on('ui.toast', ($, e) => {
     toasts.push(e.text)
@@ -84,6 +84,8 @@ function world(on: On, opts: { env?: Record<string, string>; forkRead?: number; 
         } as never)
   })
   on('turn.step', async function* ($, e) {
+    // A slow request stays in flight until the test advances the clock past it (test § Test a timer).
+    if (next.slowMs > 0) await clock.sleep(next.slowMs)
     yield { kind: 'text', index: 0, text: 'ok' }
     return {
       turnId: e.turnId,
@@ -91,7 +93,7 @@ function world(on: On, opts: { env?: Record<string, string>; forkRead?: number; 
       answer: 'ok',
       toolUses: [],
       stopReason: 'end_turn',
-      usage: { model: 'claude-test', input_tokens: 1_000, output_tokens: 500, cache_read_input_tokens: 93_000, cache_creation_input_tokens: next.write },
+      usage: { model: 'claude-test', input_tokens: 1_000, output_tokens: 500, cache_read_input_tokens: next.read, cache_creation_input_tokens: next.write },
     } as never
   })
 
@@ -291,7 +293,8 @@ test('Ohne Bildschirm (-p) läuft kein Timer, also kein Ping', async ($, on) => 
   const { clock, forks } = world(on)
   await $.session.start({ surface: null, isInteractive: false, cwd: '/work' })
   await step($)
-  await run($, 'keepwarm', '2h')
+  const answer = await run($, 'keepwarm', '2h')
+  expect(answer.text).toMatch(/nur in einer interaktiven Session/)
   await clock.advance(55 * 60_000)
   expect(forks).toHaveLength(0)
 })
@@ -330,6 +333,7 @@ test('/keepwarm schaltet ab, wenn ein Ping viel neu schreibt (Teil-Fehltreffer)'
 
 test('Kalte Neuschreibung: Liste im Pane und Hinweis, warme zählt nicht', async ($, on) => {
   const { clock, toasts, next } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   await step($)
   // Warm, but much written (new context): not a cold rewrite.
   next.write = 150_000
@@ -346,10 +350,109 @@ test('Kalte Neuschreibung: Liste im Pane und Hinweis, warme zählt nicht', async
 
 test('Kalte Neuschreibung: kein Hinweis, solange /keepwarm läuft', async ($, on) => {
   const { clock, toasts, next } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   await step($)
   await run($, 'keepwarm', '2h')
   next.write = 150_000
   await clock.advance(70 * 60_000)
   await step($)
   expect(toasts.some(t => t.startsWith('Cache war kalt'))).toBe(false)
+})
+
+test('Kalt: Grenzen – unter 10k, mehr gelesen als geschrieben, nach /compact, Subagent', async ($, on) => {
+  const { clock, toasts, next } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  // Expired, but only 9,999 written: not counted.
+  await clock.advance(70 * 60_000)
+  next.write = 9_999
+  await step($)
+  // Expired by the clock, but read more than written (TTL assumption wrong): not counted.
+  await clock.advance(70 * 60_000)
+  next.write = 20_000
+  next.read = 150_000
+  await step($)
+  // After /compact the cache is empty, so a big write is a rebuild, not a cold rewrite.
+  await $.session.compact({ trigger: 'manual', messages: SUMMARY })
+  next.write = 150_000
+  next.read = 0
+  await step($)
+  // A subagent's cold request does not count either.
+  await clock.advance(70 * 60_000)
+  await step($, 'agent-1')
+  expect(toasts.some(t => t.startsWith('Cache war kalt'))).toBe(false)
+  const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  expect(await ui.find({ type: 'Text', text: /Keine – der Cache war/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('Kalt nach Modellwechsel: gezählt, aber ohne /keepwarm-Hinweis', async ($, on) => {
+  const { toasts, next } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  await $.classic.PostModelSwitch({
+    from_model: 'a',
+    to_model: 'b',
+    requested_model: null,
+    source: 'command',
+    context_tokens: 120_000,
+    prompt_cache_warm: true,
+    cache_ttl: '1h',
+    estimated_cache_write_usd: 0.42,
+    pricing: 'catalog',
+  })
+  next.write = 150_000
+  next.read = 0
+  await step($)
+  expect(toasts.some(t => t.startsWith('Cache war kalt'))).toBe(false)
+  const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  expect(await ui.find({ type: 'Text', text: ' neu geschrieben (nach Modellwechsel)' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('Resume mit "wahrscheinlich abgelaufen": Band kalt, erste Anfrage zählt', async ($, on) => {
+  const { toasts, next } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await $.classic.SessionStart({ source: 'resume', seconds_since_last_response: 1_200, prompt_cache_likely_expired: true, context_tokens: 150_000 })
+  const ui = await $.ui.mount({ surface: 'terminal', ...band(130) })
+  expect(await ui.find({ type: 'Text', text: 'abgelaufen' })).toBeDefined()
+  await ui.unmount()
+  next.write = 150_000
+  next.read = 0
+  await step($)
+  // Claude Code said cold, the clock is unknown (lastAt 0): counted, no keepwarm hint.
+  expect(toasts.some(t => t.startsWith('Cache war kalt'))).toBe(false)
+  const pane = await $.ui.mount({ surface: 'terminal', ...PANE })
+  expect(await pane.find({ type: 'Text', text: /Zusammen 1×/ })).toBeDefined()
+  await pane.unmount()
+})
+
+test('/keepwarm stoppt, wenn ein Ping ohne Antwort bleibt', async ($, on) => {
+  const { clock, forks, toasts } = world(on, { forkAnswer: false })
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  await run($, 'keepwarm', '')
+  await clock.advance(51 * 60_000)
+  await clock.settle()
+  expect(forks).toHaveLength(1)
+  expect(toasts.some(t => t.includes('Ping ohne Antwort (nothing-to-fork)'))).toBe(true)
+  await clock.advance(60 * 60_000)
+  expect(forks).toHaveLength(1)
+})
+
+test('/keepwarm pingt nicht, solange eine Hauptanfrage läuft', async ($, on) => {
+  const { clock, forks, next } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  await run($, 'keepwarm', '2h')
+  // A long request starts at minute 1 and is still running when the ping would be due.
+  await clock.advance(60_000)
+  next.slowMs = 60 * 60_000
+  const running = step($)
+  await clock.advance(50 * 60_000)
+  await clock.settle()
+  expect(forks).toHaveLength(0)
+  await clock.advance(10 * 60_000)
+  await running
+  expect(forks).toHaveLength(0)
 })

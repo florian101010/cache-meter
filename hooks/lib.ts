@@ -138,7 +138,7 @@ export function parseKeepWarm(args: string): number | null | undefined {
   return ms
 }
 
-/** When to ping: once less than this share of the TTL is left (≈ 10 min of 60m). */
+/** When to ping: once this share of the TTL or less is left (≈ 10 min of 60m). */
 export const PING_SHARE = 0.17
 
 /** Most pings one /keepwarm run makes (8 h at one ping per ≈ 50 min is about ten). */

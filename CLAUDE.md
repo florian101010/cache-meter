@@ -7,4 +7,8 @@
 - Die Mods-API ist Early Access und jünger als jedes Modell. Vor jeder Änderung die betroffenen Seiten **neu abrufen**, nicht erinnern. Jede Annahme über API-Verhalten im Code-Kommentar mit Seite + Abschnitt belegen oder als „unbelegt“ markieren.
 - Subagenten, die hier prüfen oder schreiben, diese Regel ausdrücklich in den Auftrag schreiben.
 
-Ablauf einer Änderung: Feature-Branch → `claude plugin validate .` → `claude plugin test .` → `tsc -p .` → Rauchtest aus dem README → bei neuen Tests einen Fehler einbauen und prüfen, dass der Test rot wird → Commit (Conventional Commits) → README und `~/Documents/WICHTIGE_BACKUPS/claude-code-infos/claude-code-mods-infos.md` nachziehen.
+**Der Ordner `~/Dateien/ai-webdev/cache-meter` ist live:** `CLAUDE_CODE_PLUGIN_DIRS` lädt ihn so, wie er ausgecheckt ist, in jeder neuen Session. Er bleibt deshalb auf `main` (Merge = Deploy). Entwickelt wird in einem Worktree (`git worktree add ../cache-meter-wt -b feat/…`), ausprobiert mit `claude --plugin-dir ../cache-meter-wt`. Nach dem Merge im Ordner `git pull`.
+
+Remote: <https://github.com/florian101010/cache-meter> (privat). Kein serverseitiger Branch-Schutz (GitHub Free, privat); geschützt wird lokal durch die Settings-Hooks in `~/.claude/` und, sobald installiert, flo-guard.
+
+Ablauf einer Änderung: Feature-Branch im Worktree → `claude plugin validate .` → `claude plugin test .` → `tsc -p .` → Rauchtest aus dem README → bei neuen Tests einen Fehler einbauen und prüfen, dass der Test rot wird → Commit (Conventional Commits) → README und `~/Documents/WICHTIGE_BACKUPS/claude-code-infos/claude-code-mods-infos.md` nachziehen.

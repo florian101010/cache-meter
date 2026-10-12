@@ -32,7 +32,8 @@ export type Measure = {
   usd: number | null
 }
 
-export type Totals = { main: Usage4; sub: Usage4; mainSteps: number; subSteps: number }
+/** Session sums; the cold-rewrite count and tokens are kept apart from the (capped) list of cold rewrites. */
+export type Totals = { main: Usage4; sub: Usage4; mainSteps: number; subSteps: number; coldCount: number; coldWritten: number }
 
 export type KeepWarm = { until: number | null; pings: number; readTokens: number; lastPingAt: number | null }
 
