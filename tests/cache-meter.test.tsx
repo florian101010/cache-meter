@@ -918,7 +918,7 @@ test('/tokens <tab> opens on that tab and switches an open pane instead of closi
 test('pane footer: offers clicks only in the fullscreen renderer, which captures the mouse', async ($, on) => {
   world(on)
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
-  const footer = /\/tokens context \| health · keys: ctrl\+x tab, then 1–3/
+  const footer = /\/tokens context \| health · keys: ctrl\+x, then tab, then 1–3/
   let ui = await $.ui.mount({ surface: 'terminal', ...PANE, viewport: { columns: 190, rows: 50, isFullscreen: false } })
   expect(await ui.find({ type: 'Text', text: footer })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^click a tab/ })).toBeUndefined()

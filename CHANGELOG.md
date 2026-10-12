@@ -11,6 +11,9 @@ A café that acts out the cache.
 - **Minute flash:** the big countdown lights up once at each new minute.
 - `ui.fault`: if the café's file fails, the pane leaves it out.
 
+### Changed
+- The pane's key hint reads `ctrl+x, then tab, then 1–3`: two keys one after the other, not at once. The README FAQ spells the sequence out, with `Esc` to give the keyboard back.
+
 ### Docs
 - README: new screenshots – the full terminal with the docked dashboard, crops of Overview, Context and Health, the band; a section on the café; FAQ on turning animations off. PRIVACY, SECURITY, AGENTS, CONTRIBUTING, llms.txt and how-it-works describe the animation file.
 
