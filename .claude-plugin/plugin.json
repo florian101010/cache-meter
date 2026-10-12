@@ -38,6 +38,16 @@
         "5m"
       ],
       "default": "auto"
+    },
+    "autoSidebar": {
+      "type": "string",
+      "title": "Sidebar at start",
+      "description": "auto: in Claude Code's fullscreen renderer (/tui fullscreen), open the /tokens dashboard as a sidebar beside the chat at session start – placed from 144 terminal columns, 110 once you opened it yourself – and leave it closed once you close it. Never opens above the prompt by itself. off: only with /tokens.",
+      "options": [
+        "auto",
+        "off"
+      ],
+      "default": "auto"
     }
   }
 }

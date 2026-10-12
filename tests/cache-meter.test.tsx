@@ -18,6 +18,7 @@ import {
   parseKeepWarm,
   rasterCells,
   readMultiplier,
+  tokensSuggestions,
   remainingLabel,
   resolveTtl,
   tall,
@@ -131,6 +132,7 @@ function world(on: On, opts: { env?: Record<string, string>; forkRead?: number; 
     return usageValue(100_000, 1_000_000, 970_000)
   })
   on('session.turns', () => ({ value: 4 }))
+  on('prompt.autocomplete', () => ({ suggestions: [] }))
   on('classic.StopFailure', () => ({}))
   on('session.start', () => ({ cwd: '/work' }))
   on('classic.SessionStart', () => ({}))
@@ -860,4 +862,52 @@ test('pane footer: offers clicks only in the fullscreen renderer, which captures
   ui = await $.ui.mount({ surface: 'terminal', ...PANE, viewport: { columns: 190, rows: 50, isFullscreen: true } })
   expect(await ui.find({ type: 'Text', text: /^click a tab or \/tokens context \| health/ })).toBeDefined()
   await ui.unmount()
+})
+
+test('typeahead: the /tokens tabs while typing the command, then the tab names', async ($, on) => {
+  expect(tokensSuggestions('/tok', 0, '/tok').map(r => r.text)).toEqual(['/tokens overview', '/tokens context', '/tokens health'])
+  // Too short to mean /tokens, another command, or a word later in a prompt: nothing.
+  expect(tokensSuggestions('/t', 0, '/t')).toEqual([])
+  expect(tokensSuggestions('/tokenize', 0, '/tokenize')).toEqual([])
+  expect(tokensSuggestions('see /tokens', 4, '/tokens')).toEqual([])
+  expect(tokensSuggestions('/tokens h', 8, 'h').map(r => r.text)).toEqual(['health'])
+  expect(tokensSuggestions('/keepwarm h', 10, 'h')).toEqual([])
+
+  world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  // The test's $ fires every event (test › Stub what Claude Code would answer); its type lacks this method.
+  const prompt = $.prompt as unknown as { autocomplete: (e: unknown) => Promise<{ suggestions: unknown[] }> }
+  const result = await prompt.autocomplete({ text: '/tokens c', cursor: 9, token: 'c', start: 8 })
+  expect(result.suggestions).toEqual([{ text: 'context', label: 'context', description: 'what fills your context: memory files, MCP servers, skills' }])
+})
+
+test('sidebar at start: opens by itself only in fullscreen, and not again once closed', async ($, on) => {
+  const { pane, clock } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  // Classic renderer: the band is drawn, the pane never opens by itself.
+  let ui = await $.ui.mount({ surface: 'terminal', ...band(130), viewport: { columns: 190, rows: 50, isFullscreen: false } })
+  await ui.unmount()
+  await clock.advance(20_000)
+  expect(pane.opened).toHaveLength(0)
+  // Fullscreen: the next tick opens it unasked – a sidebar, so without closeOnEscape.
+  ui = await $.ui.mount({ surface: 'terminal', ...band(130), viewport: { columns: 190, rows: 50, isFullscreen: true } })
+  await ui.unmount()
+  await clock.advance(16_000)
+  expect(pane.opened).toHaveLength(1)
+  expect(pane.opened[0]?.closeOnEscape).toBeUndefined()
+  // Closed with /tokens: it stays closed.
+  expect((await run($, 'tokens', '')).text).toMatch(/^Closed/)
+  await clock.advance(60_000)
+  expect(pane.opened).toHaveLength(1)
+})
+
+test('sidebar at start: a pane the person opened and closed before stays closed', async ($, on) => {
+  const { pane, clock } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await run($, 'tokens', '')
+  await run($, 'tokens', '')
+  const ui = await $.ui.mount({ surface: 'terminal', ...band(130), viewport: { columns: 190, rows: 50, isFullscreen: true } })
+  await ui.unmount()
+  await clock.advance(20_000)
+  expect(pane.opened).toHaveLength(1)
 })

@@ -53,6 +53,7 @@ import {
   stack,
   tall,
   contextMapOf,
+  tokensSuggestions,
   isNormalStop,
   bump,
   tally,
@@ -109,6 +110,12 @@ let isPinging = false
 let mainRequests = 0
 // Where the surface last seated the pane: beside a fullscreen transcript (dock) or above the prompt (inline).
 let seat: 'dock' | 'inline' | null = null
+// Opening the dashboard as a sidebar by itself (option autoSidebar): only once the band has been drawn
+// fullscreen, once per load, and never again after the person closed it.
+let autoSidebar = 'auto'
+let isFullscreenSeen = false
+let hasAutoOpened = false
+let isDismissed = false
 // The pane's open tab; a reload starts on the overview again.
 const TABS = ['overview', 'context', 'health'] as const
 let tab: (typeof TABS)[number] = 'overview'
@@ -211,8 +218,18 @@ async function recordCheck($: EngineInterface, engineWarm: boolean, source: 'mod
   }))
 }
 
+// A pane opened unasked is placed from 144 terminal columns (110 once the person opened it before) and
+// waits undrawn below that (types: UiOpenResult); docked, it is a sidebar, never a takeover.
+async function maybeAutoOpen($: EngineInterface) {
+  if (autoSidebar === 'off' || !isInteractive || !isFullscreenSeen || hasAutoOpened || isDismissed) return
+  hasAutoOpened = true
+  if ((await $.ui.panes()).some(p => p.id === PANE)) return
+  await $.ui.open({ id: PANE, title: 'Tokens & Cache' })
+}
+
 async function tick($: EngineInterface) {
   $.ui.invalidate('ui.render')
+  await maybeAutoOpen($)
   const keep = await read($, keepA)
   // No ping while a main request runs: that request touches the cache anyway.
   if (keep.until === null || isPinging || mainRequests > 0) return
@@ -332,6 +349,10 @@ async function pressKeepWarm($: EngineInterface, ms: number | null) {
 
 export const register: Register = (on, options) => {
   setting = typeof options.cacheTtl === 'string' ? options.cacheTtl : 'auto'
+  autoSidebar = typeof options.autoSidebar === 'string' ? options.autoSidebar : 'auto'
+  isFullscreenSeen = false
+  hasAutoOpened = false
+  isDismissed = false
   isPinging = false
   mainRequests = 0
 
@@ -344,11 +365,13 @@ export const register: Register = (on, options) => {
     if (e.isInteractive) {
       // Returning the promise lets a mock clock await the tick (test § Test a timer).
       $.clock.every(TICK_MS, () => tick($))
+      // Soon after start, once the band has been drawn and said whether the session is fullscreen.
+      $.clock.after(2_000, () => maybeAutoOpen($))
     }
     try {
       await $.command.register({
         name: 'tokens',
-        description: 'Show token and prompt-cache usage of this session in a pane',
+        description: 'Prompt-cache and token dashboard – tabs: overview, context (what fills it), health (errors, cost rate)',
         argumentHint: '[overview | context | health]',
       })
       await $.command.register({
@@ -594,6 +617,7 @@ export const register: Register = (on, options) => {
       if (isOpen) return { text: `Switched the pane to ${wanted}.` }
     }
     if (isOpen) {
+      isDismissed = true
       await $.ui.close({ id: PANE })
 
       return { text: 'Closed the "Tokens & Cache" pane.' }
@@ -611,6 +635,21 @@ export const register: Register = (on, options) => {
         ? 'Opened the "Tokens & Cache" sidebar. /tokens again closes it.'
         : 'Opened the "Tokens & Cache" pane. Esc at an empty prompt or /tokens again closes it.',
     }
+  })
+
+  // The person closed the dashboard (its close mark or ctrl+x x): it stays closed this session.
+  on('ui.close', async ($, e, next) => {
+    if (e.id === PANE && e.origin.kind === 'person') isDismissed = true
+
+    return next(e)
+  })
+
+  // Typeahead: the /tokens tabs with one line each, so the options show while typing.
+  on('prompt.autocomplete', async ($, e, next) => {
+    const result = await next(e)
+    const rows = tokensSuggestions(e.text, e.start, e.token)
+
+    return rows.length === 0 ? result : { suggestions: [...result.suggestions, ...rows] }
   })
 
   // Above the prompt the pane is a glance: it takes rows from the transcript, so the person's next prompt
@@ -633,6 +672,7 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     // What the mods after this one draw: kept beneath this row (interface § Pick where to draw › Band).
     const theirs = await next(e)
+    if (e.viewport?.isFullscreen === true) isFullscreenSeen = true
     if (e.props.hasSurvey) return theirs
     const measure = await read($, measureA)
     const cache = await read($, cacheA)

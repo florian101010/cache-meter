@@ -183,6 +183,7 @@ To load the clone in every session, add its **absolute** path to `CLAUDE_CODE_PL
 |---|---|
 | See cache and context | the band above the prompt, always on |
 | Open the full view | `/tokens` – again to close; Esc at an empty prompt closes it above the prompt |
+| See the options while typing | type `/tok` – the typeahead lists `/tokens overview`, `/tokens context`, `/tokens health` with one line each; after `/tokens ` the tab names |
 | Open a tab directly | `/tokens context`, `/tokens health`, `/tokens overview` (a prefix is enough: `/tokens h`) – switches an open pane instead of closing it |
 | Switch tabs | `/tokens health` etc.; or press ctrl+x, then Tab (the pane gets the keys), then `1`–`3` – Esc hands the keys back; clicking a tab works only in Claude Code's fullscreen renderer, which captures the mouse |
 | Count the context exactly | `x` or **Count exactly** in the Context tab – one API request per tool and memory file, as `/context` |
@@ -193,7 +194,12 @@ To load the clone in every session, add its **absolute** path to `CLAUDE_CODE_PL
 
 ## Configuration
 
-One option, `cacheTtl` – `auto` (default), `60m` or `5m`. Set it with `/config` → `cache-meter.cacheTtl`, or in `~/.claude/settings.json` under `pluginConfigs` → `"cache-meter@cache-meter"` (marketplace install) or `"cache-meter@inline"` (loaded with `--plugin-dir` or `CLAUDE_CODE_PLUGIN_DIRS`) → `options` → `cacheTtl`.
+Two options. Set them with `/config` → `cache-meter.<option>`, or in `~/.claude/settings.json` under `pluginConfigs` → `"cache-meter@cache-meter"` (marketplace install) or `"cache-meter@inline"` (loaded with `--plugin-dir` or `CLAUDE_CODE_PLUGIN_DIRS`) → `options`.
+
+| Option | Values | What it does |
+|---|---|---|
+| `cacheTtl` | `auto` (default), `60m`, `5m` | Which cache lifetime the countdown assumes – see below |
+| `autoSidebar` | `auto` (default), `off` | `auto`: in Claude Code's fullscreen renderer (`/tui fullscreen`) the dashboard opens by itself as a sidebar at session start – from 144 terminal columns, 110 once you have opened it yourself – and stays closed once you close it. It never opens above the prompt by itself. `off`: only with `/tokens` |
 
 With `auto`, Cache Meter follows Claude Code's own TTL controls and your plan state ([full order](docs/how-it-works.md#how-the-ttl-is-derived)). On an API key or a cloud provider Claude Code's default is five minutes: set `cacheTtl` to `5m`, or set `promptCacheTtl`.
 
@@ -220,7 +226,7 @@ More in [SECURITY.md](SECURITY.md).
 
 **Does it read or change my prompts?** No. It hooks model requests only to read their token counts, stop reasons and server-side tool calls.
 
-**Why does the pane sit above the prompt and not beside the chat?** Claude Code places it, not the mod: beside the chat only in its fullscreen renderer (`/tui fullscreen`) from 110 columns, otherwise above the prompt – there your next prompt closes it so it doesn't take rows from the conversation. See [SECURITY.md](SECURITY.md) for everything it can reach.
+**Why does the pane sit above the prompt and not beside the chat?** Claude Code places it, not the mod: beside the chat only in its fullscreen renderer (`/tui fullscreen`) from 110 columns, otherwise above the prompt – there your next prompt closes it so it doesn't take rows from the conversation. In fullscreen it opens as a sidebar by itself at session start; set `autoSidebar` to `off` to stop that. See [SECURITY.md](SECURITY.md) for everything it can reach.
 
 **Where does it work?** In the Claude Code terminal and the Code tab of the Desktop app. In the VS Code extension and under `claude -p` it runs but draws nothing.
 
