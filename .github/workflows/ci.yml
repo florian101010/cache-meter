@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: validate and test
+    # RUNNER: with the repository variable CI_RUNNER set, a self-hosted runner with that label;
+    # otherwise GitHub's ubuntu-latest. Pull requests from forks and Dependabot always run on GitHub.
+    runs-on: >-
+      ${{ (github.event_name != 'pull_request' ||
+      (github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.user.login != 'dependabot[bot]')) &&
+      vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    env:
+      # The version the tests were written against; bump deliberately after reading its release notes.
+      CLAUDE_CODE_VERSION: 2.1.296
+      DISABLE_AUTOUPDATER: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - name: Install Claude Code
+        run: npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+      - run: claude --version
+      # Manifest, marketplace, hooks module and state contract; warnings fail the build.
+      - run: claude plugin validate --strict .
+      # The mod's tests run against the engine with no session, sign-in or network.
+      - run: claude plugin test .

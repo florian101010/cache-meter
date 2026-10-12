@@ -8,7 +8,7 @@ import type { On } from 'claude-code'
 import { FIVE_MIN, HOUR, forecast, hitPct, litCells, parseKeepWarm, remainingLabel, resolveTtl } from '../hooks/lib'
 
 const T0 = Date.parse('2026-10-12T10:00:00Z')
-const SUMMARY = [{ role: 'user' as const, text: 'Zusammenfassung', toolUses: [] }]
+const SUMMARY = [{ role: 'user' as const, text: 'Summary', toolUses: [] }]
 const NO_TTL = { setting: 'auto', force5m: false, envTtl: null, settingTtl: null, enable1h: false, reported: null, limits: [] }
 
 function band(bodyColumns: number, isWorking = false) {
@@ -114,18 +114,18 @@ async function step($: Engine, agentId?: string) {
   return next.value
 }
 
-test('TTL: eigene Option, dann Claude Codes Steuerung, dann Overage, dann Meldung', async () => {
+test('TTL: own option, then Claude Code controls, then overage, then reported value', async () => {
   expect(resolveTtl({ ...NO_TTL, setting: '5m', reported: '1h' }).ms).toBe(FIVE_MIN)
   expect(resolveTtl({ ...NO_TTL, force5m: true, enable1h: true }).source).toBe('FORCE_PROMPT_CACHING_5M')
   expect(resolveTtl({ ...NO_TTL, envTtl: '5m', settingTtl: '1h' }).source).toBe('CLAUDE_CODE_PROMPT_CACHE_TTL')
   expect(resolveTtl({ ...NO_TTL, settingTtl: '5m' }).ms).toBe(FIVE_MIN)
   expect(resolveTtl({ ...NO_TTL, envTtl: 'bogus' }).ms).toBe(HOUR)
   expect(resolveTtl({ ...NO_TTL, reported: '1h', limits: [{ kind: 'five_hour', percentUsed: 100 }] }).ms).toBe(FIVE_MIN)
-  expect(resolveTtl({ ...NO_TTL, reported: '5m' }).source).toBe('gemeldet beim Modellwechsel')
+  expect(resolveTtl({ ...NO_TTL, reported: '5m' }).source).toBe('reported on model switch')
   expect(resolveTtl(NO_TTL).ms).toBe(HOUR)
 })
 
-test('Trefferquote, Balken, Restzeit, Wetter, /keepwarm-Argumente', async () => {
+test('hit rate, bar, time left, weather, /keepwarm arguments', async () => {
   expect(hitPct({ input: 10, read: 930, write: 60, output: 5 })).toBe(93)
   expect(hitPct({ input: 0, read: 0, write: 0, output: 5 })).toBe(null)
   expect(litCells(HOUR, HOUR, 20)).toBe(20)
@@ -135,17 +135,17 @@ test('Trefferquote, Balken, Restzeit, Wetter, /keepwarm-Argumente', async () => 
   expect(forecast(9, 97).icon).toBe('☀')
   expect(forecast(95, 97).icon).toBe('↯')
   expect(parseKeepWarm('')).toBe(2 * HOUR)
-  expect(parseKeepWarm('aus')).toBe(null)
+  expect(parseKeepWarm('off')).toBe(null)
   expect(parseKeepWarm('120m')).toBe(2 * HOUR)
   expect(parseKeepWarm('5m')).toBe(undefined)
   expect(parseKeepWarm('12h')).toBe(undefined)
 })
 
-test('Band: leer, behält was andere Mods darunter zeichnen, Knopf nur wenn kein Turn läuft', async ($, on) => {
+test('band: empty, keeps what other mods draw below, button only between turns', async ($, on) => {
   world(on)
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ surface, ...band(120) })
-    expect(await ui.find({ type: 'Text', text: 'leer' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: 'empty' })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: 'drawn below' })).toBeDefined()
     expect(await ui.find({ type: 'Button', key: 'compact' })).toBeDefined()
     await ui.unmount()
@@ -155,37 +155,37 @@ test('Band: leer, behält was andere Mods darunter zeichnen, Knopf nur wenn kein
   await busy.unmount()
 })
 
-test('turn.step: Hauptanfrage füllt Band, Subagent nur die Summen', async ($, on) => {
+test('turn.step: a main request fills the band, a subagent only the totals', async ($, on) => {
   world(on)
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   await step($, 'agent-1')
   let ui = await $.ui.mount({ surface: 'terminal', ...band(120) })
-  expect(await ui.find({ type: 'Text', text: 'leer' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'empty' })).toBeDefined()
   await ui.unmount()
 
   await step($)
   ui = await $.ui.mount({ surface: 'terminal', ...band(120) })
   expect(await ui.find({ type: 'Text', text: '60m' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: '93%' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: ' (Auto-Compact 97%)' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ' (auto-compact 97%)' })).toBeDefined()
   await ui.unmount()
 
   const pane = await $.ui.mount({ surface: 'desktop', ...PANE })
-  expect(await pane.find({ type: 'Text', text: / · 1 Anfragen/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: / · 1 requests/ })).toBeDefined()
   await pane.unmount()
 })
 
-test('Countdown zählt ab Beginn der Anfrage und läuft ab', async ($, on) => {
+test('countdown starts at the request and expires', async ($, on) => {
   const { clock } = world(on)
   await step($)
   await clock.advance(61 * 60_000)
   const ui = await $.ui.mount({ surface: 'terminal', ...band(130) })
-  expect(await ui.find({ type: 'Text', text: 'abgelaufen' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /Neuschreiben/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'expired' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /rewrite/ })).toBeDefined()
   await ui.unmount()
 })
 
-test('Resume setzt den Countdown fort, /clear lädt Messwerte neu', async ($, on) => {
+test('resume continues the countdown, /clear reloads the measurement', async ($, on) => {
   world(on)
   await $.classic.SessionStart({ source: 'resume', seconds_since_last_response: 600, context_tokens: 120_000 })
   let ui = await $.ui.mount({ surface: 'terminal', ...band(120) })
@@ -194,11 +194,11 @@ test('Resume setzt den Countdown fort, /clear lädt Messwerte neu', async ($, on
 
   await $.classic.SessionStart({ source: 'clear' })
   ui = await $.ui.mount({ surface: 'terminal', ...band(120) })
-  expect(await ui.find({ type: 'Text', text: ' (Auto-Compact 97%)' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ' (auto-compact 97%)' })).toBeDefined()
   await ui.unmount()
 })
 
-test('Modellwechsel: kalt mit Schätzung, beim Resume nicht', async ($, on) => {
+test('model switch: cold with estimate, but not on resume', async ($, on) => {
   world(on)
   await step($)
   const sw = {
@@ -218,44 +218,44 @@ test('Modellwechsel: kalt mit Schätzung, beim Resume nicht', async ($, on) => {
 
   await $.classic.PostModelSwitch({ ...sw, source: 'command' })
   ui = await $.ui.mount({ surface: 'terminal', ...band(130) })
-  expect(await ui.find({ type: 'Text', text: 'abgelaufen' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'expired' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /≈ \$0\.42/ })).toBeDefined()
   await ui.unmount()
 })
 
-test('Compact: echter Compact leert, precompute nicht, Knopf leert selbst', async ($, on) => {
+test('compact: a real compact empties, precompute does not, the button empties itself', async ($, on) => {
   world(on)
   await step($)
   await $.session.compact({ trigger: 'precompute', messages: SUMMARY })
   let ui = await $.ui.mount({ surface: 'terminal', ...band(120) })
   expect(await ui.find({ type: 'Text', text: '60m' })).toBeDefined()
   await ui.press({ key: 'compact' })
-  expect(await ui.find({ type: 'Text', text: 'leer' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'empty' })).toBeDefined()
   await ui.unmount()
 
   await step($)
   await $.session.compact({ trigger: 'manual', messages: SUMMARY })
   ui = await $.ui.mount({ surface: 'terminal', ...band(120) })
-  expect(await ui.find({ type: 'Text', text: 'leer' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'empty' })).toBeDefined()
   await ui.unmount()
 })
 
-test('Schmales Band: nichts bricht um, Teile fallen weg', async ($, on) => {
+test('narrow band: nothing wraps, parts are dropped', async ($, on) => {
   const { clock } = world(on)
   await step($)
   await clock.advance(61 * 60_000)
   const narrow = await $.ui.mount({ surface: 'terminal', ...band(60) })
-  expect(await narrow.find({ type: 'Text', text: /Neuschreiben/ })).toBeUndefined()
-  expect(await narrow.find({ type: 'Text', text: /Auto-Compact/ })).toBeUndefined()
+  expect(await narrow.find({ type: 'Text', text: /rewrite/ })).toBeUndefined()
+  expect(await narrow.find({ type: 'Text', text: /auto-compact/ })).toBeUndefined()
   await narrow.unmount()
 })
 
-test('/keepwarm pingt kurz vor Ablauf und verlängert', async ($, on) => {
+test('/keepwarm pings shortly before expiry and extends', async ($, on) => {
   const { clock, forks } = world(on)
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   await step($)
   const started = await run($, 'keepwarm', '2h')
-  expect(started.text).toMatch(/Warmhalten bis/)
+  expect(started.text).toMatch(/Keepwarm until/)
   await clock.advance(49 * 60_000)
   expect(forks).toHaveLength(0)
   await clock.advance(2 * 60_000)
@@ -265,11 +265,11 @@ test('/keepwarm pingt kurz vor Ablauf und verlängert', async ($, on) => {
   const ui = await $.ui.mount({ surface: 'terminal', ...band(120) })
   expect(await ui.find({ type: 'Text', text: '59m' })).toBeDefined()
   await ui.unmount()
-  const stopped = await run($, 'keepwarm', 'aus')
-  expect(stopped.text).toMatch(/1 Pings/)
+  const stopped = await run($, 'keepwarm', 'off')
+  expect(stopped.text).toMatch(/1 pings/)
 })
 
-test('/keepwarm schaltet ab, wenn ein Ping den Cache nicht trifft', async ($, on) => {
+test('/keepwarm stops when a ping misses the cache', async ($, on) => {
   const { clock, forks, toasts } = world(on, { forkRead: 0 })
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   await step($)
@@ -277,30 +277,30 @@ test('/keepwarm schaltet ab, wenn ein Ping den Cache nicht trifft', async ($, on
   await clock.advance(51 * 60_000)
   await clock.settle()
   expect(forks).toHaveLength(1)
-  expect(toasts.some(t => t.includes('traf den Cache nicht'))).toBe(true)
+  expect(toasts.some(t => t.includes('the ping missed the cache'))).toBe(true)
   await clock.advance(60 * 60_000)
   expect(forks).toHaveLength(1)
 })
 
-test('/keepwarm startet bei 5m-TTL nicht', async ($, on) => {
+test('/keepwarm does not start at a 5m TTL', async ($, on) => {
   world(on, { env: { FORCE_PROMPT_CACHING_5M: '1' } })
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   await step($)
   const answer = await run($, 'keepwarm', '2h')
-  expect(answer.text).toMatch(/lohnt Warmhalten nicht/)
+  expect(answer.text).toMatch(/keepwarm is not worth it/)
 })
 
-test('Ohne Bildschirm (-p) läuft kein Timer, also kein Ping', async ($, on) => {
+test('without a screen (-p) no timer runs, so no ping', async ($, on) => {
   const { clock, forks } = world(on)
   await $.session.start({ surface: null, isInteractive: false, cwd: '/work' })
   await step($)
   const answer = await run($, 'keepwarm', '2h')
-  expect(answer.text).toMatch(/nur in einer interaktiven Session/)
+  expect(answer.text).toMatch(/only works in an interactive session/)
   await clock.advance(55 * 60_000)
   expect(forks).toHaveLength(0)
 })
 
-test('Pane zeichnet mit Anfragen und Limits auf jeder Oberfläche', async ($, on) => {
+test('pane draws with requests and limits on every surface', async ($, on) => {
   world(on)
   await step($)
   await $.session.measure({
@@ -311,15 +311,15 @@ test('Pane zeichnet mit Anfragen und Limits auf jeder Oberfläche', async ($, on
   })
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ surface, ...PANE })
-    expect(await ui.find({ type: 'Text', text: /warm · noch 60m/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /5 Stunden/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /warm · 60m left/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /5 hours/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /\$2\.50/ })).toBeDefined()
     expect(await ui.find({ type: 'Button', key: 'pane-compact' })).toBeDefined()
     await ui.unmount()
   }
 })
 
-test('/keepwarm schaltet ab, wenn ein Ping viel neu schreibt (Teil-Fehltreffer)', async ($, on) => {
+test('/keepwarm stops when a ping writes a lot (partial miss)', async ($, on) => {
   const { clock, forks, toasts } = world(on, { forkRead: 99_000, forkWrite: 20_000 })
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   await step($)
@@ -327,12 +327,12 @@ test('/keepwarm schaltet ab, wenn ein Ping viel neu schreibt (Teil-Fehltreffer)'
   await clock.advance(51 * 60_000)
   await clock.settle()
   expect(forks).toHaveLength(1)
-  expect(toasts.some(t => t.includes('20.0k geschrieben'))).toBe(true)
+  expect(toasts.some(t => t.includes('20.0k written'))).toBe(true)
   await clock.advance(60 * 60_000)
   expect(forks).toHaveLength(1)
 })
 
-test('Kalte Neuschreibung: Liste im Pane und Hinweis, warme zählt nicht', async ($, on) => {
+test('cold rewrite: listed in the pane with a hint, a warm one does not count', async ($, on) => {
   const { clock, toasts, next } = world(on)
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   await step($)
@@ -342,14 +342,14 @@ test('Kalte Neuschreibung: Liste im Pane und Hinweis, warme zählt nicht', async
   // After a 70-minute break the cache has lapsed; this request writes it anew.
   await clock.advance(70 * 60_000)
   await step($)
-  expect(toasts.filter(t => t.startsWith('Cache war kalt: 150.0k'))).toHaveLength(1)
+  expect(toasts.filter(t => t.startsWith('Cache was cold: 150.0k'))).toHaveLength(1)
   const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
-  expect(await ui.find({ type: 'Text', text: ' neu geschrieben nach 1h10m Pause' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /Zusammen 1×/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ' re-written after 1h10m idle' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Total 1×/ })).toBeDefined()
   await ui.unmount()
 })
 
-test('Kalte Neuschreibung: kein Hinweis, solange /keepwarm läuft', async ($, on) => {
+test('cold rewrite: no hint while /keepwarm runs', async ($, on) => {
   const { clock, toasts, next } = world(on)
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   await step($)
@@ -357,10 +357,10 @@ test('Kalte Neuschreibung: kein Hinweis, solange /keepwarm läuft', async ($, on
   next.write = 150_000
   await clock.advance(70 * 60_000)
   await step($)
-  expect(toasts.some(t => t.startsWith('Cache war kalt'))).toBe(false)
+  expect(toasts.some(t => t.startsWith('Cache was cold'))).toBe(false)
 })
 
-test('Kalt: Grenzen – unter 10k, mehr gelesen als geschrieben, nach /compact, Subagent', async ($, on) => {
+test('cold: limits – under 10k, more read than written, after /compact, subagent', async ($, on) => {
   const { clock, toasts, next } = world(on)
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   await step($)
@@ -381,13 +381,13 @@ test('Kalt: Grenzen – unter 10k, mehr gelesen als geschrieben, nach /compact, 
   // A subagent's cold request does not count either.
   await clock.advance(70 * 60_000)
   await step($, 'agent-1')
-  expect(toasts.some(t => t.startsWith('Cache war kalt'))).toBe(false)
+  expect(toasts.some(t => t.startsWith('Cache was cold'))).toBe(false)
   const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
-  expect(await ui.find({ type: 'Text', text: /Keine – der Cache war/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /None – the cache was warm/ })).toBeDefined()
   await ui.unmount()
 })
 
-test('Kalt nach Modellwechsel: gezählt, aber ohne /keepwarm-Hinweis', async ($, on) => {
+test('cold after a model switch: counted, but no /keepwarm hint', async ($, on) => {
   const { toasts, next } = world(on)
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   await step($)
@@ -405,32 +405,32 @@ test('Kalt nach Modellwechsel: gezählt, aber ohne /keepwarm-Hinweis', async ($,
   next.write = 150_000
   next.read = 0
   await step($)
-  expect(toasts.some(t => t.startsWith('Cache war kalt'))).toBe(false)
+  expect(toasts.some(t => t.startsWith('Cache was cold'))).toBe(false)
   const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
-  expect(await ui.find({ type: 'Text', text: ' neu geschrieben (nach Modellwechsel)' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ' re-written (after a model switch)' })).toBeDefined()
   await ui.unmount()
 })
 
-test('Resume mit "wahrscheinlich abgelaufen": Band kalt, erste Anfrage zählt', async ($, on) => {
+test('resume reported as likely expired: band cold, first request counts', async ($, on) => {
   const { toasts, next } = world(on)
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   await $.classic.SessionStart({ source: 'resume', seconds_since_last_response: 1_200, prompt_cache_likely_expired: true, context_tokens: 150_000 })
   const ui = await $.ui.mount({ surface: 'terminal', ...band(130) })
-  expect(await ui.find({ type: 'Text', text: 'abgelaufen' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'expired' })).toBeDefined()
   await ui.unmount()
   next.write = 150_000
   next.read = 0
   await step($)
   // Claude Code said cold: counted as a resume with the reported pause, no keepwarm hint.
-  expect(toasts.some(t => t.startsWith('Cache war kalt'))).toBe(false)
+  expect(toasts.some(t => t.startsWith('Cache was cold'))).toBe(false)
   const pane = await $.ui.mount({ surface: 'terminal', ...PANE })
-  expect(await pane.find({ type: 'Text', text: /Zusammen 1×/ })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: / \(nach Resume, 20m Pause\)/ })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: /Modellwechsel/ })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: /Total 1×/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: / \(after resume, 20m idle\)/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /model switch/ })).toBeUndefined()
   await pane.unmount()
 })
 
-test('/keepwarm stoppt, wenn ein Ping ohne Antwort bleibt', async ($, on) => {
+test('/keepwarm stops when a ping gets no answer', async ($, on) => {
   const { clock, forks, toasts } = world(on, { forkAnswer: false })
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   await step($)
@@ -438,12 +438,12 @@ test('/keepwarm stoppt, wenn ein Ping ohne Antwort bleibt', async ($, on) => {
   await clock.advance(51 * 60_000)
   await clock.settle()
   expect(forks).toHaveLength(1)
-  expect(toasts.some(t => t.includes('Ping ohne Antwort (nothing-to-fork)'))).toBe(true)
+  expect(toasts.some(t => t.includes('the ping got no answer (nothing-to-fork)'))).toBe(true)
   await clock.advance(60 * 60_000)
   expect(forks).toHaveLength(1)
 })
 
-test('/keepwarm pingt nicht, solange eine Hauptanfrage läuft', async ($, on) => {
+test('/keepwarm does not ping while a main request runs', async ($, on) => {
   const { clock, forks, next } = world(on)
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   await step($)
@@ -460,7 +460,7 @@ test('/keepwarm pingt nicht, solange eine Hauptanfrage läuft', async ($, on) =>
   expect(forks).toHaveLength(0)
 })
 
-test('/keepwarm pingt wieder, nachdem ein Turn abgebrochen wurde', async ($, on) => {
+test('/keepwarm pings again after an aborted turn', async ($, on) => {
   const { clock, forks, next } = world(on)
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   await step($)

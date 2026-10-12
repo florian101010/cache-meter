@@ -1,0 +1,49 @@
+name: Bug report
+description: Something in the band, the /tokens pane or /keepwarm is wrong
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Cache Meter is a Claude Code mod. Please include the versions – the mods API changes between Claude Code releases.
+  - type: input
+    id: claude-version
+    attributes:
+      label: Claude Code version
+      description: Output of `claude --version`
+    validations:
+      required: true
+  - type: input
+    id: mod-version
+    attributes:
+      label: Cache Meter version
+      description: '`version` in `.claude-plugin/plugin.json`, or `claude plugin list`'
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where
+      options: [Terminal, Desktop app (Code tab), VS Code extension, claude -p / Agent SDK]
+    validations:
+      required: true
+  - type: dropdown
+    id: billing
+    attributes:
+      label: Billing
+      description: Decides the default cache TTL
+      options: [Claude subscription, API key, Cloud provider (Bedrock / Vertex / Foundry), Gateway]
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+      description: A screenshot of the band or the pane helps. `cacheTtl` setting and the TTL source shown in /tokens, if relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: debug
+    attributes:
+      label: Debug log lines
+      description: Start with `claude --debug` and paste the lines that contain `cache-meter` (check them for private content first).
+      render: text
