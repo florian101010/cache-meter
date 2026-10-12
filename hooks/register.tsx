@@ -53,7 +53,6 @@ import {
   stack,
   tall,
   contextMapOf,
-  tokensSuggestions,
   isNormalStop,
   bump,
   tally,
@@ -644,14 +643,6 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
-  // Typeahead: the /tokens tabs with one line each, so the options show while typing.
-  on('prompt.autocomplete', async ($, e, next) => {
-    const result = await next(e)
-    const rows = tokensSuggestions(e.text, e.start, e.token)
-
-    return rows.length === 0 ? result : { suggestions: [...result.suggestions, ...rows] }
-  })
-
   // Above the prompt the pane is a glance: it takes rows from the transcript, so the person's next prompt
   // closes it (the band keeps the summary). Docked beside a fullscreen transcript it is a sidebar and stays.
   on('prompt.submit', async ($, e, next) => {
@@ -768,10 +759,11 @@ export const register: Register = (on, options) => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Button, Text } = $.ui.resolve(e)
+    const elements = $.ui.resolve(e)
+    const { Box, Button, Text } = elements
     seat = e.props.placement
     // Raster (colored cells) is drawn by the terminal only (reference › Elements); elsewhere text.
-    const Raster = e.surface === 'terminal' ? $.ui.resolve(e).Raster : null
+    const Raster = 'Raster' in elements ? elements.Raster : null
     const steps = await read($, stepsA)
     const totals: Totals = await read($, totalsA)
     const measure = await read($, measureA)

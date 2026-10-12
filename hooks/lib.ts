@@ -451,28 +451,3 @@ export function tally(counts: Readonly<Record<string, number>>, label: (key: str
 export function bump(counts: Readonly<Record<string, number>>, key: string): Record<string, number> {
   return { ...counts, [key]: (counts[key] ?? 0) + 1 }
 }
-
-/** The tabs of /tokens and the one line the typeahead shows beside each. */
-export const TAB_HELP = {
-  overview: 'countdown, keepwarm, every request, what caching saved',
-  context: 'what fills your context: memory files, MCP servers, skills',
-  health: 'API errors, unusual stops, cost per hour, cache check',
-} as const
-
-/**
- * Typeahead rows for /tokens: the three tab commands while the command is being typed (from
- * `/tok`), and the tab names after `/tokens `. Empty for anything else.
- */
-export function tokensSuggestions(text: string, start: number, token: string): { text: string; label: string; description: string }[] {
-  const tabs = Object.entries(TAB_HELP) as [keyof typeof TAB_HELP, string][]
-  if (start === 0 && token.length >= 4 && '/tokens'.startsWith(token)) {
-    return tabs.map(([tab, help]) => ({ text: `/tokens ${tab}`, label: `/tokens ${tab}`, description: help }))
-  }
-  if (text.slice(0, start).trimEnd() === '/tokens' && start > '/tokens'.length - 1) {
-    const typed = token.toLowerCase()
-
-    return tabs.filter(([tab]) => tab.startsWith(typed)).map(([tab, help]) => ({ text: tab, label: tab, description: help }))
-  }
-
-  return []
-}
