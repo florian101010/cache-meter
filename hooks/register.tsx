@@ -897,9 +897,11 @@ export const register: Register = (on, options) => {
     const sessionCard = (
       <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="column">
         <Box flexDirection="row" justifyContent="space-between">
-          <Text color="claude" bold>
-            Session
-          </Text>
+          <Box flexShrink={0} marginRight={1}>
+            <Text color="claude" bold>
+              Session
+            </Text>
+          </Box>
           {saving !== null && (
             <Text bold color={saving >= 0 ? 'success' : 'warning'} wrap="truncate-end">
               {saving >= 0 ? `cache saved ${saving}%${tier === 'narrow' ? '' : ' of input cost'}` : `cache cost +${-saving}%`}
@@ -996,11 +998,17 @@ export const register: Register = (on, options) => {
     const requestsCard = (
       <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="column">
         <Box flexDirection="row" justifyContent="space-between">
-          <Text color="claude" bold>
-            Requests
-          </Text>
+          <Box flexShrink={0} marginRight={1}>
+            <Text color="claude" bold>
+              Requests
+            </Text>
+          </Box>
           <Text dimColor wrap="truncate-end">
-            {tier === 'narrow' ? 'not from cache' : 'height = share not from cache · blue = first write · newest right'}
+            {tier === 'wide'
+              ? 'height = share not from cache · blue = first write · newest right'
+              : tier === 'medium'
+                ? 'height = not from cache · blue = first write'
+                : 'not from cache'}
           </Text>
         </Box>
         {steps.length === 0 && <Text dimColor>No request measured yet.</Text>}
@@ -1067,9 +1075,11 @@ export const register: Register = (on, options) => {
         {contextCard}
         <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="column">
           <Box flexDirection="row" justifyContent="space-between">
-            <Text color="claude" bold>
-              Where it goes
-            </Text>
+            <Box flexShrink={0} marginRight={1}>
+              <Text color="claude" bold>
+                Where it goes
+              </Text>
+            </Box>
             <Text dimColor wrap="truncate-end">
               {map === null ? 'no reading yet' : `${map.detail === 'full' ? 'exact' : 'estimate'} · ${hhmm(map.at)}`}
             </Text>
@@ -1078,17 +1088,19 @@ export const register: Register = (on, options) => {
           {map !== null && map.categories.slice(0, 8).map(c => itemRow(c.name, c.tokens, topCat, nameW, pctOf(c.tokens)))}
           <Box flexDirection="row" justifyContent="space-between">
             <Text dimColor wrap="truncate-end">
-              {tier === 'narrow' ? 'exact: 1 request per item' : 'Exact count: one API request per tool and memory file, as /context'}
+              {tier === 'wide' ? 'Exact count: one API request per tool and memory file, as /context' : 'exact: 1 request per tool and file'}
             </Text>
-            {isCounting ? (
-              <Text color="claude">counting…</Text>
-            ) : (
-              <Button key="context-exact" plain hotkey="x" onPress={() => countExactly($)}>
-                <Text color="claude" bold>
-                  Count exactly
-                </Text>
-              </Button>
-            )}
+            <Box flexShrink={0} marginLeft={2}>
+              {isCounting ? (
+                <Text color="claude">counting…</Text>
+              ) : (
+                <Button key="context-exact" plain hotkey="x" onPress={() => countExactly($)}>
+                  <Text color="claude" bold>
+                    Count exactly
+                  </Text>
+                </Button>
+              )}
+            </Box>
           </Box>
         </Box>
         {map !== null && (
