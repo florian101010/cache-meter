@@ -813,9 +813,6 @@ export const register: Register = (on, options) => {
               ))}
             </Box>
           )}
-        </Box>
-
-        <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="column">
           <Text color="claude" bold>
             Plan limits
           </Text>

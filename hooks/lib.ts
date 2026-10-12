@@ -258,13 +258,15 @@ const TRACK = 0x45475a
 const MARKER = 0xff6b81
 
 /**
- * A one-row meter: `lit` of `width` cells filled with a gradient along the bar, the rest a dim
- * track; an optional marker cell (e.g. the auto-compact point) drawn as a bright bar.
+ * A one-row meter: `lit` of `width` cells in one solid color, the rest a dim track; an optional
+ * marker cell (e.g. the auto-compact point) drawn as a bright bar. Solid, not a per-cell gradient:
+ * the terminal rounds Raster colors to a smaller palette (gallery › Raster), which turned a
+ * gradient into visible bands.
  */
 export function meter(width: number, lit: number, palette: Palette, markerAt: number | null = null): Cell[] {
   return Array.from({ length: width }, (_, i): Cell => {
     if (markerAt !== null && i === markerAt) return [0x2503, MARKER, DEFAULT_COLOR] // ┃
-    if (i < lit) return [0x2588, mix(palette.from, palette.to, width > 1 ? i / (width - 1) : 1), DEFAULT_COLOR] // █
+    if (i < lit) return [0x2588, mix(palette.from, palette.to, 0.6), DEFAULT_COLOR] // █
     return [0x2591, TRACK, DEFAULT_COLOR] // ░
   })
 }

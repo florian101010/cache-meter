@@ -98,7 +98,7 @@ In the new session the band appears above the prompt after the first answer; typ
 | `· rewrite ≈ …` | When the cache has expired: what the next request will re-write (in $ when Claude Code estimated it, otherwise in tokens) |
 | `[ Compact ]` | Runs `/compact`; hidden while a turn is running |
 
-**Pane `/tokens`** – a dashboard: a big countdown with a gradient meter, a keepwarm card with one-key start (`w`), a context gauge marking the auto-compact point, every main-conversation request as a stacked bar (read from cache / written to cache / uncached), session totals for the main conversation and subagents, cost as in `/cost`, plan limits (5 hours, 7 days) with reset times, a context sparkline, the cold rewrites of the session, the keepwarm balance, and the TTL together with the rule that produced it.
+**Pane `/tokens`** – a dashboard: a big countdown with a color meter, a keepwarm card with one-key start (`w`), a context gauge marking the auto-compact point, every main-conversation request as a stacked bar (read from cache / written to cache / uncached), session totals for the main conversation and subagents, cost as in `/cost`, plan limits (5 hours, 7 days) with reset times, a context sparkline, the cold rewrites of the session, the keepwarm balance, and the TTL together with the rule that produced it.
 
 **`/keepwarm [10m … 8h | off]`** – shortly before the cache would expire, sends one tiny request over your conversation (`$.model.fork`) so the cache stays warm while you are away. Stops by itself on a miss, at the end of the window, after 12 pings, or when the TTL is 5 minutes.
 
