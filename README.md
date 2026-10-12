@@ -22,7 +22,7 @@ Claude Code re-sends your entire conversation with every message. The prompt cac
 
 ### ⏱️ See it
 
-A live countdown above the prompt: minutes until the cache expires, the last request's hit rate, how full the context is and what the session would cost on an API key. **Under every answer, what that answer cost** – and a heads-up *before* a model or effort switch re-writes the cache.
+A live countdown above the prompt: minutes until the cache expires, the last request's hit rate, how full the context is and what the session would cost on an API key. **Under every answer, what that answer cost** – and a heads-up when a switch is about to re-write it: before a `/model` switch, and the moment a request with another model or effort goes out.
 
 </td>
 <td width="33%" valign="top">
@@ -65,7 +65,7 @@ It runs the same command (Claude Code may ask you to approve it); start a new se
 3. `/keepwarm` before your next break – then check after the break that the next answer reads from the cache (hit rate in the band).
 4. `/tokens report` – the whole session as Markdown on your clipboard, ready to paste into an issue or a note.
 
-Safe by design: it never changes your prompts, answers or tool calls, never keeps their text and writes nothing to disk. It sends nothing on its own – only the `/keepwarm` pings and, if you press **Count exactly**, the token counts `/context` would make. Free and MIT-licensed.
+Safe by design: it never changes your prompts, answers or tool calls, never keeps their text and writes nothing to disk. It sends nothing on its own – only the `/keepwarm` pings and, if you press **Count exactly**, the token counts `/context` would make; with the option `expiryNotice` on, a notification through your own terminal. Free and MIT-licensed.
 
 ### What you see
 
@@ -171,10 +171,10 @@ Four more places, only when there is something to say:
 
 | Where | What |
 |---|---|
-| Under each answer | `◉ Cache Meter · ≈ $0.42 API value · 3 requests · 97% from cache · 6.0k written to cache` – what this answer cost (subagents it started included; `spent` on an API key; no cost under half a cent), its model requests and how they used the cache. Option [`turnLine`](#configuration) |
+| Under each answer | `◉ Cache Meter · ≈ $0.42 API value · 3 requests · 97% from cache · 6.0k written to cache` – what the session cost rose by during this answer (subagents it started count; `spent` on an API key; no cost under half a cent), its model requests and how they used the cache. Option [`turnLine`](#configuration) |
 | At a model switch | While the cache is warm, Claude Code asks you to confirm a `/model` switch. Cache Meter adds a note with Claude Code's own estimate and the time left: *Model switch re-writes 148.0k tokens to the cache (≈ $1.18) · cache warm 42m more – after it expires, switching adds nothing.* It never blocks or approves a switch |
-| When a request splits the cache | While the cache is warm, a request that changes what the cache is keyed on – the model for one turn (a skill or command that names its own, `opusplan`), or the effort level on a model where that splits it – gets a note the moment it goes out: *This request re-writes 148.0k tokens to the cache: effort high → medium.* Effort changes keep the cache on Opus 5.5, Sonnet 5.5, Haiku 5.5 and Fable 5.1 with an API key or a subscription, so there is no note there ([prompt-caching › Changing effort level](https://code.claude.com/docs/en/prompt-caching#changing-effort-level)). Fast mode is not observable for a mod |
-| Before the cache expires (option [`expiryNotice`](#configuration), off by default) | One native notification per cache window, about 10 minutes before a one-hour cache expires, while keepwarm is off: *Prompt cache expires in 10m – the next prompt would re-write 148.0k tokens. Type /keepwarm to keep it.* It goes through your own notification channel (Claude Code's `preferredNotifChannel` setting) and your `Notification` settings hooks |
+| When a request splits the cache | While the cache is warm, a request that changes what the cache is keyed on – the model for one turn (a skill or command that names its own, `opusplan`), or the effort level on a model where that splits it – gets a note the moment it goes out: *This request re-writes 148.0k tokens to the cache: effort high → medium.* Effort changes keep the cache on Opus 5.5, Sonnet 5.5, Haiku 5.5 and Fable 5.1 with an API key or a subscription, so these models get no note on any provider – on Amazon Bedrock, Google Cloud's Agent Platform or a gateway the change does split the cache, and the Health tab names it afterwards ([prompt-caching › Changing effort level](https://code.claude.com/docs/en/prompt-caching#changing-effort-level)). Fast mode is not observable for a mod |
+| Before the cache expires (option [`expiryNotice`](#configuration), off by default) | One terminal notification per cache window, about 10 minutes before a one-hour cache expires, while keepwarm is off: *Prompt cache expires in 10m – the next prompt would re-write 148.0k tokens. Type /keepwarm to keep it.* It goes through your own notification channel (Claude Code's `preferredNotifChannel` setting – the terminal's own notification or just a bell, which shows no text) and your `Notification` settings hooks |
 
 **Pane `/tokens`** – the dashboard with its Overview, Context and Health tabs, and `/tokens report` for a Markdown copy; see [above](#see-everything-with-tokens). The Context tab's *What the conversation holds* lists the tool results of the main conversation since the start or the last compact – by tool and the five largest, labelled with the file path or, for Bash, only the program name. The Overview's request chart draws one column per request: its height is the share not read from the cache, so a cold re-write stands out as a tall red column, a first write of the cache in blue.
 
@@ -242,7 +242,7 @@ Four options. Set them with `/config` → `cache-meter.<option>`, or in `~/.clau
 | `cacheTtl` | `auto` (default), `60m`, `5m` | Which cache lifetime the countdown assumes – see below |
 | `autoSidebar` | `auto` (default), `off` | `auto`: in Claude Code's fullscreen renderer (`/tui fullscreen`) the dashboard opens by itself as a sidebar at session start – from 144 terminal columns, 110 once you have opened it yourself – and stays closed once you close it. It never opens above the prompt by itself. `off`: only with `/tokens` |
 | `turnLine` | `on` (default), `off` | The line under each answer with what it cost and how it used the cache. `off`: no line |
-| `expiryNotice` | `off` (default), `on` | `on`: a native notification once per cache window when about 10 minutes are left and keepwarm is off – only with a one-hour TTL and at least 10k tokens of context. The Health tab shows how many went out, or why one was not sent (`disabled`, `no-channel`, …) |
+| `expiryNotice` | `off` (default), `on` | `on`: a terminal notification once per cache window when about 10 minutes are left and keepwarm is off – only with a one-hour TTL and at least 10k tokens of context. The Health tab shows how many were sent (a terminal does not confirm delivery), or why one was not (`disabled`, `no-channel`, …) |
 
 With `auto`, Cache Meter follows Claude Code's own TTL controls and your plan state ([full order](docs/how-it-works.md#how-the-ttl-is-derived)). On an API key or a cloud provider Claude Code's default is five minutes: set `cacheTtl` to `5m`, or set `promptCacheTtl`.
 

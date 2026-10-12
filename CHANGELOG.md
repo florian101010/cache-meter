@@ -20,9 +20,9 @@ Context under control: what fills the conversation, when it compacts, and a repo
 Why and when: what broke the cache, and a word before it happens.
 
 ### Added
-- **Note before a request that splits a warm cache:** a model for one turn (a skill or command with its own `model`, `opusplan`) or an effort change on a model where effort splits the cache – shown the moment the request goes out, with the tokens it re-writes. No note for effort changes on Opus 5.5, Sonnet 5.5, Haiku 5.5 and Fable 5.1, which keep the cache with an API key or a subscription. `/effort` and `/fast` fire no event a mod can catch earlier.
-- **Cause of a warm miss** in the Health tab: model or effort change, a changed MCP tool set, a pause longer than the real TTL, or – when none of these – the causes a mod cannot observe (fast mode, plugin reload, tool deny rule, removed images).
-- **Expiry notification** (option `expiryNotice`, off by default): once per cache window, about 10 minutes before a one-hour cache expires and while keepwarm is off, through your own notification channel. The Health tab shows how many went out, or why not.
+- **Note before a request that splits a warm cache:** a model for one turn (a skill or command with its own `model`, `opusplan`) or an effort change on a model where effort splits the cache – shown the moment the request goes out, with the tokens it re-writes. No note for effort changes on Opus 5.5, Sonnet 5.5, Haiku 5.5 and Fable 5.1, which keep the cache with an API key or a subscription; on Bedrock, Agent Platform or a gateway they do not, and the warm-miss cause names it afterwards. `/effort` and `/fast` fire no event a mod can catch earlier.
+- **Cause of a warm miss** in the Health tab: model or effort change, a changed MCP tool set, a pause longer than the real TTL, or – when none of these – the causes a mod cannot observe (fast mode, a code-intelligence plugin's LSP tool, tool deny rule, removed images). A loaded tool counts only without tool search, which keeps the prefix.
+- **Expiry notification** (option `expiryNotice`, off by default): once per cache window, about 10 minutes before a one-hour cache expires and while keepwarm is off, through your own terminal's notification channel. The Health tab shows how many were sent (a terminal does not confirm delivery), or why not.
 - **Subagents** in the Health tab: tokens, requests, hit rate and cache saving per subagent, named by type and task.
 
 ## [0.6.0] – 2026-10-12
@@ -30,10 +30,11 @@ Why and when: what broke the cache, and a word before it happens.
 Saves money: each feature points at a cost before or while it happens.
 
 ### Added
-- **Line under each answer:** what the answer cost (API value on a plan, spend on an API key; subagents it started included), its requests, the share read from the cache and what was written to it. A line another mod already put under the answer is kept. Option `turnLine` (`on`/`off`).
+- **Line under each answer:** what the session cost rose by during the answer (API value on a plan, spend on an API key; subagents it started count), its requests, the share read from the cache and what was written to it. A line another mod already put under the answer is kept. Option `turnLine` (`on`/`off`).
 - **Model switch note:** while the cache is warm, a note with Claude Code's own re-write estimate and the minutes the cache has left. It never blocks or approves a switch (`ask` would refuse switches from `/config` and the SDK).
-- **Limit forecast:** in the overview, when a plan limit is full at the pace since its first reading in this window, if before its reset. The pace starts again after a reset.
-- **MCP calls per server** in the Context tab; a server with no call after three prompts is marked *unused so far*.
+- **Limit forecast:** in the overview, when a plan limit is full at the pace since its first reading in this window, if before its known reset. The pace starts again after a reset.
+- **CI:** rejects parameters named `h` (and nested ones named `on`) in `hooks/`, which the plugin directory blocks.
+- **MCP calls per server** in the Context tab; a server with no call after three prompts – since the start, `/clear`, `/resume` or `/branch` – is marked *unused so far*.
 - **Warm miss** in the Health tab: how often a warm cache was re-written anyway, with the pause before the last one – after seconds the model, effort, fast mode or the tool set changed (editing CLAUDE.md keeps the cache), after minutes the cache lives shorter than the TTL assumed.
 - **Compact hint** in the band: when the cache has expired and the context is half full or more, `cold: good time to [ Compact ]`.
 

@@ -42,7 +42,8 @@ export type Measure = {
   /** Prompts the user has sent this session ($.session.turns()). */
   prompts: number | null
   /** Per plan limit, the first reading of this window: the start of the pace for the forecast. */
-  limitStart: Record<string, LimitStart>
+  /** Absent in state an older version of the module wrote (it survives a reload). */
+  limitStart?: Record<string, LimitStart>
 }
 
 /** Session sums; the cold-rewrite count and tokens are kept apart from the (capped) list of cold rewrites. */
@@ -65,7 +66,8 @@ export type ContextMap = {
   categories: ContextItem[]
   memoryFiles: ContextItem[]
   /** Loaded MCP tools summed per server; `tools` counts them. */
-  mcpServers: (ContextItem & { tools: number; toolNames: string[] })[]
+  /** `toolNames` is absent in a map an older version wrote; it is rewritten at the next reading. */
+  mcpServers: (ContextItem & { tools: number; toolNames?: string[] })[]
   /** MCP tools behind tool search, not in the context until loaded. */
   deferredMcpTools: number
   agents: ContextItem[]
@@ -87,9 +89,13 @@ export type Health = {
   /** The server-side tool calls of the last main request that had any. */
   lastServerTools: { at: number; calls: ServerToolCall[] } | null
   /** MCP tool calls of this session by wire name (mcp__server__tool), to tell used servers from unused ones. */
-  toolCalls: Record<string, number>
-  /** Main requests that re-wrote the cache although it was warm by the clock: something early in the prompt changed. */
-  unexpected: { count: number; written: number; lastAt: number | null; lastIdleMs: number | null; lastCause?: string | null }
+  toolCalls?: Record<string, number>
+  /**
+   * Main requests that re-wrote the cache although it was warm by the clock: the model, effort or tool
+   * set changed, or the real TTL is shorter than assumed. Optional fields here and above: state written
+   * by an older version of the module survives a reload without them.
+   */
+  unexpected?: { count: number; written: number; lastAt: number | null; lastIdleMs: number | null; lastCause?: string | null }
   /** The expiry notification (option expiryNotice): how many went out and why the last one did not. */
   notice?: { sent: number; lastReason: string | null }
   /** Claude Code's own verdict on the cache against Cache Meter's, at model switches and resumes. */
@@ -108,7 +114,8 @@ export type ToolResults = {
 }
 
 /** One subagent's requests, summed: what it read from and wrote to its own cache. */
-export type AgentUse = Usage4 & { steps: number; label: string; model: string }
+/** `model` is the last one seen; `isNamed` false while the type and task could not be looked up yet. */
+export type AgentUse = Usage4 & { steps: number; label: string; model: string; isNamed?: boolean }
 
 /** The TTL controls Claude Code documents (prompt-caching § Choose the TTL yourself), read at start. */
 export type TtlConfig = { force5m: boolean; envTtl: string | null; settingTtl: string | null; enable1h: boolean }

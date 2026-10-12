@@ -18,7 +18,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { AgentUse, ToolResults, CacheInfo, ColdWrite, Health, KeepWarm, Measure, ServerToolCall, Totals, TtlConfig, Usage4 } from '../types'
+import type { AgentUse, CacheInfo, ColdWrite, ContextMap, Health, KeepWarm, Measure, ServerToolCall, Step, ToolResults, Totals, TtlConfig, Usage4 } from '../types'
 import {
   COLD_MIN,
   FIVE_MIN,
@@ -141,6 +141,9 @@ let lastMain: { model: string; effort?: string | number } | null = null
 // Option expiryNotice, and the cache window it already notified for (cache.lastAt), so it fires once.
 let expiryNotice = false
 let notifiedFor: number | null = null
+// Prompts already in the transcript when this load or /clear, /resume, /branch began: MCP calls are
+// counted from then on ($.state resets there, $.session.turns() does not), so "unused" counts from there too.
+let promptBase = 0
 let openTurns: Record<string, { usd: number | null; requests: number }> = {}
 // Where the surface last seated the pane: beside a fullscreen transcript (dock) or above the prompt (inline).
 let seat: 'dock' | 'inline' | null = null
@@ -325,6 +328,14 @@ async function tick($: EngineInterface) {
 
 // Why a warm cache was re-written: a fresh, free context estimate (no request, types:
 // SessionUsageArgs) shows whether the loaded MCP tools changed since the last turn.
+// The loaded MCP tools of a context map, or null when it cannot tell (none yet, or written by an older
+// version without tool names).
+function toolNamesOf(map: ContextMap | null): string[] | null {
+  if (map === null || map.mcpServers.some(s => s.toolNames === undefined)) return null
+
+  return map.mcpServers.flatMap(s => s.toolNames ?? [])
+}
+
 async function explainBreak(
   $: EngineInterface,
   before: CacheInfo | null,
@@ -334,13 +345,16 @@ async function explainBreak(
   effort: string | number | undefined,
   change: string | null,
 ): Promise<string> {
-  const was = (await read($, contextMapA))?.mcpServers.flatMap(s => s.toolNames ?? []) ?? null
+  const was = toolNamesOf(await read($, contextMapA))
   let tools: { added: number; removed: number } | null = null
   try {
     const usage = await $.session.usage({ breakdown: 'summary' })
     await mapContext($, usage.context.breakdown, 'summary')
-    const is = (await read($, contextMapA))?.mcpServers.flatMap(s => s.toolNames ?? []) ?? null
-    tools = was === null || is === null ? null : toolDiff(was, is)
+    const map = await read($, contextMapA)
+    const is = toolNamesOf(map)
+    // With tool search active, loading a deferred tool keeps the prefix (prompt-caching › Connecting or
+    // removing an MCP server): a change in loaded tools is then no cause.
+    tools = was === null || is === null || (map?.deferredMcpTools ?? 0) > 0 ? null : toolDiff(was, is)
   } catch {
     tools = null
   }
@@ -361,22 +375,26 @@ async function explainBreak(
 // A subagent's request: summed under its id; its type and task looked up once ($.agent.list).
 async function countAgent($: EngineInterface, id: string, u: Usage4, model: string) {
   const known = (await read($, agentsA))[id]
-  let label = known?.label ?? null
+  // Looked up until it succeeds: a failed lookup leaves the id as the label and is tried again.
+  let label = known?.isNamed ? known.label : null
+  let isNamed = known?.isNamed ?? false
   if (label === null) {
     try {
-      label = agentLabel((await $.agent.list()).find(a => a.id === id), id)
+      const entry = (await $.agent.list()).find(a => a.id === id)
+      label = agentLabel(entry, id)
+      isNamed = entry !== undefined
     } catch {
       label = agentLabel(undefined, id)
     }
   }
   await update($, agentsA, all => {
-    const was = all[id] ?? { ...ZERO, steps: 0, label: label ?? id, model }
+    const was = all[id] ?? { ...ZERO, steps: 0, label: label ?? id, model, isNamed }
 
-    return { ...all, [id]: { ...add(was, u), steps: was.steps + 1, label: was.label, model } }
+    return { ...all, [id]: { ...add(was, u), steps: was.steps + 1, label: label ?? was.label, model, isNamed } }
   })
 }
 
-// Option expiryNotice: once per cache window, at the band's "low" mark, a native notification through
+// Option expiryNotice: once per cache window, at the band's "low" mark, a terminal notification through
 // the person's own channel ($.ui.notify; nothing limits how often, so the guards are here).
 async function maybeNotify($: EngineInterface) {
   if (!expiryNotice || !isInteractive || mainRequests > 0 || isPinging) return
@@ -393,13 +411,14 @@ async function maybeNotify($: EngineInterface) {
   try {
     const sent = await $.ui.notify(expiryText(status.remaining, cache.contextTokens), { title: 'Cache Meter' })
     reason = sent.isSent ? null : sent.reason
-  } catch {
-    reason = 'refused'
+  } catch (error) {
+    // Rejected by a Notification hook's deny or a failed write (types: $.ui.notify): its own words.
+    reason = error instanceof Error ? error.message : String(error)
   }
-  await update($, healthA, h => {
-    const n = h.notice ?? { sent: 0, lastReason: null }
+  await update($, healthA, health => {
+    const n = health.notice ?? { sent: 0, lastReason: null }
 
-    return { ...h, notice: reason === null ? { sent: n.sent + 1, lastReason: null } : { ...n, lastReason: reason } }
+    return { ...health, notice: reason === null ? { sent: n.sent + 1, lastReason: null } : { ...n, lastReason: reason } }
   })
 }
 
@@ -453,8 +472,9 @@ async function copyReport($: EngineInterface): Promise<string> {
   let copied: { isCopied: boolean; reason?: string }
   try {
     copied = await $.ui.copy({ text })
-  } catch {
-    copied = { isCopied: false, reason: 'refused' }
+  } catch (error) {
+    // A ui.copy hook's deny or a failed write: its own words, not the result reason 'refused'.
+    copied = { isCopied: false, reason: error instanceof Error ? error.message : String(error) }
   }
   const lines = text.split('\n').length
 
@@ -462,6 +482,14 @@ async function copyReport($: EngineInterface): Promise<string> {
   return copied.isCopied
     ? `Copied the session report (${lines} lines of Markdown) to the clipboard – paste it to check; some terminals drop clipboard writes silently.`
     : `Could not copy the session report (${copied.reason ?? 'unknown'}).`
+}
+
+async function turnsNow($: EngineInterface): Promise<number> {
+  try {
+    return await $.session.turns()
+  } catch {
+    return 0
+  }
 }
 
 async function resetCache($: EngineInterface) {
@@ -537,12 +565,14 @@ export const register: Register = (on, options) => {
   expiryNotice = options.expiryNotice === 'on'
   lastMain = null
   notifiedFor = null
+  promptBase = 0
   openTurns = {}
 
   on('session.start', async ($, e, next) => {
     const result = await next(e)
     await loadTtlConfig($)
     await measureNow($)
+    promptBase = await turnsNow($)
     // Hooks also run under -p and the SDK, where nothing draws (overview § Where mods run).
     isInteractive = e.isInteractive
     if (e.isInteractive) {
@@ -575,6 +605,9 @@ export const register: Register = (on, options) => {
   on('classic.SessionStart', { source: ['clear', 'resume', 'fork'] }, async ($, e, next) => {
     await loadTtlConfig($)
     await measureNow($)
+    promptBase = await turnsNow($)
+    // A new transcript: no last main request to compare the next one with.
+    lastMain = null
     if ((e.source === 'resume' || e.source === 'fork') && e.seconds_since_last_response !== undefined) {
       if (e.prompt_cache_likely_expired !== undefined) await recordCheck($, !e.prompt_cache_likely_expired, 'resume')
       const now = await $.clock.now()
@@ -650,19 +683,16 @@ export const register: Register = (on, options) => {
         const kind = isCold ? ('cold' as const) : before === null ? ('first' as const) : undefined
         await update($, stepsA, list => [...list, { ...u, at: startedAt, model: usage.model, ...(kind ? { kind } : {}) }].slice(-STEPS_KEPT))
         await update($, totalsA, t => ({ ...t, main: add(t.main, u), mainSteps: t.mainSteps + 1 }))
-        // Measured, not explained: how often a warm cache was re-written anyway. Why is left open,
-        // because the prompt sections are not compared (a prompt.compose hook would run on every render).
+        // A warm cache re-written anyway: counted with the pause before it and its most likely cause, in
+        // one write – the cause first, so the pane never pairs a new miss with the previous cause.
         if (isUnexpectedWrite(wasCold, before !== null && before.lastAt > 0, u)) {
-          await update($, healthA, h => {
-            const prev = h.unexpected ?? { count: 0, written: 0, lastAt: null, lastIdleMs: null }
-            // The pause before it tells the two causes apart: seconds point at the prompt, minutes
-            // at a cache that lives shorter than the TTL assumed (API key without promptCacheTtl).
-            const lastIdleMs = before === null ? null : Math.max(0, startedAt - before.lastAt)
-
-            return { ...h, unexpected: { ...prev, count: prev.count + 1, written: prev.written + u.write, lastAt: startedAt, lastIdleMs } }
-          })
+          const lastIdleMs = before === null ? null : Math.max(0, startedAt - before.lastAt)
           const lastCause = await explainBreak($, before, startedAt, prevMain, e.model, e.effort, change)
-          await update($, healthA, h => ({ ...h, unexpected: { ...h.unexpected, lastCause } }))
+          await update($, healthA, health => {
+            const prev = health.unexpected ?? { count: 0, written: 0, lastAt: null, lastIdleMs: null }
+
+            return { ...health, unexpected: { count: prev.count + 1, written: prev.written + u.write, lastAt: startedAt, lastIdleMs, lastCause } }
+          })
         }
         await update($, cacheA, () => ({
           lastAt: startedAt,
@@ -728,11 +758,9 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
-  // A main turn has ended, also when aborted (events § Follow a turn; TurnCompleteInput.isAborted):
-  // no main request runs any more. Resets the counter even if an aborted stream never reached its
-  // finally above, so /keepwarm cannot stall silently.
-  // The session cost when a turn starts, for the line under its answer. SessionCost.usd sums every
-  // priced response, subagents' included: the line shows what the whole answer cost (types: SessionCost).
+  // The session cost when a turn starts, for the line under its answer. SessionCost.usd sums "every
+  // priced API response this session" (types: SessionCost), so the line shows the cost added during the
+  // turn: subagents it started count, as would any other priced call in that time (inferred, not stated).
   on('turn.start', async ($, e, next) => {
     let usd: number | null = null
     try {
@@ -785,7 +813,7 @@ export const register: Register = (on, options) => {
   on('tool.call', async ($, e, next) => {
     const result = await next(e)
     if ('deny' in result && result.deny) return result
-    if (e.tool.startsWith('mcp__')) await update($, healthA, h => ({ ...h, toolCalls: bump(h.toolCalls ?? {}, e.tool) }))
+    if (e.tool.startsWith('mcp__')) await update($, healthA, health => ({ ...health, toolCalls: bump(health.toolCalls ?? {}, e.tool) }))
     if (e.agentId === undefined && typeof result.text === 'string') {
       const tokens = estimateTokens(result.text)
       const label = toolLabel(e.tool, e as unknown as Record<string, unknown>)
@@ -1529,7 +1557,7 @@ export const register: Register = (on, options) => {
               MCP servers{map.deferredMcpTools > 0 ? ` · ${map.deferredMcpTools} more tools behind tool search, not loaded` : ''}
             </Text>
             {map.mcpServers.length === 0 && <Text dimColor> none loaded</Text>}
-            {map.mcpServers.slice(0, 5).map(m => itemRow(m.name, m.tokens, topServer, nameW, mcpNote(m.tools, m.toolNames, health.toolCalls ?? {}, measure?.prompts ?? null)))}
+            {map.mcpServers.slice(0, 5).map(m => itemRow(m.name, m.tokens, topServer, nameW, mcpNote(m.tools, m.toolNames, health.toolCalls ?? {}, measure?.prompts == null ? null : measure.prompts - promptBase)))}
             <Text wrap="truncate-end">
               <Text dimColor>Skills </Text>
               {map.skills === null ? (
@@ -1566,6 +1594,7 @@ export const register: Register = (on, options) => {
     const lastCheck = health.checks.last
     const unexpected = health.unexpected ?? { count: 0, written: 0, lastAt: null, lastIdleMs: null }
     const notice = health.notice ?? { sent: 0, lastReason: null }
+    const subagentTtl = (await read($, ttlConfigA)).enable1h ? HOUR : FIVE_MIN
     const agentRows = Object.values(agents)
       .sort((a, b) => b.input + b.read + b.write + b.output - (a.input + a.read + a.write + a.output))
       .slice(0, 5)
@@ -1637,9 +1666,10 @@ export const register: Register = (on, options) => {
           </Text>
           {agentRows.length === 0 && <Text dimColor>none this session</Text>}
           {agentRows.map(a => {
-            // Subagents fall outside the main conversation's TTL bucket: five minutes by default
-            // (prompt-caching › Subagents and the cache), so writes are priced at the 5-minute rate.
-            const saved = cacheSaving(a, readMultiplier(a.model), writeMultiplier(FIVE_MIN))
+            // Subagents fall outside the main conversation's TTL bucket: five minutes by default, one hour
+            // with ENABLE_PROMPT_CACHING_1H (prompt-caching › Subagents and the cache, › Choose the TTL
+            // yourself). subagentPromptCacheTtl and an agent's own cacheTtl are not read: an estimate.
+            const saved = cacheSaving(a, readMultiplier(a.model), writeMultiplier(subagentTtl))
             const hit = hitPct(a)
 
             return (
@@ -1848,8 +1878,9 @@ function costLabel(measure: Measure | null, isLong: boolean): string {
 }
 
 /**
- * An MCP server's note in the context tab: its tools and how often this session called them. "unused
- * so far" only after a few prompts, so a fresh session does not call every server idle.
+ * An MCP server's note in the context tab: its tools and how often they were called since the start,
+ * /clear, /resume or /branch. "unused so far" only after a few prompts in that span, so a fresh or
+ * resumed session does not call every server idle.
  */
 function mcpNote(tools: number, toolNames: readonly string[] | undefined, calls: Readonly<Record<string, number>>, prompts: number | null): string {
   if (toolNames === undefined) return ` · ${tools} tools`
