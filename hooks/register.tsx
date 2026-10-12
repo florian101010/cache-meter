@@ -18,9 +18,10 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { CacheInfo, ColdWrite, Health, KeepWarm, Measure, ServerToolCall, Totals, TtlConfig, Usage4 } from '../types'
+import type { AgentUse, CacheInfo, ContextMap, ColdWrite, Health, KeepWarm, Measure, ServerToolCall, Totals, TtlConfig, Usage4 } from '../types'
 import {
   COLD_MIN,
+  FIVE_MIN,
   HOUR,
   MAX_PINGS,
   PING_HIT_SHARE,
@@ -28,6 +29,12 @@ import {
   PING_WRITE_SHARE,
   ZERO,
   add,
+  agentLabel,
+  breakCause,
+  effortKeepsCache,
+  expiryText,
+  requestChange,
+  toolDiff,
   isUnexpectedWrite,
   limitForecast,
   nextLimitStarts,
@@ -92,6 +99,7 @@ const keepA = atom({ plugin: 'cache-meter', key: 'keepWarm' } as const, {
   lastPingAt: null,
 })
 const coldA = atom({ plugin: 'cache-meter', key: 'coldWrites' } as const, [])
+const agentsA = atom({ plugin: 'cache-meter', key: 'agents' } as const, {} as Record<string, AgentUse>)
 const contextMapA = atom({ plugin: 'cache-meter', key: 'contextMap' } as const, null)
 const healthA = atom({ plugin: 'cache-meter', key: 'health' } as const, {
   stops: {},
@@ -120,6 +128,12 @@ let mainRequests = 0
 // The line under each answer (option turnLine), and per open turn the session cost at its start and
 // its main requests. Keyed by turnId; a reload loses at most the line of the turn that was running.
 let showTurnLine = true
+// The model and effort of the last main request, to see what the next one changes (option-free;
+// a reload starts without one, so it never warns about a change it did not see).
+let lastMain: { model: string; effort?: string | number } | null = null
+// Option expiryNotice, and the cache window it already notified for (cache.lastAt), so it fires once.
+let expiryNotice = false
+let notifiedFor: number | null = null
 // Prompts already in the transcript when this load or /clear, /resume, /branch began: MCP calls are
 // counted from then on ($.state resets there, $.session.turns() does not), so "unused" counts from there too.
 let promptBase = 0
@@ -248,6 +262,7 @@ async function maybeAutoOpen($: EngineInterface) {
 async function tick($: EngineInterface) {
   $.ui.invalidate('ui.render')
   await maybeAutoOpen($)
+  await maybeNotify($)
   const keep = await read($, keepA)
   // No ping while a main request runs: that request touches the cache anyway.
   if (keep.until === null || isPinging || mainRequests > 0) return
@@ -302,6 +317,102 @@ async function tick($: EngineInterface) {
   } finally {
     isPinging = false
   }
+}
+
+// Why a warm cache was re-written: a fresh, free context estimate (no request, types:
+// SessionUsageArgs) shows whether the loaded MCP tools changed since the last turn.
+// The loaded MCP tools of a context map, or null when it cannot tell (none yet, or written by an older
+// version without tool names).
+function toolNamesOf(map: ContextMap | null): string[] | null {
+  if (map === null || map.mcpServers.some(s => s.toolNames === undefined)) return null
+
+  return map.mcpServers.flatMap(s => s.toolNames ?? [])
+}
+
+async function explainBreak(
+  $: EngineInterface,
+  before: CacheInfo | null,
+  startedAt: number,
+  prev: { model: string; effort?: string | number } | null,
+  model: string,
+  effort: string | number | undefined,
+  change: string | null,
+): Promise<string> {
+  const was = toolNamesOf(await read($, contextMapA))
+  let tools: { added: number; removed: number } | null = null
+  try {
+    const usage = await $.session.usage({ breakdown: 'summary' })
+    await mapContext($, usage.context.breakdown, 'summary')
+    const map = await read($, contextMapA)
+    const is = toolNamesOf(map)
+    // With tool search active, loading a deferred tool keeps the prefix (prompt-caching › Connecting or
+    // removing an MCP server): a change in loaded tools is then no cause.
+    tools = was === null || is === null || (map?.deferredMcpTools ?? 0) > 0 ? null : toolDiff(was, is)
+  } catch {
+    tools = null
+  }
+  const effortOnly =
+    prev !== null && prev.effort !== undefined && effort !== undefined && prev.effort !== effort && effortKeepsCache(model)
+      ? `effort ${prev.effort} → ${effort}`
+      : null
+
+  return breakCause({
+    change,
+    effortOnly,
+    tools,
+    idleMs: before === null ? null : Math.max(0, startedAt - before.lastAt),
+    ttlMs: (await ttlNow($)).ms,
+  })
+}
+
+// A subagent's request: summed under its id; its type and task looked up once ($.agent.list).
+async function countAgent($: EngineInterface, id: string, u: Usage4, model: string) {
+  const known = (await read($, agentsA))[id]
+  // Looked up until it succeeds: a failed lookup leaves the id as the label and is tried again.
+  let label = known?.isNamed ? known.label : null
+  let isNamed = known?.isNamed ?? false
+  if (label === null) {
+    try {
+      const entry = (await $.agent.list()).find(a => a.id === id)
+      label = agentLabel(entry, id)
+      isNamed = entry !== undefined
+    } catch {
+      label = agentLabel(undefined, id)
+    }
+  }
+  await update($, agentsA, all => {
+    const was = all[id] ?? { ...ZERO, steps: 0, label: label ?? id, model, isNamed }
+
+    return { ...all, [id]: { ...add(was, u), steps: was.steps + 1, label: label ?? was.label, model, isNamed } }
+  })
+}
+
+// Option expiryNotice: once per cache window, at the band's "low" mark, a terminal notification through
+// the person's own channel ($.ui.notify; nothing limits how often, so the guards are here).
+async function maybeNotify($: EngineInterface) {
+  if (!expiryNotice || !isInteractive || mainRequests > 0 || isPinging) return
+  const now = await $.clock.now()
+  const keep = await read($, keepA)
+  if (keep.until !== null && keep.until > now) return
+  const cache = await read($, cacheA)
+  const ttl = await ttlNow($)
+  const status = cacheStatus(cache, now, ttl.ms)
+  if (cache === null || status.kind !== 'warm' || ttl.ms < HOUR || cache.contextTokens < COLD_MIN) return
+  if (status.remaining > ttl.ms * PING_SHARE || notifiedFor === cache.lastAt) return
+  notifiedFor = cache.lastAt
+  let reason: string | null = null
+  try {
+    const sent = await $.ui.notify(expiryText(status.remaining, cache.contextTokens), { title: 'Cache Meter' })
+    reason = sent.isSent ? null : sent.reason
+  } catch (error) {
+    // Rejected by a Notification hook's deny or a failed write (types: $.ui.notify): its own words.
+    reason = error instanceof Error ? error.message : String(error)
+  }
+  await update($, healthA, health => {
+    const n = health.notice ?? { sent: 0, lastReason: null }
+
+    return { ...health, notice: reason === null ? { sent: n.sent + 1, lastReason: null } : { ...n, lastReason: reason } }
+  })
 }
 
 async function turnsNow($: EngineInterface): Promise<number> {
@@ -382,6 +493,9 @@ export const register: Register = (on, options) => {
   isPinging = false
   mainRequests = 0
   showTurnLine = options.turnLine !== 'off'
+  expiryNotice = options.expiryNotice === 'on'
+  lastMain = null
+  notifiedFor = null
   promptBase = 0
   openTurns = {}
 
@@ -423,6 +537,8 @@ export const register: Register = (on, options) => {
     await loadTtlConfig($)
     await measureNow($)
     promptBase = await turnsNow($)
+    // A new transcript: no last main request to compare the next one with.
+    lastMain = null
     if ((e.source === 'resume' || e.source === 'fork') && e.seconds_since_last_response !== undefined) {
       if (e.prompt_cache_likely_expired !== undefined) await recordCheck($, !e.prompt_cache_likely_expired, 'resume')
       const now = await $.clock.now()
@@ -456,11 +572,25 @@ export const register: Register = (on, options) => {
     let startedAt = 0
     let before: CacheInfo | null = null
     let wasCold = false
+    let prevMain: { model: string; effort?: string | number } | null = null
+    let change: string | null = null
     try {
       startedAt = await $.clock.now()
       // Was the main cache already expired when this request started? (read before the request)
       before = isMain ? await read($, cacheA) : null
       wasCold = before !== null && cacheStatus(before, startedAt, (await ttlNow($)).ms).kind === 'expired'
+      if (isMain) {
+        // At the moment the request goes out: a model or effort that splits a warm cache. /effort and
+        // /fast fire no config.set and have no /config row (measured with 2.1.296), so this is the
+        // earliest point; /model is caught before, at PreModelSwitch, and leaves the cache cold here.
+        const now = { model: e.model, ...(e.effort !== undefined ? { effort: e.effort } : {}) }
+        prevMain = lastMain
+        change = requestChange(prevMain, now)
+        lastMain = now
+        if (change !== null && isInteractive && !wasCold && before !== null && before.lastAt > 0 && before.contextTokens >= COLD_MIN) {
+          $.ui.toast(`This request re-writes ${short(before.contextTokens)} tokens to the cache: ${change}`, { timeoutMs: 10_000 })
+        }
+      }
       result = yield* next(e)
     } finally {
       if (isMain) mainRequests = Math.max(0, mainRequests - 1)
@@ -475,6 +605,7 @@ export const register: Register = (on, options) => {
       }
       if (e.agentId !== undefined) {
         await update($, totalsA, t => ({ ...t, sub: add(t.sub, u), subSteps: t.subSteps + 1 }))
+        await countAgent($, e.agentId, u, usage.model)
       } else {
         // Cold by the clock AND by the counts (more written than read), so a wrong TTL assumption
         // cannot turn a warm request into a "cold" one. A request with no cache before it (session
@@ -483,16 +614,15 @@ export const register: Register = (on, options) => {
         const kind = isCold ? ('cold' as const) : before === null ? ('first' as const) : undefined
         await update($, stepsA, list => [...list, { ...u, at: startedAt, model: usage.model, ...(kind ? { kind } : {}) }].slice(-STEPS_KEPT))
         await update($, totalsA, t => ({ ...t, main: add(t.main, u), mainSteps: t.mainSteps + 1 }))
-        // Measured, not explained: how often a warm cache was re-written anyway. Why is left open,
-        // because the prompt sections are not compared (a prompt.compose hook would run on every render).
+        // A warm cache re-written anyway: counted with the pause before it and its most likely cause, in
+        // one write – the cause first, so the pane never pairs a new miss with the previous cause.
         if (isUnexpectedWrite(wasCold, before !== null && before.lastAt > 0, u)) {
+          const lastIdleMs = before === null ? null : Math.max(0, startedAt - before.lastAt)
+          const lastCause = await explainBreak($, before, startedAt, prevMain, e.model, e.effort, change)
           await update($, healthA, health => {
             const prev = health.unexpected ?? { count: 0, written: 0, lastAt: null, lastIdleMs: null }
-            // The pause before it tells the two causes apart: seconds point at the prompt, minutes
-            // at a cache that lives shorter than the TTL assumed (API key without promptCacheTtl).
-            const lastIdleMs = before === null ? null : Math.max(0, startedAt - before.lastAt)
 
-            return { ...health, unexpected: { count: prev.count + 1, written: prev.written + u.write, lastAt: startedAt, lastIdleMs } }
+            return { ...health, unexpected: { count: prev.count + 1, written: prev.written + u.write, lastAt: startedAt, lastIdleMs, lastCause } }
           })
         }
         await update($, cacheA, () => ({
@@ -891,6 +1021,7 @@ export const register: Register = (on, options) => {
     const colds = await read($, coldA)
     const map = await read($, contextMapA)
     const health: Health = await read($, healthA)
+    const agents = await read($, agentsA)
     const ttl = await ttlNow($)
     const now = await $.clock.now()
     const status = cacheStatus(cache, now, ttl.ms)
@@ -1342,6 +1473,11 @@ export const register: Register = (on, options) => {
     const serverNames = Object.entries(health.serverTools).sort((a, b) => b[1].ms - a[1].ms)
     const lastCheck = health.checks.last
     const unexpected = health.unexpected ?? { count: 0, written: 0, lastAt: null, lastIdleMs: null }
+    const notice = health.notice ?? { sent: 0, lastReason: null }
+    const subagentTtl = (await read($, ttlConfigA)).enable1h ? HOUR : FIVE_MIN
+    const agentRows = Object.values(agents)
+      .sort((a, b) => b.input + b.read + b.write + b.output - (a.input + a.read + a.write + a.output))
+      .slice(0, 5)
     const healthView = (
       <Box flexDirection="column">
         <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="column">
@@ -1406,6 +1542,32 @@ export const register: Register = (on, options) => {
         </Box>
         <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="column">
           <Text color="claude" bold>
+            Subagents
+          </Text>
+          {agentRows.length === 0 && <Text dimColor>none this session</Text>}
+          {agentRows.map(a => {
+            // Subagents fall outside the main conversation's TTL bucket: five minutes by default, one hour
+            // with ENABLE_PROMPT_CACHING_1H (prompt-caching › Subagents and the cache, › Choose the TTL
+            // yourself). subagentPromptCacheTtl and an agent's own cacheTtl are not read: an estimate.
+            const saved = cacheSaving(a, readMultiplier(a.model), writeMultiplier(subagentTtl))
+            const hit = hitPct(a)
+
+            return (
+              <Text wrap="truncate-end">
+                <Text bold>{short(a.input + a.read + a.write + a.output)}</Text>
+                <Text dimColor> tok · {a.steps} req · </Text>
+                <Text color={hitColor(hit)}>{hit === null ? '–' : `${hit}%`}</Text>
+                <Text dimColor> hit{saved === null ? '' : saved >= 0 ? ` · cache saved ${saved}%` : ` · cache cost +${-saved}%`} · </Text>
+                <Text>{a.label}</Text>
+              </Text>
+            )
+          })}
+          {Object.keys(agents).length > agentRows.length && (
+            <Text dimColor>+{Object.keys(agents).length - agentRows.length} more</Text>
+          )}
+        </Box>
+        <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="column">
+          <Text color="claude" bold>
             Cache check
           </Text>
           {lastCheck === null ? (
@@ -1441,9 +1603,20 @@ export const register: Register = (on, options) => {
           </Text>
           {unexpected.count > 0 && (
             <Text dimColor wrap="truncate-end">
-              {''.padEnd(10)}after seconds: model, effort, fast mode or the tool set changed (not CLAUDE.md edits); after minutes: the cache lives shorter than assumed (option cacheTtl)
+              {''.padEnd(10)}
+              {unexpected.lastCause ?? 'after seconds: model, effort, fast mode or the tool set changed (not CLAUDE.md edits); after minutes: the cache lives shorter than assumed (option cacheTtl)'}
             </Text>
           )}
+          <Text wrap="truncate-end">
+            {label('Notice')}
+            {!expiryNotice ? (
+              <Text dimColor>off – option expiryNotice sends a notification before the cache expires</Text>
+            ) : notice.lastReason !== null ? (
+              <Text color="warning">not sent: {notice.lastReason} · {notice.sent} sent</Text>
+            ) : (
+              <Text color="success">on · {notice.sent} sent</Text>
+            )}
+          </Text>
         </Box>
       </Box>
     )

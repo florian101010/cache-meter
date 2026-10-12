@@ -95,10 +95,16 @@ export type Health = {
    * set changed, or the real TTL is shorter than assumed. Optional fields here and above: state written
    * by an older version of the module survives a reload without them.
    */
-  unexpected?: { count: number; written: number; lastAt: number | null; lastIdleMs: number | null }
+  unexpected?: { count: number; written: number; lastAt: number | null; lastIdleMs: number | null; lastCause?: string | null }
+  /** The expiry notification (option expiryNotice): how many went out and why the last one did not. */
+  notice?: { sent: number; lastReason: string | null }
   /** Claude Code's own verdict on the cache against Cache Meter's, at model switches and resumes. */
   checks: { agreed: number; differed: number; last: { at: number; engineWarm: boolean; ourWarm: boolean; source: 'model' | 'resume' } | null }
 }
+
+/** One subagent's requests, summed: what it read from and wrote to its own cache. */
+/** `model` is the last one seen; `isNamed` false while the type and task could not be looked up yet. */
+export type AgentUse = Usage4 & { steps: number; label: string; model: string; isNamed?: boolean }
 
 /** The TTL controls Claude Code documents (prompt-caching § Choose the TTL yourself), read at start. */
 export type TtlConfig = { force5m: boolean; envTtl: string | null; settingTtl: string | null; enable1h: boolean }
@@ -116,6 +122,7 @@ declare module 'claude-code' {
       coldWrites: ColdWrite[]
       contextMap: ContextMap | null
       health: Health
+      agents: Record<string, AgentUse>
     }
   }
 }

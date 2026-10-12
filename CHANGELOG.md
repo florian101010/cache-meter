@@ -2,6 +2,16 @@
 
 All notable changes to Cache Meter, a Claude Code mod. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] – 2026-10-12
+
+Why and when: what broke the cache, and a word before it happens.
+
+### Added
+- **Note before a request that splits a warm cache:** a model for one turn (a skill or command with its own `model`, `opusplan`) or an effort change on a model where effort splits the cache – shown the moment the request goes out, with the tokens it re-writes. No note for effort changes on Opus 5.5, Sonnet 5.5, Haiku 5.5 and Fable 5.1, which keep the cache with an API key or a subscription; on Bedrock, Agent Platform or a gateway they do not, and the warm-miss cause names it afterwards. `/effort` and `/fast` fire no event a mod can catch earlier.
+- **Cause of a warm miss** in the Health tab: model or effort change, a changed MCP tool set, a pause longer than the real TTL, or – when none of these – the causes a mod cannot observe (fast mode, a code-intelligence plugin's LSP tool, tool deny rule, removed images). A loaded tool counts only without tool search, which keeps the prefix.
+- **Expiry notification** (option `expiryNotice`, off by default): once per cache window, about 10 minutes before a one-hour cache expires and while keepwarm is off, through your own terminal's notification channel. The Health tab shows how many were sent (a terminal does not confirm delivery), or why not.
+- **Subagents** in the Health tab: tokens, requests, hit rate and cache saving per subagent, named by type and task.
+
 ## [0.6.0] – 2026-10-12
 
 Saves money: each feature points at a cost before or while it happens.
@@ -143,6 +153,7 @@ Changes for Anthropic's plugin directory, whose validation blocked 0.5.1.
 - Pane `/tokens`: per-request token history, totals, plan limits, cost.
 - `/keepwarm`.
 
+[0.7.0]: https://github.com/florian101010/cache-meter/compare/b0b9980...899ec58
 [0.6.0]: https://github.com/florian101010/cache-meter/compare/92aef39...b0b9980
 [0.5.4]: https://github.com/florian101010/cache-meter/compare/9175da5...92aef39
 [0.5.3]: https://github.com/florian101010/cache-meter/compare/bc581d0...9175da5
