@@ -188,10 +188,10 @@ Changes for Anthropic's plugin directory, whose validation blocked 0.5.1.
 - Pane `/tokens`: per-request token history, totals, plan limits, cost.
 - `/keepwarm`.
 
-[0.9.0]: https://github.com/florian101010/cache-meter/compare/feat/v0.8-context...HEAD
-[0.8.0]: https://github.com/florian101010/cache-meter/compare/feat/v0.7-why-and-when...feat/v0.8-context
-[0.7.0]: https://github.com/florian101010/cache-meter/compare/feat/v0.6-saves-money...feat/v0.7-why-and-when
-[0.6.0]: https://github.com/florian101010/cache-meter/compare/92aef39...feat/v0.6-saves-money
+[0.9.0]: https://github.com/florian101010/cache-meter/compare/e830ded...edf5849
+[0.8.0]: https://github.com/florian101010/cache-meter/compare/899ec58...e830ded
+[0.7.0]: https://github.com/florian101010/cache-meter/compare/b0b9980...899ec58
+[0.6.0]: https://github.com/florian101010/cache-meter/compare/92aef39...b0b9980
 [0.5.4]: https://github.com/florian101010/cache-meter/compare/9175da5...92aef39
 [0.5.3]: https://github.com/florian101010/cache-meter/compare/bc581d0...9175da5
 [0.5.2]: https://github.com/florian101010/cache-meter/compare/cache-meter--v0.5.1...bc581d0
