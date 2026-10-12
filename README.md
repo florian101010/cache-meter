@@ -42,22 +42,22 @@ Type **`/keepwarm`** before lunch or a meeting. Shortly before expiry one ping �
 </tr>
 </table>
 
-## At a glance
+## Why you'll want it
 
-| You know this … | Cache Meter … | How |
-|---|---|---|
-| Back from lunch, the first answer is slow and costs a full re-write | keeps the cache warm through the break – one ping ≈ 1/20 of a re-write | [`/keepwarm`](#keep-the-cache-warm-with-keepwarm) |
-| You forget to type it before every break | covers every break of the session by itself, only while you are away | [`/keepwarm auto`](#every-break-by-itself-keepwarm-auto) (opt-in) |
-| No idea when the cache runs out | shows a live countdown, the hit rate and how full the context is | [band above the prompt](#what-you-see), always on |
-| What did that answer just cost? | puts the cost under every answer and the session total in the band; warns at a budget | [automatic](#every-answer-priced), option `sessionBudget` |
-| A model or effort switch silently re-wrote everything | warns before a switch splits a warm cache – at a model switch with Claude Code's own re-write estimate | [automatic](#warned-before-the-cache-breaks) |
-| The cache was cold – but why? | names the likely cause of every warm miss | [`/tokens health`](#see-everything-with-tokens), chart tooltip |
-| The context fills up fast | shows which tool results, files, MCP servers (and unused ones) and subagents fill it | [`/tokens context`](#see-everything-with-tokens) |
-| One file read flooded the context | says so the moment a single result is ≥ 10k tokens (and ≥ 2 % of the window) | [automatic](#a-word-when-it-matters) |
-| Will I hit my plan limit before it resets? | forecasts the limit and warns once when it is half used and on course to fill | [automatic](#a-word-when-it-matters), option `limitNotice` |
-| Auto-compact always comes as a surprise | shows where it triggers and about how many prompts are left | band, [`/tokens`](#see-everything-with-tokens) |
-| You want the numbers in a ticket or a note | copies the whole session as Markdown | [`/tokens report`](#copy-the-session-as-markdown) |
-| The dashboard should stay beside the chat | docks as a sidebar in Claude Code's fullscreen renderer | [`/tui fullscreen`](#quickstart) |
+| | The problem | What Cache Meter does | How |
+|:-:|---|---|---|
+| ☕ | **“Back from lunch, the first answer takes ages – and re-writes everything.”** | Keeps the cache warm through the break – one ping costs **≈ 1/20** of a re-write | [`/keepwarm`](#keep-the-cache-warm-with-keepwarm) |
+| 🔁 | **“I always forget to type it before a break.”** | Covers **every** break of the session by itself – only while you are away | [`/keepwarm auto`](#every-break-by-itself-keepwarm-auto) · opt-in |
+| ⏱️ | **“When does my cache run out?”** | A live **countdown**, the hit rate and the context fill, always in view | [band above the prompt](#what-you-see) |
+| 💸 | **“What did that answer just cost?”** | The cost **under every answer**, the session total, a warning at your budget | [automatic](#every-answer-priced) · `sessionBudget` |
+| ⚠️ | **“A model switch silently re-wrote everything.”** | A heads-up **before** a switch splits a warm cache – with Claude Code's own re-write estimate at a model switch | [automatic](#warned-before-the-cache-breaks) |
+| 🔍 | **“The cache was cold – but why?”** | Names the likely **cause** of every warm miss | [`/tokens health`](#see-everything-with-tokens) |
+| 🧱 | **“My context fills up so fast.”** | Shows **what** fills it – tool results, files, MCP servers (also unused ones), subagents | [`/tokens context`](#see-everything-with-tokens) |
+| 📄 | **“One file read flooded the context.”** | Says so the moment a single result is **≥ 10k tokens** (and ≥ 2 % of the window) | [automatic](#a-word-when-it-matters) |
+| 📈 | **“Will I hit my plan limit before it resets?”** | Forecasts it and warns **once** when a limit is half used and on course to fill | [automatic](#a-word-when-it-matters) · `limitNotice` |
+| 🗜️ | **“Auto-compact always comes as a surprise.”** | Shows **where** it triggers and about how many prompts are left | band · [`/tokens`](#see-everything-with-tokens) |
+| 📋 | **“I need these numbers in a ticket.”** | Copies the whole session **as Markdown** | [`/tokens report`](#copy-the-session-as-markdown) |
+| 🪟 | **“I want it beside the chat, not above the prompt.”** | Docks as a **sidebar** in Claude Code's fullscreen renderer | [`/tui fullscreen`](#quickstart) |
 
 **Local and read-only:** never reads your prompts' text, writes nothing to disk, sends nothing you have not switched on – details in [Privacy, cost and permissions](#privacy-cost-and-permissions).
 
@@ -265,7 +265,7 @@ It stays with you: the report goes only to your own clipboard – the one of the
 
 ## Contents
 
-- [At a glance](#at-a-glance)
+- [Why you'll want it](#why-youll-want-it)
 - [Quickstart](#quickstart)
 - [Every answer, priced](#every-answer-priced)
 - [Warned before the cache breaks](#warned-before-the-cache-breaks)
