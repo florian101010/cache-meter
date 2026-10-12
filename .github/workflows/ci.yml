@@ -39,6 +39,9 @@ jobs:
       # a nested one named on (it shadows register's own `on`, which stays): CHANGELOG 0.5.2. Fail here first.
       - name: No parameters named h or on
         run: "! grep -nE '(^|[^A-Za-z0-9_$])(h|on) =>|\\(h[,)]|, ?(h|on)\\)' hooks/*.ts hooks/*.tsx"
+      # The file rules of Anthropic's plugin directory a script can check (size, binaries, lockfiles, launchers).
+      - name: Directory file checks
+        run: bash .github/scripts/directory-checks.sh
       # Manifest, marketplace, hooks module and state contract; warnings fail the build.
       - run: claude plugin validate --strict .
       # The mod's tests run against the engine with no session, sign-in or network.

@@ -12,7 +12,15 @@ The mods API is early access, changes between releases and is newer than any mod
 
 **Required reading before any change**, every time: [reference](https://code.claude.com/docs/en/plugins/mods/reference), [interface](https://code.claude.com/docs/en/plugins/mods/interface) (the mod draws) and [test](https://code.claude.com/docs/en/plugins/mods/test) (every change needs tests); plus [events](https://code.claude.com/docs/en/plugins/mods/events) or [api](https://code.claude.com/docs/en/plugins/mods/api) for the event or call you touch. Cite page and section in a comment for every non-obvious API fact, or mark it as *undocumented*. This applies to AI agents working on the repository as well.
 
-## Keeping up with Claude Code and the mods API
+## Passing the plugin directory's checks
+
+Every push to `main` is a new version for Anthropic's plugin directory: it is scanned again – the directory's validation and a security scan (plugin directory › [Submit your plugin](https://claude.com/docs/plugins/submit#update-a-published-plugin)). A version that is held waits for a reviewer; one that fails the security scan cannot go live, and **while the plugin has never been published, a failed security scan rejects the whole submission**. So before anything reaches `main`:
+
+1. **CI** runs `claude plugin validate --strict`, the tests, the check against parameters named `h`, and `.github/scripts/directory-checks.sh` – the mechanical rules of the [pre-submission checklist](https://claude.com/docs/plugins/pre-submission-checklist) (files under 256 KiB, no other binaries than images and fonts, no lockfile or package-source config, no package launcher).
+2. **Disclose everything in the README** the mod reads, runs, sends or fetches, and keep PRIVACY.md and SECURITY.md exact – the security scan looks for behaviour a plugin does not disclose (checklist › Prepare for the security scan). A privacy and security review of the change, against those three files, is part of every pull request that touches what the mod reads, keeps, shows or sends.
+3. **Validate in the developer portal** before merging when the change is large: the portal's **Validate** runs more checks than the command and reports for the one commit it read (checklist › Validate in the developer portal).
+4. **Merge only when the directory may take a new version** – not while the first version is with a reviewer – with `version` raised and auto-publish as the owner chose.
+
 
 The mods API is early access and changes between Claude Code releases. Three things keep this mod current:
 
