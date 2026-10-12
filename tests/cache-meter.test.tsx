@@ -1831,3 +1831,11 @@ test('a fresh session: no restart note, and the history note leaves once request
   await ui.unmount()
   expect(await healthText($, /every warm request read the cache/)).toBeDefined()
 })
+
+test('Health: a resume without Claude Code\'s verdict is named, not "no resume yet"', async ($, on) => {
+  world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await $.classic.SessionStart({ source: 'resume', seconds_since_last_response: 60, context_tokens: 100_000 } as never)
+  expect(await healthText($, /^Resumed \d\d:\d\d – Claude Code gave no verdict on the cache then/)).toBeDefined()
+  expect(await healthText($, /No model switch or resume yet/)).toBeUndefined()
+})

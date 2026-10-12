@@ -159,6 +159,9 @@ let promptBase = 0
 // history lives in memory only (nothing on disk), so a relaunch – /tui switches renderer that way
 // (fullscreen › Enable fullscreen rendering), or claude --resume – starts it over. Null otherwise.
 let historySince: number | null = null
+// The last /resume, /branch or relaunch in this process: Claude Code does not always give its verdict on
+// the cache then (prompt_cache_likely_expired is optional), and Health should not claim there was none.
+let lastResumeAt: number | null = null
 let openTurns: Record<string, { usd: number | null; requests: number }> = {}
 // Where the surface last seated the pane: beside a fullscreen transcript (dock) or above the prompt (inline).
 let seat: 'dock' | 'inline' | null = null
@@ -692,6 +695,7 @@ export const register: Register = (on, options) => {
   budgetWarned = 0
   promptBase = 0
   historySince = null
+  lastResumeAt = null
   openTurns = {}
 
   on('session.start', async ($, e, next) => {
@@ -741,6 +745,7 @@ export const register: Register = (on, options) => {
     // A new transcript: no last main request to compare the next one with.
     lastMain = null
     await settleBudget($)
+    if (e.source === 'resume' || e.source === 'fork') lastResumeAt = await $.clock.now()
     if ((e.source === 'resume' || e.source === 'fork') && e.seconds_since_last_response !== undefined) {
       if (e.prompt_cache_likely_expired !== undefined) await recordCheck($, !e.prompt_cache_likely_expired, 'resume')
       const now = await $.clock.now()
@@ -1906,7 +1911,11 @@ export const register: Register = (on, options) => {
           <Text color="claude" bold>
             Cache check
           </Text>
-          {lastCheck === null ? (
+          {lastCheck === null && lastResumeAt !== null ? (
+            <Text dimColor wrap="truncate-end">
+              Resumed {hhmm(lastResumeAt)} – Claude Code gave no verdict on the cache then; the countdown counts from its last answer.
+            </Text>
+          ) : lastCheck === null ? (
             <Text dimColor wrap="truncate-end">
               No model switch or resume yet – Claude Code reports its own verdict on the cache then.
             </Text>

@@ -144,7 +144,7 @@ It runs only in interactive sessions, never drops a message, and after an expens
 
 ## See everything with `/tokens`
 
-`/tokens` opens the dashboard, `/tokens` again closes it. Three tabs, each answering its own question:
+`/tokens` opens the dashboard, `/tokens` again closes it. Three tabs, each answering its own question, and a report to take along:
 
 | Tab | What it answers | Open with |
 |---|---|---|

@@ -16,9 +16,11 @@ Alive: the band moves when it matters, and a budget keeps a session in check.
 - **Keeping up with Claude Code:** a weekly workflow runs the tests on the newest Claude Code and compares the official pages the mod relies on with stored content hashes (`.github/scripts/upstream-docs.sh`, `docs/upstream-docs.txt`); a change opens an issue. CONTRIBUTING lists every official page and what it settles here.
 
 ### Changed
+- Health: after a resume or relaunch without Claude Code's verdict on the cache, Cache check says `Resumed <time> – Claude Code gave no verdict …` instead of `No model switch or resume yet`.
 - Health: with no request measured, Warm miss reads `no request measured yet` (dim) instead of a green `none`.
 
 ### Docs
+- README: "Three tabs … and a report to take along" – the table's fourth row is `/tokens report`, not a tab.
 - README FAQ: why the chart starts empty after `/tui` or a resume, and what to do when a click on a tab selects text instead (fullscreen, touch or trackpad).
 - README: how to update (`claude plugin update cache-meter@cache-meter`, or auto-update for the marketplace).
 
