@@ -1383,7 +1383,7 @@ export const register: Register = (on, options) => {
   on('command.run', { command: 'tokens' }, async ($, e) => {
     // /tokens <tab> opens on that tab, or switches to it when the pane is open: no focus chord needed.
     const asked = (e.args ?? '').trim().toLowerCase()
-    // /tokens report: the session as Markdown on the clipboard; the pane is left as it is, and the
+    // /tokens report: the session's stats as Markdown on the clipboard (never the conversation); the pane is left as it is, and the
     // report never goes into the transcript (CommandRunResult.text is a transcript line).
     if (asked === 'report') return { text: await copyReport($) }
     const wanted = TABS.find(t => t === asked || (asked.length > 0 && t.startsWith(asked)))
@@ -2239,7 +2239,7 @@ export const register: Register = (on, options) => {
     const healthView = (
       <Box flexDirection="column">
         <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="column">
-          {/* The one place in the pane that names the report: the session as Markdown on your own clipboard. */}
+          {/* The one place in the pane that names the report: the session's stats as Markdown on your own clipboard. */}
           <Box flexDirection="row" justifyContent="space-between">
             <Box flexShrink={0} marginRight={1}>
               <Text color="claude" bold>

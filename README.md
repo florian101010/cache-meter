@@ -56,7 +56,7 @@ Type **`/keepwarm`** before lunch or a meeting. Shortly before expiry one ping �
 | 📄 | **“One file read flooded the context.”** | Says so the moment a single result is **≥ 10k tokens** (and ≥ 2 % of the window) | [automatic](#a-word-when-it-matters) |
 | 📈 | **“Will I hit my plan limit before it resets?”** | Forecasts it and warns **once** when a limit is half used and on course to fill | [automatic](#a-word-when-it-matters) · `limitNotice` |
 | 🗜️ | **“Auto-compact always comes as a surprise.”** | Shows **where** it triggers and about how many prompts are left | band · [`/tokens`](#see-everything-with-tokens) |
-| 📋 | **“I need these numbers in a ticket.”** | Copies the whole session **as Markdown** | [`/tokens report`](#copy-the-session-as-markdown) |
+| 📋 | **“I need these numbers in a ticket.”** | Copies your **session stats** – cost, cache, context, limits – as Markdown. Never your conversation | [`/tokens report`](#copy-your-session-stats-as-markdown) |
 | 🪟 | **“I want it beside the chat, not above the prompt.”** | Docks as a **sidebar** in Claude Code's fullscreen renderer | [`/tui fullscreen`](#quickstart) |
 
 **Local and read-only:** never reads your prompts' text, writes nothing to disk, sends nothing you have not switched on – details in [Privacy, cost and permissions](#privacy-cost-and-permissions).
@@ -86,7 +86,7 @@ Install the Claude Code mod from https://github.com/florian101010/cache-meter �
 > [!TIP]
 > **Want the dashboard as a sidebar beside the chat?** Run **`/tui fullscreen`** – Claude Code's fullscreen renderer docks the pane next to the transcript from 110 columns, and it stays open while you chat (mouse clicks work there too). In the classic renderer the pane opens above the prompt instead, and says so in a tip line. The switch relaunches Claude Code with your conversation intact; Cache Meter's figures start over. `/tui default` switches back.
 
-**4 · Before your next break: `/keepwarm`** – or **`/keepwarm auto`** once, and every break this session is covered by itself. After the break, check that the next answer reads from the cache (hit rate in the band). `/tokens report` copies the whole session as Markdown.
+**4 · Before your next break: `/keepwarm`** – or **`/keepwarm auto`** once, and every break this session is covered by itself. After the break, check that the next answer reads from the cache (hit rate in the band). `/tokens report` copies your session stats as Markdown – never your conversation.
 
 | Command | Does |
 |---|---|
@@ -94,7 +94,7 @@ Install the Claude Code mod from https://github.com/florian101010/cache-meter �
 | `/tui fullscreen` | the dashboard as a sidebar beside the chat (from 110 columns) |
 | `/keepwarm` · `/keepwarm 10m`…`8h` · `/keepwarm off` | keep the cache warm through a break, with hard limits |
 | `/keepwarm auto` (or `/keepwarm-auto`) | keep it warm through every break this session, by itself – it pings on its own once on |
-| `/tokens report` | the session as Markdown on your clipboard |
+| `/tokens report` | your session stats as Markdown on your clipboard – never the conversation |
 
 Safe by design: it never changes your prompts, answers or tool calls, never keeps their text and writes nothing to disk. It sends nothing you have not switched on – the `/keepwarm` pings (with `/keepwarm auto`, on their own during every break) and, if you press **Count exactly**, the token counts `/context` would make; with the options `expiryNotice` or `limitNotice` on, a notification through your own terminal. Free and MIT-licensed.
 
@@ -255,11 +255,11 @@ Small touches go with it, each a fraction of a second: the big countdown flashes
 
 **Where the numbers come from.** Everything is what Claude Code reports to mods – token counts per request, context breakdown, cost, plan limits, stop reasons, errors. Tool-result sizes are estimates (characters ÷ 4 of the text the model reads), shown beside Claude Code's own total for all messages. Showing them sends nothing: only **Count exactly** in the Context tab asks the API to count tokens, once, when you press it (what `/keepwarm` sends is under [Privacy, cost and permissions](#privacy-cost-and-permissions)).
 
-### Copy the session as Markdown
+### Copy your session stats as Markdown
 
-<p align="center"><img src="https://raw.githubusercontent.com/florian101010/cache-meter/assets/brand/feature-report.svg" width="100%" alt="Copy it – /tokens report: a Markdown session report fills line by line and lands on your own clipboard with a check mark."></p>
+<p align="center"><img src="https://raw.githubusercontent.com/florian101010/cache-meter/assets/brand/feature-report.svg" width="100%" alt="Copy it – /tokens report: your session stats as a Markdown report fill line by line and land on your own clipboard with a check mark – never your conversation."></p>
 
-`/tokens report` puts the whole session on your clipboard as Markdown – cost, hit rate, cold re-writes and warm misses with their cause, context fill and the auto-compact forecast, the heaviest files, servers and tool results, subagents and plan limits. Paste it into an issue, a pull request or your notes. Paths are shortened to `~` and Bash commands appear only by program name; review it before you post it publicly.
+`/tokens report` puts your session stats on your clipboard as Markdown – figures and labels, never a word of your prompts or Claude's answers: cost, hit rate, cold re-writes and warm misses with their cause, context fill and the auto-compact forecast, the heaviest files, servers and tool results, subagents and plan limits. Paste it into an issue, a pull request or your notes. Paths are shortened to `~` and Bash commands appear only by program name; review it before you post it publicly.
 
 It stays with you: the report goes only to your own clipboard – the one of the device your terminal runs on. The Health tab's Session card reminds you: *copy as Markdown: /tokens report*.
 
@@ -271,7 +271,7 @@ It stays with you: the report goes only to your own clipboard – the one of the
 - [Warned before the cache breaks](#warned-before-the-cache-breaks)
 - [Keep the cache warm with `/keepwarm`](#keep-the-cache-warm-with-keepwarm)
 - [Every break, by itself: `/keepwarm auto`](#every-break-by-itself-keepwarm-auto)
-- [See everything with `/tokens`](#see-everything-with-tokens) · [Copy the session as Markdown](#copy-the-session-as-markdown)
+- [See everything with `/tokens`](#see-everything-with-tokens) · [Copy your session stats as Markdown](#copy-your-session-stats-as-markdown)
 - [Features](#features)
 - [Requirements](#requirements)
 - [Installation](#installation) · [Update](#update)
@@ -459,9 +459,9 @@ A cache read keeps the entry for the duration of its original write – one hour
 ### Using it
 
 <details>
-<summary><b>How do I get the whole session as text – to keep, compare or paste into an issue?</b></summary>
+<summary><b>How do I get the session's stats as text – to keep, compare or paste into an issue?</b></summary>
 
-`/tokens report` puts a Markdown summary on your clipboard: cost, hit rate, cold re-writes and warm misses with their cause, context fill and the auto-compact forecast, the heaviest files, servers and tool results, subagents and plan limits. Paths are shortened to `~` and Bash commands appear only by program name; still, review it before you post it publicly.
+`/tokens report` puts your session stats on your clipboard as Markdown (never your conversation): cost, hit rate, cold re-writes and warm misses with their cause, context fill and the auto-compact forecast, the heaviest files, servers and tool results, subagents and plan limits. Paths are shortened to `~` and Bash commands appear only by program name; still, review it before you post it publicly.
 </details>
 
 <details>
