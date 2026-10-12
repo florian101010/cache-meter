@@ -1915,15 +1915,17 @@ test('café module: one frame timer, a one-line fallback without room', async ()
   const elements = { Box: tag('Box'), Text: tag('Text') }
   let timers = 0
   let sets = 0
+  let tick: () => void = () => {}
   const surface = (rows: number) => ({
     elements,
     state: undefined,
     setState: () => (sets += 1),
     columns: 40,
     rows,
-    every: (ms: number) => {
+    every: (ms: number, fn: () => void) => {
       expect(ms).toBe(FRAME_MS)
       timers += 1
+      tick = fn
 
       return () => {}
     },
@@ -1935,6 +1937,9 @@ test('café module: one frame timer, a one-line fallback without room', async ()
   expect(small).toContain('cache cold · napping')
   expect(small).not.toContain('╭─────╮')
   expect(timers).toBe(1)
+  expect(sets).toBe(1)
+  // The one-line fallback does not animate: a frame tick asks for no redraw.
+  tick()
   expect(sets).toBe(1)
   const full = JSON.stringify(Cafe({ state: 'warm' }, surface(SCENE_ROWS) as never))
   expect(full).toContain('╭─────╮')
@@ -2016,4 +2021,21 @@ test('pane footer: a narrow sidebar (iPad) still names the key to reach the pane
   const ui = await $.ui.mount({ surface: 'terminal', ...PANE, props: { ...PANE.props, bodyColumns: 50 } })
   expect(await ui.find({ type: 'Text', text: /ctrl\+x tab: keys$/ })).toBeDefined()
   await ui.unmount()
+})
+
+test('pane header: narrow docks keep every tab – the title shrinks to its mark, then the names shorten', async ($, on) => {
+  world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  const header = async (bodyColumns: number) => {
+    const ui = await $.ui.mount({ surface: 'terminal', ...PANE, props: { ...PANE.props, bodyColumns } })
+    const title = (await ui.find({ type: 'Text', text: /^◉/ }))?.text
+    const names = [await ui.find({ key: 'tab-overview' }), await ui.find({ key: 'tab-context' }), await ui.find({ key: 'tab-health' })].map(b => b !== undefined)
+    const over = (await ui.find({ type: 'Text', text: /^(Overview|Over)$/ }))?.text
+    await ui.unmount()
+
+    return { title, names, over }
+  }
+  expect(await header(90)).toEqual({ title: '◉ Cache Meter', names: [true, true, true], over: 'Overview' })
+  expect(await header(44)).toEqual({ title: '◉', names: [true, true, true], over: 'Overview' })
+  expect(await header(30)).toEqual({ title: '◉', names: [true, true, true], over: 'Over' })
 })

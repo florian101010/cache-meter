@@ -81,7 +81,11 @@ const Cafe: ClientModule<CafeProps, Local> = (props, surface: ClientSurface<Loca
   const { Box, Text } = surface.elements
   if (surface.state === undefined) {
     // Started once; the instance (and with it the timer) ends when the Overview leaves the screen.
-    surface.every(FRAME_MS, () => surface.setState({ f: (surface.state?.f ?? 0) + 1 }))
+    // Frames advance only while the full scene shows: the one-line fallback does not move, so it
+    // costs no redraws at all (terminal apps that repaint badly – Termius – showed traces there).
+    surface.every(FRAME_MS, () => {
+      if (surface.rows >= SCENE_ROWS && surface.columns >= SCENE_COLUMNS) surface.setState({ f: (surface.state?.f ?? 0) + 1 })
+    })
     surface.setState({ f: 0 })
   }
   const f = surface.state?.f ?? 0

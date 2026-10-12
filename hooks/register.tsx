@@ -2051,12 +2051,15 @@ export const register: Register = (on, options) => {
     return (
       <Box flexDirection="column" minHeight={showCafe ? e.props.scroll.bodyRows : undefined}>
         <Box flexDirection="row" justifyContent="space-between">
-          <Box flexDirection="row" columnGap={2}>
+          {/* The header needs about 47 columns: below 50 the title shrinks to its mark and the gaps to
+              one, below 36 the tab names shorten – measured in tmux, the title wrapped at 48 and a tab
+              was cut at 30. */}
+          <Box flexDirection="row" columnGap={cols < 50 ? 1 : 2} flexShrink={0}>
             <Text color="claude" bold>
-              ◉ Cache Meter
+              {cols < 50 ? '◉' : '◉ Cache Meter'}
             </Text>
-            {tabButton('overview', 'Overview', '1')}
-            {tabButton('context', 'Context', '2')}
+            {tabButton('overview', cols < 36 ? 'Over' : 'Overview', '1')}
+            {tabButton('context', cols < 36 ? 'Ctx' : 'Context', '2')}
             {tabButton('health', 'Health', '3', issues !== '')}
           </Box>
           {/* The key hint sits in the header too: the footer is the first row a too-tall tab cuts off. */}
