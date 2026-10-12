@@ -2,6 +2,19 @@
 
 All notable changes to Cache Meter, a Claude Code mod. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] – 2026-10-12
+
+Saves money: each feature points at a cost before or while it happens.
+
+### Added
+- **Line under each answer:** what the session cost rose by during the answer (API value on a plan, spend on an API key; subagents it started count), its requests, the share read from the cache and what was written to it. A line another mod already put under the answer is kept. Option `turnLine` (`on`/`off`).
+- **Model switch note:** while the cache is warm, a note with Claude Code's own re-write estimate and the minutes the cache has left. It never blocks or approves a switch (`ask` would refuse switches from `/config` and the SDK).
+- **Limit forecast:** in the overview, when a plan limit is full at the pace since its first reading in this window, if before its known reset. The pace starts again after a reset.
+- **CI:** rejects parameters named `h` (and nested ones named `on`) in `hooks/`, which the plugin directory blocks.
+- **MCP calls per server** in the Context tab; a server with no call after three prompts – since the start, `/clear`, `/resume` or `/branch` – is marked *unused so far*.
+- **Warm miss** in the Health tab: how often a warm cache was re-written anyway, with the pause before the last one – after seconds the model, effort, fast mode or the tool set changed (editing CLAUDE.md keeps the cache), after minutes the cache lives shorter than the TTL assumed.
+- **Compact hint** in the band: when the cache has expired and the context is half full or more, `cold: good time to [ Compact ]`.
+
 ## [0.5.4] – 2026-10-12
 
 ### Changed
@@ -130,7 +143,8 @@ Changes for Anthropic's plugin directory, whose validation blocked 0.5.1.
 - Pane `/tokens`: per-request token history, totals, plan limits, cost.
 - `/keepwarm`.
 
-[0.5.4]: https://github.com/florian101010/cache-meter/compare/9175da5...HEAD
+[0.6.0]: https://github.com/florian101010/cache-meter/compare/92aef39...b0b9980
+[0.5.4]: https://github.com/florian101010/cache-meter/compare/9175da5...92aef39
 [0.5.3]: https://github.com/florian101010/cache-meter/compare/bc581d0...9175da5
 [0.5.2]: https://github.com/florian101010/cache-meter/compare/cache-meter--v0.5.1...bc581d0
 [0.5.1]: https://github.com/florian101010/cache-meter/compare/cache-meter--v0.5.0...cache-meter--v0.5.1

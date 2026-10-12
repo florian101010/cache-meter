@@ -11,16 +11,22 @@ import {
   cacheSaving,
   columnCells,
   forecast,
+  hhmm,
   hitPct,
+  isUnexpectedWrite,
+  limitForecast,
   litCells,
   meterCells,
   meterRuns,
+  nextLimitStarts,
   parseKeepWarm,
   rasterCells,
   readMultiplier,
   remainingLabel,
   resolveTtl,
+  switchNote,
   tall,
+  turnLine,
   writeMultiplier,
 } from '../hooks/lib'
 
@@ -71,9 +77,9 @@ function usageValue(tokens: number | undefined, window: number, threshold: numbe
             { path: '/home/u/.claude/CLAUDE.md', type: 'User', tokens: 9_000 },
           ],
           mcpTools: [
-            { name: 'a', serverName: 'github', tokens: 1_000, isLoaded: true },
-            { name: 'b', serverName: 'github', tokens: 2_000, isLoaded: true },
-            { name: 'c', serverName: 'memory', tokens: 500, isLoaded: false },
+            { name: 'mcp__github__a', serverName: 'github', tokens: 1_000, isLoaded: true },
+            { name: 'mcp__github__b', serverName: 'github', tokens: 2_000, isLoaded: true },
+            { name: 'mcp__memory__c', serverName: 'memory', tokens: 500, isLoaded: false },
           ],
           agents: [],
           skills: { totalSkills: 154, includedSkills: 120, tokens: 4_200, skillFrontmatter: [] },
@@ -86,7 +92,7 @@ function usageValue(tokens: number | undefined, window: number, threshold: numbe
 }
 
 /** Every stub a session-start-to-turn test needs; registered before the first call on $. */
-function world(on: On, opts: { env?: Record<string, string>; forkRead?: number; forkWrite?: number; forkAnswer?: boolean } = {}) {
+function world(on: On, opts: { env?: Record<string, string>; forkRead?: number; forkWrite?: number; forkAnswer?: boolean; turnText?: string } = {}) {
   const clock = mock.clock(on, { now: T0 })
   mock.env(on, opts.env ?? {})
   const toasts: string[] = []
@@ -97,6 +103,12 @@ function world(on: On, opts: { env?: Record<string, string>; forkRead?: number; 
     read: 93_000,
     slowMs: 0,
     stop: 'end_turn' as string | null,
+    // The session cost $.session.usage reports; a test raises it during a turn.
+    usd: 1.5,
+    // What $.session.turns() answers (prompts in the transcript).
+    turns: 4,
+    // Whether the next tool call is refused (a deny from a hook beneath).
+    deny: false,
     server: [] as { id: string; name: string; input: unknown; startedAt: number; endedAt?: number }[],
   }
   // The breakdown detail of each $.session.usage call, to tell the free estimate from the exact count.
@@ -128,16 +140,20 @@ function world(on: On, opts: { env?: Record<string, string>; forkRead?: number; 
   on('settings.read', () => ({ value: {} }))
   on('session.usage', ($, e) => {
     usageDetails.push((e as { breakdown?: string }).breakdown)
-    return usageValue(100_000, 1_000_000, 970_000)
+    const v = usageValue(100_000, 1_000_000, 970_000) as { value: Record<string, unknown> }
+    return { value: { ...v.value, cost: { usd: next.usd } } } as never
   })
-  on('session.turns', () => ({ value: 4 }))
+  on('turn.start', ($, e) => ({ turnId: e.turnId }))
+  on('tool.call', () => (next.deny ? { deny: 'refused' } : { result: 'ok' }) as never)
+  on('classic.PreModelSwitch', () => ({}))
+  on('session.turns', () => ({ value: next.turns }))
   on('classic.StopFailure', () => ({}))
   on('session.start', () => ({ cwd: '/work' }))
   on('classic.SessionStart', () => ({}))
   on('classic.PostModelSwitch', () => ({}))
   on('session.measure', ($, e) => ({ changed: e.changed }))
   on('session.compact', () => ({ messages: SUMMARY }))
-  on('turn.complete', () => ({ text: '' }))
+  on('turn.complete', () => ({ text: opts.turnText ?? '' }))
   on('model.fork', ($, e) => {
     forks.push(e.prompt)
     return opts.forkAnswer === false
@@ -892,4 +908,200 @@ test('sidebar at start: a pane the person opened and closed before stays closed'
   await ui.unmount()
   await clock.advance(20_000)
   expect(pane.opened).toHaveLength(1)
+})
+
+const TURN_USAGE = { model: 'claude-test', input_tokens: 1_000, output_tokens: 500, cache_read_input_tokens: 93_000, cache_creation_input_tokens: 6_000 }
+
+function complete($: Engine, isAborted = false, agentId?: string) {
+  return $.turn.complete({ turnId: 't', answer: 'ok', durationMs: 1_000, isAborted, usage: TURN_USAGE, ...(agentId ? { agentId } : {}) } as never) as Promise<{ text: string }>
+}
+
+test('line under the answer: cost of the turn, requests, cache share', async ($, on) => {
+  const { next } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await $.turn.start({ turnId: 't', text: 'hi' } as never)
+  await step($)
+  await step($)
+  next.usd = 1.92
+  const done = await complete($)
+  expect(done.text).toBe('◉ Cache Meter · $0.42 spent · 2 requests · 93% from cache · 6.0k written to cache')
+})
+
+test('line under the answer: none when aborted, for a subagent, or without a request', async ($, on) => {
+  world(on)
+  await $.turn.start({ turnId: 't', text: 'hi' } as never)
+  await step($)
+  expect((await complete($, true)).text).toBe('')
+  await $.turn.start({ turnId: 't', text: 'hi' } as never)
+  await step($)
+  expect((await complete($, false, 'agent-1')).text).toBe('')
+  // A turn with no main request (a local command) gets no line either.
+  await $.turn.start({ turnId: 't', text: 'hi' } as never)
+  expect((await complete($)).text).toBe('')
+})
+
+test('turnLine: API value on a plan, no cost under half a cent', async () => {
+  const u = { input: 1_000, read: 93_000, write: 6_000, output: 500 }
+  expect(turnLine(u, 1, 0.42, true)).toBe('◉ Cache Meter · ≈ $0.42 API value · 1 request · 93% from cache · 6.0k written to cache')
+  expect(turnLine({ ...u, write: 0 }, 3, 0.001, false)).toBe('◉ Cache Meter · 3 requests · 99% from cache')
+  expect(turnLine(u, 1, null, false)).not.toMatch(/\$/)
+})
+
+test('limit forecast: pace since the first reading, renewed after a reset', async () => {
+  const t0 = T0
+  const start = { at: t0, pct: 20, resetsAt: '2026-10-12T15:00:00Z' }
+  // 20 % → 40 % in one hour: the remaining 60 % take three more hours, so full at T0 + 4 h.
+  expect(limitForecast(start, 40, t0 + HOUR, '2026-10-12T15:00:00Z')).toBe(t0 + 4 * HOUR)
+  // After the reset the limit is free again before it would fill: no forecast.
+  expect(limitForecast(start, 40, t0 + HOUR, '2026-10-12T12:00:00Z')).toBeNull()
+  // Too early, or no rise: no forecast.
+  expect(limitForecast(start, 21, t0 + 5 * 60_000, undefined)).toBeNull()
+  expect(limitForecast(start, 20, t0 + HOUR, undefined)).toBeNull()
+  // The window reset (lower percentage): the start is renewed, so the forecast works again.
+  const renewed = nextLimitStarts({ five_hour: start }, [{ kind: 'five_hour', percentUsed: 3, resetsAt: '2026-10-12T20:00:00Z' }], t0 + 5 * HOUR)
+  expect(renewed.five_hour).toEqual({ at: t0 + 5 * HOUR, pct: 3, resetsAt: '2026-10-12T20:00:00Z' })
+  // The reset moved while the percentage rose: a new window all the same.
+  const moved = nextLimitStarts({ five_hour: start }, [{ kind: 'five_hour', percentUsed: 25, resetsAt: '2026-10-12T20:00:00Z' }], t0 + 2 * HOUR)
+  expect(moved.five_hour).toEqual({ at: t0 + 2 * HOUR, pct: 25, resetsAt: '2026-10-12T20:00:00Z' })
+  // No reset time: the window may free up first, so no forecast.
+  expect(limitForecast(start, 40, t0 + HOUR, undefined)).toBeNull()
+  const kept = nextLimitStarts({ five_hour: start }, [{ kind: 'five_hour', percentUsed: 30, resetsAt: '2026-10-12T15:00:00Z' }], t0 + HOUR)
+  expect(kept.five_hour).toBe(start)
+})
+
+test('limit forecast drawn in the overview once the pace is known', async ($, on) => {
+  const { clock } = world(on)
+  const at = (pct: number) => ({ context: { tokens: 100_000, window: 1_000_000, percent: 10 }, rateLimits: [{ kind: 'five_hour', percentUsed: pct, resetsAt: '2026-10-12T20:00:00Z' }], changed: ['rateLimits'] })
+  await $.session.measure(at(20) as never)
+  let ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  expect(await ui.find({ type: 'Text', text: /full ≈/ })).toBeUndefined()
+  await ui.unmount()
+  await clock.advance(HOUR)
+  await $.session.measure(at(40) as never)
+  ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  expect(await ui.find({ type: 'Text', text: ` · full ≈ ${hhmm(T0 + 4 * HOUR)} at this pace` })).toBeDefined()
+  await ui.unmount()
+})
+
+test('MCP servers: calls counted per server, idle ones marked after a few prompts', async ($, on) => {
+  const { next } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await $.tool.call({ tool: 'mcp__github__a' } as never)
+  await $.tool.call({ tool: 'mcp__github__a' } as never)
+  await $.tool.call({ tool: 'mcp__github__b' } as never)
+  // A refused call did not run: not counted.
+  next.deny = true
+  await $.tool.call({ tool: 'mcp__github__b' } as never)
+  next.deny = false
+  await $.session.measure({ context: { tokens: 100_000, window: 1_000_000, percent: 10 }, rateLimits: [], changed: ['context'] })
+  const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  await ui.press({ key: 'tab-context' })
+  expect(await ui.find({ type: 'Text', text: / · 2 tools · 3 calls$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /unused so far/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('model switch while warm: a note with the estimate, never a decision', async ($, on) => {
+  const { toasts } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  const sw = {
+    from_model: 'a',
+    to_model: 'b',
+    requested_model: null,
+    context_tokens: 148_000,
+    prompt_cache_warm: true,
+    cache_ttl: '1h' as const,
+    estimated_cache_write_usd: 1.18,
+    pricing: 'catalog' as const,
+  }
+  for (const source of ['command', 'picker', 'sdk'] as const) {
+    // Exactly what the stub beneath answered: no decision, no reason, no block of its own.
+    expect(await $.classic.PreModelSwitch({ ...sw, source } as never)).toEqual({})
+  }
+  expect(toasts.filter(t => t.startsWith('Model switch re-writes 148.0k tokens to the cache (≈ $1.18) · cache warm 60m more')).length).toBe(3)
+  // Cold, or to the same model: nothing to say.
+  await $.classic.PreModelSwitch({ ...sw, source: 'command', prompt_cache_warm: false } as never)
+  await $.classic.PreModelSwitch({ ...sw, source: 'command', to_model: 'a' } as never)
+  expect(toasts.filter(t => t.startsWith('Model switch')).length).toBe(3)
+  expect(switchNote(148_000, 1.18, false, null)).toBe('Model switch re-writes 148.0k tokens to the cache (≈ $1.18 (estimate)) – after it expires, switching adds nothing')
+})
+
+test('warm miss: a warm cache re-written anyway is counted, a cold one is not', async ($, on) => {
+  const { clock, next } = world(on)
+  await step($)
+  next.write = 60_000
+  next.read = 10_000
+  await clock.advance(5 * 60_000)
+  await step($)
+  let ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  await ui.press({ key: 'tab-health' })
+  expect(await ui.find({ type: 'Text', text: /1× re-written while warm · 60.0k tokens · last \d\d:\d\d after 5m idle/ })).toBeDefined()
+  await ui.unmount()
+  // After the TTL the same re-write is an expiry, not a warm miss.
+  await clock.advance(2 * HOUR)
+  await step($)
+  ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  await ui.press({ key: 'tab-health' })
+  expect(await ui.find({ type: 'Text', text: /1× re-written while warm/ })).toBeDefined()
+  await ui.unmount()
+  expect(isUnexpectedWrite(false, false, { input: 0, read: 0, write: 50_000, output: 0 })).toBe(false)
+})
+
+test('band: a cold cache over half full suggests compacting', async ($, on) => {
+  const { clock } = world(on)
+  await step($)
+  await $.session.measure({ context: { tokens: 600_000, window: 1_000_000, percent: 60 }, rateLimits: [], changed: ['context'] })
+  let ui = await $.ui.mount({ surface: 'terminal', ...band(160) })
+  expect(await ui.find({ type: 'Text', text: /good time to/ })).toBeUndefined()
+  await ui.unmount()
+  await clock.advance(61 * 60_000)
+  ui = await $.ui.mount({ surface: 'terminal', ...band(160) })
+  expect(await ui.find({ type: 'Text', text: ' · cold: good time to' })).toBeDefined()
+  await ui.unmount()
+  // While Claude works there is no button, so no hint.
+  ui = await $.ui.mount({ surface: 'terminal', ...band(160, true) })
+  expect(await ui.find({ type: 'Text', text: /good time to/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('MCP servers: unused only after three prompts since the start or a /resume', async ($, on) => {
+  const { next } = world(on)
+  // A resumed transcript already holds 4 prompts; the call counts start again ($.state resets there).
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  next.turns = 5
+  await $.session.measure({ context: { tokens: 100_000, window: 1_000_000, percent: 10 }, rateLimits: [], changed: ['context'] })
+  let ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  await ui.press({ key: 'tab-context' })
+  expect(await ui.find({ type: 'Text', text: / · 2 tools · 0 calls$/ })).toBeDefined()
+  await ui.unmount()
+  next.turns = 7
+  await $.session.measure({ context: { tokens: 100_000, window: 1_000_000, percent: 10 }, rateLimits: [], changed: ['context'] })
+  ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  await ui.press({ key: 'tab-context' })
+  expect(await ui.find({ type: 'Text', text: / · 2 tools · 0 calls – unused so far$/ })).toBeDefined()
+  await ui.unmount()
+  // /resume or /branch: counted from there again.
+  await $.classic.SessionStart({ source: 'resume', seconds_since_last_response: 60, context_tokens: 100_000 })
+  await $.session.measure({ context: { tokens: 100_000, window: 1_000_000, percent: 10 }, rateLimits: [], changed: ['context'] })
+  ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  await ui.press({ key: 'tab-context' })
+  expect(await ui.find({ type: 'Text', text: /unused so far/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('line under the answer: a line another mod put there is kept', async ($, on) => {
+  const { next } = world(on, { turnText: 'other mod: summary' })
+  await $.turn.start({ turnId: 't', text: 'hi' } as never)
+  await step($)
+  next.usd = 1.6
+  expect((await complete($)).text).toBe('other mod: summary\n◉ Cache Meter · $0.10 spent · 1 request · 93% from cache · 6.0k written to cache')
+})
+
+test('line under the answer: when the core text is the answer itself, only the line', async ($, on) => {
+  const { next } = world(on, { turnText: 'ok' })
+  await $.turn.start({ turnId: 't', text: 'hi' } as never)
+  await step($)
+  next.usd = 1.6
+  expect((await complete($)).text).toBe('◉ Cache Meter · $0.10 spent · 1 request · 93% from cache · 6.0k written to cache')
 })

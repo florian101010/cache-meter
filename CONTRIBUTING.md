@@ -58,7 +58,7 @@ claude --settings '{"env":{"CLAUDE_CODE_PLUGIN_DIRS":"/absolute/path/to/cache-me
    ```
 
    (This makes one small model request. Delete the debug log afterwards – it contains session data.)
-7. Update `README.md`, `docs/how-it-works.md` and `CHANGELOG.md` in the same pull request. Bump `version` in `.claude-plugin/plugin.json` for every change users should receive.
+7. Update, in the same pull request, every file that describes what changed: `README.md` (features, band and pane tables, options, hook table, FAQ), `docs/how-it-works.md`, `CHANGELOG.md`; `PRIVACY.md` and `SECURITY.md` when what the mod reads, hooks or sends changes; `AGENTS.md` and `llms.txt` when features or options change. Then search all of them for numbers and lists that went stale (option count, hook list, versions). Bump `version` in `.claude-plugin/plugin.json` for every change users should receive: the plugin directory picks up every push to `main` as a new version.
 8. Commit with [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `docs:`, `chore:`, `refactor:`, `test:`).
 
 ## Pull requests
@@ -70,7 +70,7 @@ Fill in the template. CI must be green. Describe what a user sees differently, a
 Images (README screenshots, header, icon and social preview sources) live on the [`assets` branch](https://github.com/florian101010/cache-meter/tree/assets), not on `main`: the directory scans `main`, and image files there hold every version for review. Its README says how to regenerate them.
 
 ```text
-.claude-plugin/plugin.json        manifest: name, version, type contract, the cacheTtl and autoSidebar options
+.claude-plugin/plugin.json        manifest: name, version, type contract, the cacheTtl, autoSidebar and turnLine options
                                   (the folder also holds the listing icon, a static PNG; its source is on the assets branch)
 .claude-plugin/marketplace.json   makes this repository a one-plugin marketplace
 hooks/hooks.json                  points to the hooks module
