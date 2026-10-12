@@ -262,9 +262,37 @@ def auto(s):
     return "\n".join(out)
 
 
+# --- why: what a cold cache costs against a keepwarm ping – two bars grow, the figures land -----------------
+def why(s):
+    x0, full = 40, 360
+    ping = full * 0.03 / 1.20
+    out = []
+    keys = "0;0.06;0.34;0.92;1"
+    rw_a, rw_v = s.a("width", keys, f"0;0;{full};{full};0", static=f"{full}")
+    pg_a, pg_v = s.a("width", "0;0.30;0.44;0.92;1", f"0;0;{ping:.1f};{ping:.1f};0", static=f"{ping:.1f}")
+    t1_a, t1_v = s.a("opacity", "0;0.30;0.36;0.92;1", "0;0;1;1;0", static="1")
+    t2_a, t2_v = s.a("opacity", "0;0.42;0.48;0.92;1", "0;0;1;1;0", static="1")
+    bw = full if s.t is None else rw_v
+    pw = f"{ping:.1f}" if s.t is None else pg_v
+    o1 = 1 if s.t is None else t1_v
+    o2 = 1 if s.t is None else t2_v
+    out.append(f'<text x="{x0}" y="62" font-family="{MONO}" font-size="13" fill="{MUTED}">re-write after the break</text>')
+    out.append(f'<rect x="{x0}" y="72" width="{full}" height="26" rx="8" fill="{TRACK}"/>')
+    out.append(f'<rect x="{x0}" y="72" width="{bw}" height="26" rx="8" fill="{RED}" filter="url(#glow)">{rw_a}</rect>')
+    out.append(f'<text x="{x0 + full}" y="128" text-anchor="end" font-family="{FONT}" font-size="22" font-weight="700" fill="{TEXT}" opacity="{o1}">$1.20{t1_a}</text>')
+    out.append(f'<text x="{x0}" y="150" font-family="{MONO}" font-size="13" fill="{MUTED}">/keepwarm ping</text>')
+    out.append(f'<rect x="{x0}" y="160" width="{full}" height="26" rx="8" fill="{TRACK}"/>')
+    out.append(f'<rect x="{x0}" y="160" width="{pw}" height="26" rx="4" fill="{GREEN}" filter="url(#glow)">{pg_a}</rect>')
+    out.append(f'<text x="{x0 + 24}" y="180" font-family="{FONT}" font-size="22" font-weight="700" fill="{GREEN_HI}" opacity="{o2}">$0.03{t2_a}</text>')
+    out.append(f'<text x="{x0}" y="214" font-family="{MONO}" font-size="12" fill="{MUTED}">Opus 5.5 · 150k tokens · API prices</text>')
+    return "\n".join(out)
+
+
 BANNERS = [
     ("keepwarm", "Keep it: /keepwarm – one tiny ping keeps the prompt cache alive while you are away.", keepwarm, "KEEP IT", "/keepwarm",
      "One tiny ping keeps the cache alive while you are away.", "≈ 1/20 of a re-write · heartbeat in the band · stops on a miss"),
+    ("why", "Why Cache Meter – stop wasting tokens: a re-write after a break costs about $1.20 for a 150k-token conversation on Opus 5.5 at API prices, a keepwarm ping about $0.03. Twelve everyday problems it solves follow.", why, "WHY CACHE METER", "Stop wasting tokens",
+     "Twelve everyday problems it solves – right below.", "see it · keep it · understand it · local and read-only"),
     ("auto", "Every break: /keepwarm auto – switched on once, it keeps the prompt cache warm through every break of the session, by itself.", auto, "EVERY BREAK", "/keepwarm auto",
      "Type it once – every break stays warm, by itself.", "opt-in · pings only while you are away · 2h break ≈ 2 pings"),
     ("cost", "See it: every answer, priced – and a session budget that warns at 80 percent.", cost, "SEE IT", "Every answer, priced",

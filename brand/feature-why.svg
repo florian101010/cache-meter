@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="240" viewBox="0 0 1280 240" role="img" aria-label="Why Cache Meter – stop wasting tokens: a re-write after a break costs about $1.20 for a 150k-token conversation on Opus 5.5 at API prices, a keepwarm ping about $0.03. Twelve everyday problems it solves follow.">
+<defs>
+<radialGradient id="bg" cx="0.12" cy="0.3" r="1.1"><stop offset="0" stop-color="#2b2540"/><stop offset="0.55" stop-color="#16141f"/><stop offset="1" stop-color="#0c0b12"/></radialGradient>
+<linearGradient id="accent" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#ff9a6b"/><stop offset="1" stop-color="#d97757"/></linearGradient>
+<filter id="glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="7" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+<filter id="shadow" x="-20%" y="-30%" width="140%" height="170%"><feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#000" flood-opacity="0.45"/></filter>
+<pattern id="dots" width="22" height="22" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1.2" fill="#ffffff" opacity="0.045"/></pattern>
+</defs>
+<rect width="1280" height="240" rx="24" fill="url(#bg)"/>
+<rect width="1280" height="240" rx="24" fill="url(#dots)"/>
+<circle cx="210" cy="120" r="150" fill="#d97757" opacity="0.05"/>
+<text x="40" y="62" font-family="'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="13" fill="#7f849c">re-write after the break</text>
+<rect x="40" y="72" width="360" height="26" rx="8" fill="#2a2939"/>
+<rect x="40" y="72" width="360" height="26" rx="8" fill="#e05060" filter="url(#glow)"><animate attributeName="width" dur="9s" repeatCount="indefinite" keyTimes="0;0.06;0.34;0.92;1" values="0;0;360;360;0"/></rect>
+<text x="400" y="128" text-anchor="end" font-family="'Helvetica Neue', 'Segoe UI', Roboto, Arial, sans-serif" font-size="22" font-weight="700" fill="#f5f5f7" opacity="1">$1.20<animate attributeName="opacity" dur="9s" repeatCount="indefinite" keyTimes="0;0.30;0.36;0.92;1" values="0;0;1;1;0"/></text>
+<text x="40" y="150" font-family="'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="13" fill="#7f849c">/keepwarm ping</text>
+<rect x="40" y="160" width="360" height="26" rx="8" fill="#2a2939"/>
+<rect x="40" y="160" width="9.0" height="26" rx="4" fill="#3ddc84" filter="url(#glow)"><animate attributeName="width" dur="9s" repeatCount="indefinite" keyTimes="0;0.30;0.44;0.92;1" values="0;0;9.0;9.0;0"/></rect>
+<text x="64" y="180" font-family="'Helvetica Neue', 'Segoe UI', Roboto, Arial, sans-serif" font-size="22" font-weight="700" fill="#9af2b8" opacity="1">$0.03<animate attributeName="opacity" dur="9s" repeatCount="indefinite" keyTimes="0;0.42;0.48;0.92;1" values="0;0;1;1;0"/></text>
+<text x="40" y="214" font-family="'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="12" fill="#7f849c">Opus 5.5 · 150k tokens · API prices</text>
+<rect x="470" y="40" width="193" height="28" rx="14" fill="#d97757" fill-opacity="0.14" stroke="#d97757" stroke-opacity="0.55"/>
+<text x="487" y="59" font-family="'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="13" font-weight="700" letter-spacing="1.6" fill="#ff9a6b">WHY CACHE METER</text>
+<text x="470" y="118" font-family="'Helvetica Neue', 'Segoe UI', Roboto, Arial, sans-serif" font-size="46" font-weight="700" fill="#f5f5f7" letter-spacing="-0.8">Stop wasting tokens</text>
+<text x="472" y="160" font-family="'Helvetica Neue', 'Segoe UI', Roboto, Arial, sans-serif" font-size="23" fill="#cdd6f4">Twelve everyday problems it solves – right below.</text>
+<text x="472" y="198" font-family="'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="15" fill="#7f849c">see it · keep it · understand it · local and read-only</text>
+<rect x="1" y="1" width="1278" height="238" rx="23" fill="none" stroke="#ffffff" stroke-opacity="0.06" stroke-width="2"/>
+</svg>
