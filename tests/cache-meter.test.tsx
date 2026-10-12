@@ -1892,6 +1892,9 @@ test('café state: a ping first, then brewing, work, cold, empty, the last stret
 test('café scene: steam while warm, z\'s while cold, a clock in the last stretch, a cup that fills while brewing', () => {
   const text = (state: CafeState, f: number) => sceneRows(state, f).map(r => r.map(s => s.t).join(''))
   expect(sceneRows('warm', 1)).toHaveLength(SCENE_ROWS - 1)
+  // The barista wears a cap: the top two rows start with it, not with the face.
+  expect(text('warm', 1)[0]).toMatch(/^  ▄▄▄  /)
+  expect(text('warm', 1)[1]).toMatch(/^▄█████▄/)
   expect(text('warm', 1).slice(0, 2).join('')).toMatch(/[()]/)
   expect(text('cold', 1).slice(0, 2).join('')).not.toMatch(/[()]/)
   expect(text('cold', 1).slice(0, 2).join('')).toMatch(/z/i)

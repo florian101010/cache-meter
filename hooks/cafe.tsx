@@ -17,6 +17,8 @@ const BODY = 'claude'
 const EYES = '#2a1a12'
 const APRON = '#f3e7d9'
 const COFFEE = '#8b5a3c'
+// The barista's cap: its own figure, not anyone's mascot – a cap with a brim over a round-eyed face.
+const CAP = '#5b3a29'
 
 const CAPTION: Record<CafeState, string> = {
   empty: 'cup empty · waiting for the first answer',
@@ -66,8 +68,8 @@ export function sceneRows(state: CafeState, f: number): Seg[][] {
   const arm = isSip || state === 'working' || state === 'ping' ? '▄' : ' '
 
   return [
-    [{ t: '       ' }, { t: side0, c: 'subtle' }, { t: above[0], ...steam }],
-    [{ t: ' ▄▄▄▄▄ ', c: BODY }, { t: side1, c: 'subtle' }, { t: above[1], ...steam }],
+    [{ t: '  ▄▄▄  ', c: CAP }, { t: side0, c: 'subtle' }, { t: above[0], ...steam }],
+    [{ t: '▄█████▄', c: CAP }, { t: side1, c: 'subtle' }, { t: above[1], ...steam }],
     [{ t: '█', c: BODY }, { t: eyes, c: EYES, bg: BODY }, { t: '█', c: BODY }, { t: '   ' }, { t: '╭─────╮', c: 'subtle' }],
     [{ t: '█', c: BODY }, { t: mouth, c: EYES, bg: BODY }, { t: '█', c: BODY }, { t: arm, c: BODY }, { t: '  ' }, { t: '│', c: 'subtle' }, { t: fill, c: fillColor }, { t: '├╮', c: 'subtle' }],
     [{ t: '█', c: BODY }, { t: '     ', bg: APRON }, { t: '█', c: BODY }, { t: '   ' }, { t: '│', c: 'subtle' }, { t: fill, c: fillColor }, { t: '├╯', c: 'subtle' }],

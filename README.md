@@ -168,7 +168,7 @@ It runs only in interactive sessions, never drops a message, and after an expens
 
 ### A barista who keeps an eye on your cache
 
-Docked beside the chat, the free room under the request chart becomes a small café – a pixel barista in Claude-orange and a cup that act out the cache, four frames a second:
+Docked beside the chat, the free room under the request chart becomes a small café – a pixel barista in an orange apron and a brown cap and a cup that act out the cache, four frames a second:
 
 | The cache | The café |
 |---|---|

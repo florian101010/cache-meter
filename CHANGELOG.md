@@ -7,7 +7,7 @@ All notable changes to Cache Meter, a Claude Code mod. The format follows [Keep 
 A café that acts out the cache.
 
 ### Added
-- **The café** (option `animations`, on by default): docked beside the chat, the room under the request chart shows a pixel barista and a cup – stirring while Claude works, coffee dripping into the cup when a fresh cache is written, steam and a sip while it is warm, thin steam and a watched clock in the last stretch, a puff on a keepwarm ping, a grey cup and a nap once it is cold. A separate surface module (`hooks/cafe.tsx`, a `Client`) with its own frame clock at four frames a second, only while the Overview is on screen; it gets nothing but the cache's state word. With too little room, one line.
+- **The café** (option `animations`, on by default): docked beside the chat, the room under the request chart shows a pixel barista (orange, with a brown cap and a white apron – a figure of its own) and a cup – stirring while Claude works, coffee dripping into the cup when a fresh cache is written, steam and a sip while it is warm, thin steam and a watched clock in the last stretch, a puff on a keepwarm ping, a grey cup and a nap once it is cold. A separate surface module (`hooks/cafe.tsx`, a `Client`) with its own frame clock at four frames a second, only while the Overview is on screen; it gets nothing but the cache's state word. With too little room, one line.
 - **Minute flash:** the big countdown lights up once at each new minute.
 - `ui.fault`: if the café's file fails, the pane leaves it out.
 
