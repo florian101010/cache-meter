@@ -181,7 +181,7 @@ Docked beside the chat, the free room under the request chart becomes a small ca
 
 The big countdown flashes once at each new minute. Both run only while the Overview is on screen and stop with the option `animations` set to `off`. The café is a separate file that gets nothing but that one word – no session data, no files, no network.
 
-**Where it shows.** In Claude Code's classic renderer the pane sits above the prompt, and your next prompt closes it so the conversation keeps its room. In the fullscreen renderer (`/tui fullscreen`) it docks beside the chat as a sidebar, opens there by itself at session start (option [`autoSidebar`](#configuration)) and stays open while you work.
+**Where it shows.** In Claude Code's classic renderer the pane sits above the prompt, and your next prompt closes it so the conversation keeps its room. In the fullscreen renderer (`/tui fullscreen`) it docks beside the chat as a sidebar, opens there by itself at session start (option [`autoSidebar`](#configuration)) and stays open while you work – and there it takes the mouse: click the tabs and buttons, scroll with the wheel, point at the request chart. **Keys, either way:** <kbd>Ctrl</kbd>+<kbd>X</kbd>, then <kbd>Tab</kbd> gives the pane the keyboard (it turns orange), <kbd>1</kbd>–<kbd>3</kbd> switch tabs, <kbd>↓</kbd> / <kbd>Page Down</kbd> scroll, <kbd>Esc</kbd> hands the keys back.
 
 **Switching tabs.** `/tokens context` or `/tokens health` – a prefix is enough; after `/tokens ` Claude Code shows the tab names and `report` as a hint. Or click a tab (fullscreen renderer), or press ctrl+x, Tab, then `1`–`3`.
 
@@ -295,14 +295,15 @@ or `/plugin` → **Installed** → Cache Meter → **Update now**. To update aut
 | See cache and context | the band above the prompt, always on |
 | Open the full view | `/tokens` – again to close; Esc at an empty prompt closes it above the prompt |
 | Open a tab directly | `/tokens context`, `/tokens health`, `/tokens overview` (a prefix is enough: `/tokens h`) – switches an open pane instead of closing it |
-| Switch tabs | `/tokens health` etc.; or press ctrl+x, then Tab (the pane gets the keys), then `1`–`3` – Esc hands the keys back; clicking a tab works only in Claude Code's fullscreen renderer, which captures the mouse |
+| Switch tabs | `/tokens health` etc. – always works; or with the keyboard or the mouse, see the next two rows |
 | Count the context exactly | `x` or **Count exactly** in the Context tab – one API request per tool and memory file, as `/context` |
-| Keys in the pane | once the pane has the keys (ctrl+x, then Tab): `1`–`3` switch tabs, `w` keeps the cache warm for 2 h, `s` stops it, `x` counts the context exactly, `c` compacts |
+| Keyboard in the pane | <kbd>Ctrl</kbd>+<kbd>X</kbd>, let go, then <kbd>Tab</kbd>: the pane takes the keys and its header and bottom line turn orange (*keys here*). Then `1`–`3` switch tabs, <kbd>↓</kbd> <kbd>↑</kbd> <kbd>Page Down</kbd> <kbd>Page Up</kbd> <kbd>End</kbd> <kbd>Home</kbd> scroll a tab that is taller than the pane, <kbd>Tab</kbd> + <kbd>Enter</kbd> walk and press the buttons, `w` keeps the cache warm for 2 h, `s` stops it, `x` counts the context exactly, `c` compacts. <kbd>Esc</kbd> hands the keys back to the prompt |
+| Mouse | only in Claude Code's fullscreen renderer (`/tui fullscreen`), which captures the mouse: click a tab or a button, scroll a pane with the wheel, point at a column of the request chart for its details. In the classic renderer the terminal keeps the mouse – use the keys |
 | Copy a session report | `/tokens report` – Markdown on the clipboard; the pane stays as it is. Paste it to check: some terminals drop clipboard writes without saying so |
 | Pane beside the chat | `/tui fullscreen` (Claude Code's fullscreen renderer): from 110 columns the pane docks as a sidebar and stays open while you chat; `/tui default` switches back |
 | Keep the cache warm | `/keepwarm` (2 h), `/keepwarm 30m` … `/keepwarm 8h`, also `/keepwarm 120m` – interactive sessions only |
 | Stop keeping it warm | `/keepwarm off` (or `0`) – reports pings and tokens read |
-| Compact | the `[ Compact ]` button in the band or the pane (between turns only) |
+| Compact | the `[ Compact ]` button in the band, or `c` in the pane – the band hides its button while the pane is open (between turns only) |
 
 ## Configuration
 
@@ -411,13 +412,16 @@ Yes: `/config` → `cache-meter.animations` → `off`. The café under the reque
 </details>
 
 <details>
-<summary><b>A tab doesn't switch when I click it</b></summary>
+<summary><b>How do I switch tabs or scroll without the mouse – and why doesn't a click work?</b></summary>
 
-In the fullscreen renderer a click that moves the pointer even slightly becomes a text selection – Claude Code then copies the word (`sent … chars via OSC 52`) instead of clicking. That happens easily on a touchscreen or trackpad, for example over SSH from an iPad. Without the mouse: `/tokens context`, `/tokens health`, or the keyboard, no mouse needed:
+Always: `/tokens overview`, `/tokens context`, `/tokens health` (a prefix is enough, `/tokens h`). Or the keyboard:
 
-1. <kbd>Ctrl</kbd>+<kbd>X</kbd>, let go, then <kbd>Tab</kbd> – the pane takes the keyboard and its bottom line turns orange: *keys here*. (Claude Code moves the keyboard from the prompt to the band, then to each open pane, then back – [keybindings › `abovePrompt:focus`](https://code.claude.com/docs/en/keybindings). While the pane is open the band has no button, so the first press lands in the pane; with another mod's pane open, press it again until this one lights up.)
+1. <kbd>Ctrl</kbd>+<kbd>X</kbd>, let go, then <kbd>Tab</kbd> – the pane takes the keyboard: its header and bottom line turn orange, *keys here*. (Claude Code moves the keyboard from the prompt to the band, then to each open pane, then back – [keybindings › `abovePrompt:focus`](https://code.claude.com/docs/en/keybindings). While the pane is open the band has no button, so the first press lands in the pane; with another mod's pane open, press it again until this one lights up.)
 2. <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> switch tabs – or <kbd>Tab</kbd> walks the tabs and buttons and <kbd>Enter</kbd> presses one.
-3. <kbd>Esc</kbd> gives the keyboard back to the prompt. Until then <kbd>c</kbd>, <kbd>w</kbd> and <kbd>x</kbd> press the pane's buttons, and digits typed before the line turns orange go into the chat.
+3. A tab taller than the pane – the Context tab in a short window, for example – scrolls with <kbd>↓</kbd> <kbd>↑</kbd>, <kbd>Page Down</kbd> <kbd>Page Up</kbd>, and <kbd>End</kbd> <kbd>Home</kbd> for the bottom and top ([interface › What each key does](https://code.claude.com/docs/en/plugins/mods/interface)).
+4. <kbd>Esc</kbd> gives the keyboard back to the prompt. Until then <kbd>c</kbd>, <kbd>w</kbd> and <kbd>x</kbd> press the pane's buttons, and digits typed before the pane turns orange go into the chat.
+
+**The mouse** works only in Claude Code's fullscreen renderer (`/tui fullscreen`), which captures it: click a tab or a button, scroll a pane with the wheel, point at a column of the request chart for its details. In the classic renderer the terminal keeps the mouse. Even in fullscreen, a click that moves the pointer slightly becomes a text selection – Claude Code then copies the word (`sent … chars via OSC 52`) instead of clicking. That happens easily on a touchscreen or trackpad, for example over SSH from an iPad; the keys above always work.
 </details>
 
 <details>

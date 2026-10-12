@@ -2059,8 +2059,16 @@ export const register: Register = (on, options) => {
             {tabButton('context', 'Context', '2')}
             {tabButton('health', 'Health', '3', issues !== '')}
           </Box>
-          <Text dimColor wrap="truncate-end">
-            {tier === 'wide' ? 'prompt cache · tokens' : ''}
+          {/* The key hint sits in the header too: the footer is the first row a too-tall tab cuts off. */}
+          <Text wrap="truncate-end">
+            {tier === 'wide' && <Text dimColor>prompt cache · tokens · </Text>}
+            {tier === 'narrow' ? null : e.props.isFocused ? (
+              <Text color="claude" bold>
+                {tier === 'wide' ? 'keys here · ↓ scroll · esc' : '↓ scroll · esc'}
+              </Text>
+            ) : (
+              <Text dimColor>{tier === 'wide' ? 'ctrl+x, tab: keys here' : 'ctrl+x tab: keys'}</Text>
+            )}
           </Text>
         </Box>
         {tab === 'overview' &&
@@ -2100,8 +2108,8 @@ export const register: Register = (on, options) => {
           {e.props.isFocused ? (
             <Text color="claude" bold wrap="truncate-end">
               {tier === 'narrow'
-                ? 'keys here · 1–3 · esc'
-                : `keys here · 1–3 switch tabs · tab + enter${isKeeping ? ' · s stop' : canKeep ? ' · w keep warm' : ''} · esc back to the prompt`}
+                ? 'keys here · 1–3 · ↓ · esc'
+                : `keys here · 1–3 switch tabs · ↓ pgdn end scroll · tab + enter${isKeeping ? ' · s stop' : canKeep ? ' · w keep warm' : ''} · esc back to the prompt`}
             </Text>
           ) : (
             <Text dimColor wrap="truncate-end">
