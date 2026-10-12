@@ -77,11 +77,10 @@ In the new session the band appears above the prompt after the first answer; typ
 - [Installation](#installation)
 - [Usage](#usage)
 - [Configuration](#configuration)
-- [How it works](#how-it-works)
-- [Assumptions and limitations](#assumptions-and-limitations)
 - [Privacy, cost and permissions](#privacy-cost-and-permissions)
 - [FAQ](#faq)
-- [Development](#development)
+- [Contributing](#contributing)
+- [Learn more](#learn-more)
 - [License](#license)
 
 ## Features
@@ -154,41 +153,10 @@ To load the clone in every session, add its **absolute** path to `CLAUDE_CODE_PL
 
 One option, `cacheTtl` – `auto` (default), `60m` or `5m`. Set it with `/config` → `cache-meter.cacheTtl`, or in `~/.claude/settings.json` under `pluginConfigs` → `"cache-meter@cache-meter"` (marketplace install) or `"cache-meter@inline"` (loaded with `--plugin-dir` or `CLAUDE_CODE_PLUGIN_DIRS`) → `options` → `cacheTtl`.
 
-With `auto`, the TTL is derived in this order, following [prompt caching › choose the TTL yourself](https://code.claude.com/docs/en/prompt-caching#choose-the-ttl-yourself):
+With `auto`, Cache Meter follows Claude Code's own TTL controls and your plan state ([full order](docs/how-it-works.md#how-the-ttl-is-derived)). On an API key or a cloud provider Claude Code's default is five minutes: set `cacheTtl` to `5m`, or set `promptCacheTtl`.
 
-1. the mod's own option `60m` / `5m`
-2. `FORCE_PROMPT_CACHING_5M=1` → 5m
-3. `CLAUDE_CODE_PROMPT_CACHE_TTL` (`5m` / `1h`)
-4. the `promptCacheTtl` setting (`5m` / `1h`)
-5. `ENABLE_PROMPT_CACHING_1H=1` → 1h
-6. a plan limit at 100 % or more – Claude Code then draws usage credits and drops to 5m → 5m
-7. the value Claude Code reported on the last model switch
-8. otherwise 60m (subscription within plan usage)
 
-On an API key or a cloud provider Claude Code's default is five minutes: set `cacheTtl` to `5m`, or set `promptCacheTtl`.
 
-## How it works
-
-Cache Meter only listens and draws; it never rewrites prompts or tool calls.
-
-- **`turn.step`** gives the four token counts of every model request – the source of the hit rate, the history and the countdown (timed at the request's *start*, a conservative assumption).
-- **`session.measure`** gives context fill, plan limits and cost after each turn; `$.session.usage({ breakdown: 'summary' })` gives the auto-compact point (estimated locally, no API call).
-- **`classic.SessionStart`** carries the countdown across `--resume` and reloads state after `/clear`, `/resume` and `/branch`; **`classic.PostModelSwitch`** marks the cache cold after a real model switch, with Claude Code's own estimate.
-- **`/keepwarm`** pings through `$.model.fork` from a 15-second timer, never while a main request is running.
-
-Data flow, state, the cold-rewrite rule and every threshold: [docs/how-it-works.md](docs/how-it-works.md).
-
-## Assumptions and limitations
-
-| Topic | Status |
-|---|---|
-| TTL | derived, not measured: no mod interface reports it per request. The pane shows the rule that produced it. Check with `/usage` → *Prompt cache (main)* |
-| Does a `/keepwarm` ping extend the one-hour cache? | **Documented for cache reads in general**: a cache hit lasts the "same duration as the preceding write" ([pricing › prompt caching](https://platform.claude.com/docs/en/about-claude/pricing)), one hour for the main conversation. Forks get the five-minute TTL for what they *write* ([which TTL each request gets](https://code.claude.com/docs/en/prompt-caching#which-ttl-each-request-gets)), but a keepwarm fork writes nothing of its own ("its own tail never cached", `$.model.fork` in the type declarations). Also observed in practice with the same mechanism by [karanb192/cache-tax](https://github.com/karanb192/cache-tax) (Fable 5.1, subscription, 2026-09-19). Verify on your setup with `/usage` |
-| Does a ping reach the mod's own `turn.step` hook? | **Undocumented.** If it does, the ping shows as one row in the history; the countdown stays right. There is no filter, because a filter would drop real requests that end during a ping |
-| Countdown after `--resume` | `seconds_since_last_response` counts from the end of the last response, so the countdown is optimistic by that response's duration. If Claude Code reports `prompt_cache_likely_expired`, the cache is shown cold |
-| Dollar amounts | only Claude Code's own estimates and the `/cost` total – no price table of its own |
-| Other invalidations | a model switch, an MCP or plugin change can invalidate the cache before the TTL ends ([actions that invalidate the cache](https://code.claude.com/docs/en/prompt-caching#actions-that-invalidate-the-cache)) – visible as a low hit rate |
-| Subagents | have their own caches with a five-minute TTL; counted in the totals, not in the countdown |
 
 ## Privacy, cost and permissions
 
@@ -214,29 +182,17 @@ More in [SECURITY.md](SECURITY.md).
 
 **How do I remove it?** `claude plugin uninstall cache-meter@cache-meter`.
 
-## Development
+## Contributing
 
-```bash
-claude plugin validate --strict .   # manifest, marketplace, hooks, state contract
-claude plugin test .                # 23 tests against the engine – no session, sign-in or network
-tsc -p .                            # types appear in .claude-plugin/types/ once Claude Code has loaded the mod
-```
+Issues and pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) first – above all the rule that the **official documentation is the single source of truth** for the mods API, not memory. CI runs `claude plugin validate --strict` and the 23 tests on every push and pull request.
 
-Read [CONTRIBUTING.md](CONTRIBUTING.md) before changing anything – above all the rule that the **official documentation is the single source of truth** for the mods API, not memory. CI runs `validate --strict` and the tests on every push and pull request.
+## Learn more
 
-```text
-.claude-plugin/plugin.json        manifest: name, version, type contract, the cacheTtl option
-.claude-plugin/marketplace.json   makes this repository a one-plugin marketplace
-hooks/hooks.json                  points to the hooks module
-hooks/register.tsx                all hooks: data sources, band, pane, commands, keepwarm
-hooks/lib.ts                      pure functions without $ (TTL derivation, formatting) – unit-testable
-types/index.d.ts                  type contract of every $.state value
-tests/cache-meter.test.tsx        tests run by `claude plugin test`
-docs/how-it-works.md              design and data flow
-AGENTS.md                         guide for coding agents: install, verify, test, change
-.claude/CLAUDE.md                 imports AGENTS.md for Claude Code sessions in this repository
-llms.txt                          machine-readable index of the documentation
-```
+- [docs/how-it-works.md](docs/how-it-works.md) – events, state, thresholds, the TTL derivation, assumptions and limitations
+- [AGENTS.md](AGENTS.md) – install, verify, test and change the mod, for coding agents
+- [SECURITY.md](SECURITY.md) – everything the mod can reach
+- [CHANGELOG.md](CHANGELOG.md) – versions
+
 
 ## License
 

@@ -56,3 +56,19 @@ claude --settings "{\"env\":{\"CLAUDE_CODE_PLUGIN_DIRS\":\"$PWD\"}}"   # only th
 ## Pull requests
 
 Fill in the template. CI must be green. Describe what a user sees differently, and which documentation sections back the change.
+
+## Repository map
+
+```text
+.claude-plugin/plugin.json        manifest: name, version, type contract, the cacheTtl option
+.claude-plugin/marketplace.json   makes this repository a one-plugin marketplace
+hooks/hooks.json                  points to the hooks module
+hooks/register.tsx                all hooks: data sources, band, pane, commands, keepwarm
+hooks/lib.ts                      pure functions without $ (TTL derivation, formatting) – unit-testable
+types/index.d.ts                  type contract of every $.state value
+tests/cache-meter.test.tsx        tests run by `claude plugin test`
+docs/how-it-works.md              design and data flow
+AGENTS.md                         guide for coding agents: install, verify, test, change
+.claude/CLAUDE.md                 imports AGENTS.md for Claude Code sessions in this repository
+llms.txt                          machine-readable index of the documentation
+```
