@@ -1,16 +1,30 @@
 {
   "name": "cache-meter",
-  "version": "0.2.0",
-  "description": "Prompt-Cache-Countdown, Trefferquote und Kontext im Band über dem Prompt; Token-Verlauf, kalte Neuschreibungen, Limits und Keepwarm im Pane /tokens",
+  "displayName": "Cache Meter",
+  "version": "0.3.0",
+  "description": "Claude Code mod: prompt-cache countdown, hit rate and context in the band above the prompt; per-request token history, cold rewrites, plan limits and /keepwarm in a pane.",
   "author": {
-    "name": "Florian Grimmer"
+    "name": "Florian Grimmer",
+    "url": "https://github.com/florian101010"
   },
+  "homepage": "https://github.com/florian101010/cache-meter#readme",
+  "repository": "https://github.com/florian101010/cache-meter",
+  "license": "MIT",
+  "keywords": [
+    "claude-code",
+    "claude-code-mod",
+    "prompt-caching",
+    "tokens",
+    "cache",
+    "context-window",
+    "keepwarm"
+  ],
   "types": "./types/index.d.ts",
   "userConfig": {
     "cacheTtl": {
       "type": "string",
-      "title": "Cache-TTL",
-      "description": "auto: aus Claude Codes TTL-Steuerung (FORCE_PROMPT_CACHING_5M, CLAUDE_CODE_PROMPT_CACHE_TTL, promptCacheTtl, ENABLE_PROMPT_CACHING_1H) hergeleitet, sonst 5m bei erreichtem Abo-Limit, sonst der beim Modellwechsel gemeldete Wert, sonst 60m. 60m/5m: fest (gewinnt vor allem anderen).",
+      "title": "Cache TTL",
+      "description": "auto: derived from Claude Code's TTL controls (FORCE_PROMPT_CACHING_5M, CLAUDE_CODE_PROMPT_CACHE_TTL, promptCacheTtl, ENABLE_PROMPT_CACHING_1H), else 5m once a plan limit is used up, else the value reported on a model switch, else 60m. 60m/5m: fixed, wins over everything.",
       "options": [
         "auto",
         "60m",

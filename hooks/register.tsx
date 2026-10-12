@@ -1,9 +1,9 @@
 // cache-meter: what the prompt cache and the token budget are doing, at a glance.
 //
-// Band above the prompt:  ● cache 42m ■■■■■■■□□□ 93% hit · ☀ Kontext 9% (Auto-Compact 97%) [Compact]
+// Band above the prompt:  ● cache 42m ■■■■■■■□□□ 93% hit · ☀ context 9% (auto-compact 97%) [Compact]
 // Pane /tokens:           every main-thread request as a stacked bar (read / written / new), session
 //                         sums, subagents, rate limits, cost, keepwarm.
-// /keepwarm [2h|aus]:     pings the cache through $.model.fork shortly before it lapses.
+// /keepwarm [2h|off]:     pings the cache through $.model.fork shortly before it lapses.
 //
 // Single source of truth for every API fact below: the official docs
 // (https://code.claude.com/docs/en/plugins/mods/overview and its pages) and the type declaration of
@@ -135,14 +135,14 @@ async function tick($: EngineInterface) {
   const now = await $.clock.now()
   if (now > keep.until || keep.pings >= MAX_PINGS) {
     await update($, keepA, k => ({ ...k, until: null }))
-    $.ui.toast(`Warmhalten beendet (${keep.pings} Pings)`)
+    $.ui.toast(`Keepwarm finished (${keep.pings} pings)`)
 
     return
   }
   const ttl = await ttlNow($)
   if (ttl.ms < HOUR) {
     await update($, keepA, k => ({ ...k, until: null }))
-    $.ui.toast(`Warmhalten aus: TTL ist jetzt ${ttl.label} (${ttl.source})`)
+    $.ui.toast(`Keepwarm off: the TTL is now ${ttl.label} (${ttl.source})`)
 
     return
   }
@@ -150,7 +150,7 @@ async function tick($: EngineInterface) {
   const status = cacheStatus(cache, now, ttl.ms)
   if (status.kind !== 'warm' || cache === null) {
     await update($, keepA, k => ({ ...k, until: null }))
-    $.ui.toast(status.kind === 'empty' ? 'Kein Cache zum Warmhalten – aus' : 'Cache schon abgelaufen – Warmhalten aus')
+    $.ui.toast(status.kind === 'empty' ? 'Keepwarm off: no cache to keep warm' : 'Keepwarm off: the cache has already expired')
 
     return
   }
@@ -159,10 +159,10 @@ async function tick($: EngineInterface) {
   try {
     // Timed at the request's start: the conservative end of the window (an assumption, see README).
     const startedAt = await $.clock.now()
-    const reply = await $.model.fork({ prompt: 'Antworte nur mit dem Wort: warm' })
+    const reply = await $.model.fork({ prompt: 'Reply with the single word: warm' })
     if (!reply.isAnswered) {
       await update($, keepA, k => ({ ...k, until: null }))
-      $.ui.toast(`Warmhalten aus: Ping ohne Antwort (${reply.reason})`)
+      $.ui.toast(`Keepwarm off: the ping got no answer (${reply.reason})`)
 
       return
     }
@@ -172,10 +172,10 @@ async function tick($: EngineInterface) {
     const wrote = reply.usage.cache_creation_input_tokens
     await update($, keepA, k => ({ ...k, pings: k.pings + 1, readTokens: k.readTokens + got, lastPingAt: startedAt }))
     // A miss (little read) or a partial miss (much written next to what was read): the cache was
-    // not what the TTL assumption said. Stop paying for pings. The write rule follows cache-tax.
+    // not what the TTL assumption said. Stop paying for pings.
     if (got === 0 || (expected > 0 && got < expected * PING_HIT_SHARE) || wrote >= got * PING_WRITE_SHARE) {
       await update($, keepA, k => ({ ...k, until: null }))
-      $.ui.toast(`Warmhalten aus: Ping traf den Cache nicht ganz (${short(got)} gelesen, ${short(wrote)} geschrieben)`)
+      $.ui.toast(`Keepwarm off: the ping missed the cache (${short(got)} read, ${short(wrote)} written)`)
 
       return
     }
@@ -194,7 +194,7 @@ async function compactNow($: EngineInterface) {
   try {
     const result = await $.session.compact()
     if ('skip' in result && result.skip) {
-      $.ui.toast(`Compact übersprungen: ${result.skip}`)
+      $.ui.toast(`Compact skipped: ${result.skip}`)
 
       return
     }
@@ -202,7 +202,7 @@ async function compactNow($: EngineInterface) {
     // not see this one; resetting here too is idempotent.
     await resetCache($)
   } catch (error) {
-    $.ui.toast(`Compact geht gerade nicht: ${error instanceof Error ? error.message : String(error)}`)
+    $.ui.toast(`Compact is not possible right now: ${error instanceof Error ? error.message : String(error)}`)
   }
 }
 
@@ -222,11 +222,11 @@ export const register: Register = (on, options) => {
       $.clock.every(TICK_MS, () => tick($))
     }
     try {
-      await $.command.register({ name: 'tokens', description: 'Token- und Cache-Nutzung dieser Session im Pane zeigen' })
+      await $.command.register({ name: 'tokens', description: 'Show token and prompt-cache usage of this session in a pane' })
       await $.command.register({
         name: 'keepwarm',
-        description: 'Prompt-Cache warmhalten (kostet je Ping eine Cache-Lesung des Kontexts)',
-        argumentHint: '[2h | 30m | aus]  (10m … 8h)',
+        description: 'Keep the prompt cache warm (each ping costs one cache read of the context)',
+        argumentHint: '[2h | 30m | off]  (10m … 8h)',
       })
     } catch {
       // Without the commands the band still works.
@@ -311,10 +311,10 @@ export const register: Register = (on, options) => {
           await update($, coldA, list => [...list, cold].slice(-20))
           await update($, totalsA, t => ({ ...t, coldCount: t.coldCount + 1, coldWritten: t.coldWritten + u.write }))
           const keep = await read($, keepA)
-          // A hint, not an action (cache-tax arms keepwarm by itself here, which spends quota unasked).
+          // A hint, not an action: switching keepwarm on by itself would spend quota unasked.
           // Only after a pause in this session: after a model switch or a resume, keepwarm could not have helped.
           if (cause === 'pause' && isInteractive && !(keep.until !== null && keep.until > startedAt)) {
-            $.ui.toast(`Cache war kalt: ${short(u.write)} Tokens neu geschrieben – vor der nächsten Pause /keepwarm?`, {
+            $.ui.toast(`Cache was cold: ${short(u.write)} tokens re-written – try /keepwarm before your next break`, {
               timeoutMs: 10_000,
             })
           }
@@ -403,38 +403,38 @@ export const register: Register = (on, options) => {
   on('command.run', { command: 'tokens' }, async $ => {
     await $.ui.open({ id: PANE, title: 'Tokens & Cache' })
 
-    return { text: 'Pane „Tokens & Cache“ geöffnet.' }
+    return { text: 'Opened the "Tokens & Cache" pane.' }
   })
 
   on('command.run', { command: 'keepwarm' }, async ($, e) => {
     const ms = parseKeepWarm(e.args)
-    if (ms === undefined) return { text: 'Aufruf: /keepwarm [10m … 8h | aus] – ohne Angabe 2h.' }
+    if (ms === undefined) return { text: 'Usage: /keepwarm [10m … 8h | off] – 2h when left out.' }
     if (ms === null) {
       const keep = await read($, keepA)
       await update($, keepA, k => ({ ...k, until: null }))
 
-      return { text: `Warmhalten aus (${keep.pings} Pings, ${short(keep.readTokens)} Tokens aus dem Cache gelesen).` }
+      return { text: `Keepwarm off (${keep.pings} pings, ${short(keep.readTokens)} tokens read from the cache).` }
     }
     if (!isInteractive) {
-      return { text: 'Warmhalten geht nur in einer interaktiven Session (hier läuft kein Timer). Nicht gestartet.' }
+      return { text: 'Keepwarm only works in an interactive session (no timer runs here). Not started.' }
     }
     const now = await $.clock.now()
     const ttl = await ttlNow($)
     if (ttl.ms < HOUR) {
       return {
-        text: `Bei ${ttl.label}-TTL (${ttl.source}) lohnt Warmhalten nicht: ein Ping alle paar Minuten. Nicht gestartet.`,
+        text: `With a ${ttl.label} TTL (${ttl.source}) keepwarm is not worth it: a ping every few minutes. Not started.`,
       }
     }
     if (cacheStatus(await read($, cacheA), now, ttl.ms).kind !== 'warm') {
-      return { text: 'Kein warmer Cache – Warmhalten startet erst nach der nächsten Antwort sinnvoll.' }
+      return { text: 'No warm cache – start keepwarm after the next answer.' }
     }
     await update($, keepA, () => ({ until: now + ms, pings: 0, readTokens: 0, lastPingAt: null }))
 
     return {
       text:
-        `Warmhalten bis ${hhmm(now + ms)}, höchstens ${MAX_PINGS} Pings: einer, sobald noch höchstens ` +
-        `${Math.round((ttl.ms * PING_SHARE) / 60_000)} min TTL übrig sind (TTL ${ttl.label}, ${ttl.source}). Jeder Ping ` +
-        `liest den ganzen Kontext aus dem Cache. Trifft ein Ping den Cache nicht, schaltet es sich ab.`,
+        `Keepwarm until ${hhmm(now + ms)}, at most ${MAX_PINGS} pings: one whenever at most ` +
+        `${Math.round((ttl.ms * PING_SHARE) / 60_000)} min of the TTL is left (TTL ${ttl.label}, ${ttl.source}). Each ping ` +
+        `reads the whole context from the cache. If a ping misses the cache, keepwarm switches itself off.`,
     }
   })
 
@@ -459,14 +459,14 @@ export const register: Register = (on, options) => {
     const showButton = !e.props.isWorking
 
     // Every segment's width, so the row never wraps (AbovePrompt.bodyColumns).
-    const label = status.kind === 'warm' ? remainingLabel(status.remaining) : status.kind === 'empty' ? 'leer' : 'abgelaufen'
+    const label = status.kind === 'warm' ? remainingLabel(status.remaining) : status.kind === 'empty' ? 'empty' : 'expired'
     const hit = cache === null || cache.hitPct === null ? '–' : `${cache.hitPct}%`
     const pct = percent === null ? '–' : `${percent}%`
-    const autoText = measure?.isAutoCompactOff ? ' (Auto-Compact aus)' : auto === null ? '' : ` (Auto-Compact ${auto}%)`
+    const autoText = measure?.isAutoCompactOff ? ' (auto-compact off)' : auto === null ? '' : ` (auto-compact ${auto}%)`
     const rewriteTokens = measure?.tokens ?? cache?.contextTokens ?? 0
     const rewriteText =
       status.kind === 'expired' && cache !== null && rewriteTokens > 0
-        ? ` · Neuschreiben ${cache.rewriteUsd !== null ? `≈ $${cache.rewriteUsd.toFixed(2)}` : `≈ ${short(rewriteTokens)} Tok`}`
+        ? ` · rewrite ${cache.rewriteUsd !== null ? `≈ $${cache.rewriteUsd.toFixed(2)}` : `≈ ${short(rewriteTokens)} tok`}`
         : ''
     const base =
       '● cache '.length +
@@ -476,7 +476,7 @@ export const register: Register = (on, options) => {
       hit.length +
       ' hit · '.length +
       (sky ? 2 : 0) +
-      'Kontext '.length +
+      'context '.length +
       pct.length +
       (showButton ? '[ Compact ]'.length + 1 : 0)
     const minBar = 6
@@ -501,7 +501,7 @@ export const register: Register = (on, options) => {
         <Text bold>{hit}</Text>
         <Text dimColor> hit · </Text>
         {sky && <Text color={sky.color}>{sky.icon} </Text>}
-        <Text dimColor>Kontext </Text>
+        <Text dimColor>context </Text>
         <Text bold>{pct}</Text>
         {showAuto && <Text dimColor>{autoText}</Text>}
         {showRewrite && (
@@ -548,34 +548,34 @@ export const register: Register = (on, options) => {
         <Text bold>Cache</Text>
         <Text>
           {status.kind === 'warm' ? (
-            <Text color="success">warm · noch {remainingLabel(status.remaining)}</Text>
+            <Text color="success">warm · {remainingLabel(status.remaining)} left</Text>
           ) : (
-            <Text color="error">{status.kind === 'empty' ? 'leer – noch keine Antwort' : 'abgelaufen'}</Text>
+            <Text color="error">{status.kind === 'empty' ? 'empty – no answer yet' : 'expired'}</Text>
           )}
           <Text dimColor>
-            {'  '}TTL {ttl.label} ({ttl.source}) · Treffer letzte Anfrage{' '}
-            {cache?.hitPct == null ? '–' : `${cache.hitPct}%`} · Session {sessionHit === null ? '–' : `${sessionHit}%`}
+            {'  '}TTL {ttl.label} ({ttl.source}) · hit rate last request{' '}
+            {cache?.hitPct == null ? '–' : `${cache.hitPct}%`} · session {sessionHit === null ? '–' : `${sessionHit}%`}
           </Text>
         </Text>
         <Text dimColor>
-          Warmhalten:{' '}
+          Keepwarm:{' '}
           {keep.until !== null && keep.until > now
-            ? `an bis ${hhmm(keep.until)} · ${keep.pings}/${MAX_PINGS} Pings · ${short(keep.readTokens)} Tok gelesen`
-            : `aus (/keepwarm 2h)${keep.pings > 0 ? ` · zuletzt ${keep.pings} Pings` : ''}`}
+            ? `on until ${hhmm(keep.until)} · ${keep.pings}/${MAX_PINGS} pings · ${short(keep.readTokens)} tok read`
+            : `off (/keepwarm 2h)${keep.pings > 0 ? ` · last run ${keep.pings} pings` : ''}`}
         </Text>
         <Text> </Text>
 
-        <Text bold>Kontext</Text>
+        <Text bold>Context</Text>
         <Text>
           {measure?.percent == null ? '–' : `${measure.percent}%`}
           <Text dimColor>
             {'  '}
             {measure?.tokens == null ? '' : `${short(measure.tokens)} / ${short(measure.window)} · `}
             {measure?.isAutoCompactOff
-              ? 'Auto-Compact aus'
+              ? 'auto-compact off'
               : measure?.autoCompactPct == null
-                ? 'Auto-Compact unbekannt'
-                : `Auto-Compact bei ${measure.autoCompactPct}%`}
+                ? 'auto-compact unknown'
+                : `auto-compact at ${measure.autoCompactPct}%`}
           </Text>
           {measure !== null && measure.history.length > 1 && (
             <Text color="suggestion">
@@ -586,8 +586,8 @@ export const register: Register = (on, options) => {
         </Text>
         <Text> </Text>
 
-        <Text bold>Anfragen im Hauptthread (neueste unten)</Text>
-        {shown.length === 0 && <Text dimColor>Noch keine Anfrage gemessen.</Text>}
+        <Text bold>Main-conversation requests (newest last)</Text>
+        {shown.length === 0 && <Text dimColor>No request measured yet.</Text>}
         {shown.map(s => {
           const seg = stack(s, top, barWidth)
           const hit = hitPct(s)
@@ -600,66 +600,66 @@ export const register: Register = (on, options) => {
               <Text color="error">{'█'.repeat(seg.input)}</Text>
               <Text dimColor>
                 {' '}
-                {short(s.input + s.read + s.write)} · {hit === null ? '–' : `${hit}%`} · aus {short(s.output)}
+                {short(s.input + s.read + s.write)} · {hit === null ? '–' : `${hit}%`} · out {short(s.output)}
               </Text>
             </Text>
           )
         })}
         <Text>
           <Text color="success">█</Text>
-          <Text dimColor> aus Cache gelesen  </Text>
+          <Text dimColor> read from cache  </Text>
           <Text color="warning">█</Text>
-          <Text dimColor> in Cache geschrieben  </Text>
+          <Text dimColor> written to cache  </Text>
           <Text color="error">█</Text>
-          <Text dimColor> neu (ungecacht)</Text>
+          <Text dimColor> new (uncached)</Text>
         </Text>
         <Text> </Text>
 
-        <Text bold>Summen dieser Session</Text>
+        <Text bold>Session totals</Text>
         <Text>
-          <Text dimColor>Hauptthread  </Text>
+          <Text dimColor>Main         </Text>
           {usageLine(totals.main)}
-          <Text dimColor> · {totals.mainSteps} Anfragen</Text>
+          <Text dimColor> · {totals.mainSteps} requests</Text>
         </Text>
         <Text>
-          <Text dimColor>Subagenten   </Text>
+          <Text dimColor>Subagents    </Text>
           {usageLine(totals.sub)}
-          <Text dimColor> · {totals.subSteps} Anfragen</Text>
+          <Text dimColor> · {totals.subSteps} requests</Text>
         </Text>
         <Text>
-          <Text dimColor>Kosten       </Text>
+          <Text dimColor>Cost         </Text>
           {measure?.usd == null ? '–' : `$${measure.usd.toFixed(2)}`}
-          <Text dimColor> (wie /cost, Listenpreis)</Text>
+          <Text dimColor> (as /cost, list price)</Text>
         </Text>
         <Text> </Text>
 
-        <Text bold>Kalte Neuschreibungen dieser Session</Text>
-        {colds.length === 0 && <Text dimColor>Keine – der Cache war bei jeder Anfrage warm.</Text>}
+        <Text bold>Cold rewrites this session</Text>
+        {colds.length === 0 && <Text dimColor>None – the cache was warm for every request.</Text>}
         {colds.slice(-5).map(c => (
           <Text>
             <Text dimColor>{hhmm(c.at)} </Text>
             <Text color="warning">{short(c.written)}</Text>
             <Text dimColor>
-              {' '}neu geschrieben
+              {' '}re-written
               {c.cause === 'model'
-                ? ' (nach Modellwechsel)'
+                ? ' (after a model switch)'
                 : c.cause === 'resume'
-                  ? ` (nach Resume${c.idleMs === null ? '' : `, ${duration(c.idleMs)} Pause`})`
-                  : ` nach ${duration(c.idleMs ?? 0)} Pause`}
+                  ? ` (after resume${c.idleMs === null ? '' : `, ${duration(c.idleMs)} idle`})`
+                  : ` after ${duration(c.idleMs ?? 0)} idle`}
             </Text>
           </Text>
         ))}
         {totals.coldCount > 0 && (
           <Text dimColor>
-            Zusammen {totals.coldCount}× · {short(totals.coldWritten)} Tokens
-            {colds.some(c => c.cause === 'pause') ? ' · /keepwarm vor Pausen verhindert das' : ''}
-            {totals.coldCount > 5 ? ' · gezeigt: die letzten 5' : ''}
+            Total {totals.coldCount}× · {short(totals.coldWritten)} tokens
+            {colds.some(c => c.cause === 'pause') ? ' · /keepwarm before a break prevents this' : ''}
+            {totals.coldCount > 5 ? ' · showing the last 5' : ''}
           </Text>
         )}
         <Text> </Text>
 
-        <Text bold>Limits</Text>
-        {limits.length === 0 && <Text dimColor>Keine Messung (kein Abo oder noch keine Antwort).</Text>}
+        <Text bold>Plan limits</Text>
+        {limits.length === 0 && <Text dimColor>No reading (no subscription, or no answer yet).</Text>}
         {limits.map(l => {
           const lit = Math.max(0, Math.min(20, Math.round((l.percentUsed / 100) * 20)))
 
@@ -671,14 +671,14 @@ export const register: Register = (on, options) => {
               </Text>
               <Text color="inactive">{'■'.repeat(20 - lit)}</Text>
               <Text> {l.percentUsed}%</Text>
-              <Text dimColor>{l.resetsAt ? ` · Reset ${resetLabel(l.resetsAt)}` : ''}</Text>
+              <Text dimColor>{l.resetsAt ? ` · resets ${resetLabel(l.resetsAt)}` : ''}</Text>
             </Text>
           )
         })}
         <Text> </Text>
         <Text dimColor>
-          Treffer = gelesen ÷ (neu + gelesen + geschrieben) je Anfrage. Die TTL meldet keine Mod-Schnittstelle je
-          Anfrage; Quelle der Annahme steht oben. Gegenprobe: /usage → „Prompt cache (main)“.
+          Hit rate = read ÷ (new + read + written) per request. No mod interface reports the TTL per request; the
+          rule it came from is shown above. Cross-check: /usage → "Prompt cache (main)".
         </Text>
         <Box flexDirection="row">
           <Button key="pane-compact" label="Compact" onPress={() => compactNow($)} />
@@ -700,9 +700,9 @@ function autoCompactOf(
 }
 
 function limitName(kind: string): string {
-  if (kind === 'five_hour') return '5 Stunden'
-  if (kind === 'seven_day') return '7 Tage'
-  if (kind === 'spend_limit') return 'Ausgabelimit'
+  if (kind === 'five_hour') return '5 hours'
+  if (kind === 'seven_day') return '7 days'
+  if (kind === 'spend_limit') return 'Spend limit'
 
   return kind
 }
@@ -710,11 +710,11 @@ function limitName(kind: string): string {
 function resetLabel(iso: string): string {
   const ms = Date.parse(iso)
   if (Number.isNaN(ms)) return iso
-  const days = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa']
+  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
   return `${days[new Date(ms).getDay()]} ${hhmm(ms)}`
 }
 
 function usageLine(u: Usage4) {
-  return `gelesen ${short(u.read)} · geschrieben ${short(u.write)} · neu ${short(u.input)} · Ausgabe ${short(u.output)}`
+  return `read ${short(u.read)} · written ${short(u.write)} · new ${short(u.input)} · output ${short(u.output)}`
 }

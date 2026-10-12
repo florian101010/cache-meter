@@ -32,18 +32,18 @@ const of = (v: '5m' | '1h', source: string): Ttl =>
  * after the overage rule, since it can go stale.
  */
 export function resolveTtl(i: TtlInputs): Ttl {
-  if (i.setting === '60m') return of('1h', 'Einstellung cache-meter')
-  if (i.setting === '5m') return of('5m', 'Einstellung cache-meter')
+  if (i.setting === '60m') return of('1h', 'cache-meter option')
+  if (i.setting === '5m') return of('5m', 'cache-meter option')
   if (i.force5m) return of('5m', 'FORCE_PROMPT_CACHING_5M')
   const env = fixed(i.envTtl)
   if (env) return of(env, 'CLAUDE_CODE_PROMPT_CACHE_TTL')
   const setting = fixed(i.settingTtl)
   if (setting) return of(setting, 'promptCacheTtl')
   if (i.enable1h) return of('1h', 'ENABLE_PROMPT_CACHING_1H')
-  if (i.limits.some(l => l.percentUsed >= 100)) return of('5m', 'angenommen: Abo-Limit erreicht')
-  if (i.reported) return of(i.reported, 'gemeldet beim Modellwechsel')
+  if (i.limits.some(l => l.percentUsed >= 100)) return of('5m', 'assumed: plan limit reached')
+  if (i.reported) return of(i.reported, 'reported on model switch')
 
-  return of('1h', 'angenommen: Abo')
+  return of('1h', 'assumed: subscription')
 }
 
 /** Share of the request's input the cache served: read ÷ (new + read + written), whole percent. */
@@ -76,8 +76,8 @@ export function litCells(remaining: number, ttlMs: number, cells: number): numbe
 
 export type Forecast = { icon: string; color: string }
 
-// Single-width symbols, not emoji, so the row lines up in every terminal font
-// (the lesson of the token-weather sample mod). Scaled to the auto-compact point.
+// Single-width symbols, not emoji, so the row lines up in every terminal font.
+// Scaled to the auto-compact point.
 const FORECAST: readonly { upTo: number; icon: string; color: string }[] = [
   { upTo: 25, icon: '☀', color: 'yellow' },
   { upTo: 50, icon: '☁', color: 'cyan' },
@@ -128,7 +128,7 @@ export function stack(u: Usage4, top: number, width: number): { read: number; wr
 export function parseKeepWarm(args: string): number | null | undefined {
   const a = args.trim().toLowerCase()
   if (a === '') return 2 * HOUR
-  if (a === 'aus' || a === 'off' || a === '0') return null
+  if (a === 'off' || a === '0') return null
   const m = /^(\d{1,3})\s*(h|m|min)?$/.exec(a)
   if (!m) return undefined
   const n = Number.parseInt(m[1] ?? '', 10)
@@ -147,7 +147,7 @@ export const MAX_PINGS = 12
 /** A ping counts as a hit when it read at least this share of the context from the cache. */
 export const PING_HIT_SHARE = 0.5
 
-/** A ping that writes this share of what it read or more missed part of the cache (cache-tax's rule). */
+/** A ping that writes this share of what it read or more missed part of the cache. */
 export const PING_WRITE_SHARE = 0.1
 
 /** A main request that finds the cache expired and writes at least this much counts as a cold rewrite. */

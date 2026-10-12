@@ -1,0 +1,15 @@
+name: Feature request
+description: Suggest something Cache Meter should show or do
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What do you want to see or do?
+    validations:
+      required: true
+  - type: textarea
+    id: source
+    attributes:
+      label: Where would the data come from?
+      description: If you know the mods API event or call, link the section of https://code.claude.com/docs/en/plugins/mods/reference that provides it.

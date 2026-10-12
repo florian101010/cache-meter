@@ -1,0 +1,21 @@
+{
+  "name": "cache-meter",
+  "description": "Cache Meter – a Claude Code mod that shows the prompt cache and token usage at a glance.",
+  "owner": {
+    "name": "Florian Grimmer",
+    "url": "https://github.com/florian101010"
+  },
+  "plugins": [
+    {
+      "name": "cache-meter",
+      "source": "./",
+      "description": "Claude Code mod: prompt-cache countdown, hit rate, context, token history, cold rewrites, plan limits and /keepwarm.",
+      "category": "productivity",
+      "tags": [
+        "claude-code-mod",
+        "prompt-caching",
+        "tokens"
+      ]
+    }
+  ]
+}

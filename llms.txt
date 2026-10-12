@@ -1,0 +1,27 @@
+# Cache Meter
+
+> A Claude Code mod (a Claude Code plugin whose TypeScript hooks run inside Claude Code) that shows the prompt cache and token usage: a countdown until the cache expires, the hit rate of each request, context fill and auto-compact point above the prompt; a /tokens pane with per-request history, totals, plan limits and cold rewrites; and /keepwarm to keep the cache warm. Install: `claude plugin install cache-meter --marketplace florian101010/cache-meter`. Test: `claude plugin validate --strict . && claude plugin test .`. Requires Claude Code ≥ 2.1.287. MIT.
+
+## Start here
+
+- [AGENTS.md](https://raw.githubusercontent.com/florian101010/cache-meter/main/AGENTS.md): install, verify, test and change the mod – written for coding agents
+- [README.md](https://raw.githubusercontent.com/florian101010/cache-meter/main/README.md): features, configuration, assumptions and limitations, privacy and cost
+
+## Details
+
+- [docs/how-it-works.md](https://raw.githubusercontent.com/florian101010/cache-meter/main/docs/how-it-works.md): events, state, thresholds, cold-rewrite rule, keepwarm algorithm
+- [CONTRIBUTING.md](https://raw.githubusercontent.com/florian101010/cache-meter/main/CONTRIBUTING.md): the documentation-first rule and the change workflow
+- [SECURITY.md](https://raw.githubusercontent.com/florian101010/cache-meter/main/SECURITY.md): everything the mod can reach
+- [CHANGELOG.md](https://raw.githubusercontent.com/florian101010/cache-meter/main/CHANGELOG.md): versions
+
+## Source
+
+- [.claude-plugin/plugin.json](https://raw.githubusercontent.com/florian101010/cache-meter/main/.claude-plugin/plugin.json): manifest and the cacheTtl option
+- [hooks/register.tsx](https://raw.githubusercontent.com/florian101010/cache-meter/main/hooks/register.tsx): all hooks
+- [hooks/lib.ts](https://raw.githubusercontent.com/florian101010/cache-meter/main/hooks/lib.ts): pure functions
+
+## Official Claude Code documentation
+
+- [Mods overview](https://code.claude.com/docs/en/plugins/mods/overview)
+- [Mods reference](https://code.claude.com/docs/en/plugins/mods/reference)
+- [Prompt caching](https://code.claude.com/docs/en/prompt-caching)
