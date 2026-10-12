@@ -888,3 +888,11 @@ export function dockTip(isFullscreen: boolean | undefined, columns: number | und
 
   return null
 }
+
+/** Which animation a failed surface module is (types: UiFaultInput.module, its path under the plugin's folder). */
+export function faultTarget(module: string): 'cafe' | 'spin' | null {
+  if (/(^|\/)cafe\.tsx$/.test(module)) return 'cafe'
+  if (/(^|\/)spin\.tsx$/.test(module)) return 'spin'
+
+  return null
+}

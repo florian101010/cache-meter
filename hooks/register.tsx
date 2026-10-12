@@ -86,6 +86,7 @@ import {
   hogNote,
   isContextHog,
   shareOfRequest,
+  faultTarget,
   progress,
   shineCells,
   tween,
@@ -1312,9 +1313,10 @@ export const register: Register = (on, options) => {
   // and the pane leaves that Client out from then on (reference › ui.fault).
   on('ui.fault', async ($, e, next) => {
     // Per module (types: UiFaultInput.module, the path under the plugin's folder): a failed arrow
-    // leaves the café alone and the other way round. The reason goes to the debug log once.
-    if (e.module.endsWith('cafe.tsx')) isCafeBroken = true
-    if (e.module.endsWith('spin.tsx')) isSpinBroken = true
+    // leaves the café alone and the other way round. Each fault's reason goes to the debug log.
+    const target = faultTarget(e.module)
+    if (target === 'cafe') isCafeBroken = true
+    if (target === 'spin') isSpinBroken = true
     $.ui.log(`${e.module} failed (${e.phase}): ${e.reason}`, { to: 'debug' })
 
     return next(e)

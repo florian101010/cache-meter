@@ -16,6 +16,7 @@ import {
   hogNote,
   isContextHog,
   shareOfRequest,
+  faultTarget,
   cacheSaving,
   columnCells,
   forecast,
@@ -2622,4 +2623,33 @@ test('dock tip: in the /tokens reply and on the Overview above the prompt – no
   next.surfaces = ['desktop']
   const run2 = await $.command.run({ command: 'tokens', args: '', presentation: { isFullscreen: false, columns: 120 } } as never)
   expect((run2 as { text: string }).text).not.toMatch(/Tip/)
+})
+
+test('ui.fault: which animation a failed module is', () => {
+  expect(faultTarget('hooks/cafe.tsx')).toBe('cafe')
+  expect(faultTarget('hooks/spin.tsx')).toBe('spin')
+  expect(faultTarget('cafe.tsx')).toBe('cafe')
+  expect(faultTarget('hooks/notcafe.tsx')).toBeNull()
+  expect(faultTarget('hooks/register.tsx')).toBeNull()
+})
+
+test('café: brewing ends by itself after BREW_MS', async ($, on) => {
+  const { clock } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await clock.advance(1_000)
+  const ui = await $.ui.mount({ surface: 'terminal', ...DOCK })
+  const state = async () => ((await ui.find({ key: 'cafe' }))?.props.props as { state: CafeState } | undefined)?.state
+  await step($)
+  expect(await state()).toBe('brewing')
+  await clock.advance(12_200)
+  expect(await state()).toBe('warm')
+  await ui.unmount()
+})
+
+test('café module: an unknown state word shows the empty cup', () => {
+  const tag = (type: string) => (props: object) => ({ type, props })
+  const surface = { elements: { Box: tag('Box'), Text: tag('Text') }, state: { f: 0 }, setState: () => {}, columns: 19, rows: 3, every: () => () => {}, onPointer: () => () => {}, onKey: () => () => {}, post: () => {} }
+  const out = JSON.stringify(Cafe({ state: 'bogus' as CafeState }, surface as never))
+  expect(out).toContain('◌')
+  expect(out).toContain('cup empty')
 })
