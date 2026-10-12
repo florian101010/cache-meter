@@ -1,7 +1,7 @@
 {
   "name": "cache-meter",
   "displayName": "Cache Meter",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Claude Code mod: /keepwarm keeps your prompt cache alive through a break; a countdown, hit rate, context fill and API value above the prompt; what each answer cost; and a /tokens dashboard with what broke the cache, what fills your context, API errors and cost per hour.",
   "author": {
     "name": "Florian Grimmer",
@@ -68,6 +68,14 @@
         "on"
       ],
       "default": "off"
+    },
+    "sessionBudget": {
+      "type": "number",
+      "title": "Session budget ($)",
+      "description": "0 = off. Otherwise a dollar budget for one session, compared with the figure the band shows (spend on an API key, API value on a subscription): the band shows it as \"of $X\", turns yellow at 80 % and red at 100 %, and a toast appears once at each.",
+      "default": 0,
+      "min": 0,
+      "max": 10000
     }
   }
 }

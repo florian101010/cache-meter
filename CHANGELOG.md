@@ -2,6 +2,28 @@
 
 All notable changes to Cache Meter, a Claude Code mod. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] – 2026-10-12
+
+Alive: the band moves when it matters, and a budget keeps a session in check.
+
+### Added
+- **Last stretch:** in the last 17 % of the TTL the band redraws every second – the dot pulses, the last minute counts in seconds. The one-second timer runs only then.
+- **Keepwarm heartbeat:** after each ping the band shows `· ping ok · <tokens> read` and a bold `↻` for five seconds.
+- **Request details on hover** (fullscreen renderer): point at a column of the request chart for its time, tokens, hit rate, writes and output.
+- **Live during a turn:** context, cost and plan limits refresh after every main request (the plain `$.session.usage()`, which costs nothing), not only when the turn ends – no more `–` or `$0.00` during a long first answer, and the session budget warns while an expensive turn still runs. The auto-compact forecast still counts prompts.
+- **Session budget** (option `sessionBudget`, dollars, off by default): the band shows `of $X`, yellow from 80 %, red from 100 %, with a toast at each; the Health tab shows the share.
+- **After a relaunch:** `/tui` and `claude --resume` restart Claude Code with the conversation but not Cache Meter's in-memory history. The pane now says `No request since <time>` and counts `N requests since <time>` instead of a bare `No request measured yet` beside the session's cost.
+- **Keeping up with Claude Code:** a weekly workflow runs the tests on the newest Claude Code and compares the official pages the mod relies on with stored content hashes (`.github/scripts/upstream-docs.sh`, `docs/upstream-docs.txt`); a change opens an issue. CONTRIBUTING lists every official page and what it settles here.
+
+### Changed
+- Health: after a resume or relaunch without Claude Code's verdict on the cache, Cache check says `Resumed <time> – Claude Code gave no verdict …` instead of `No model switch or resume yet`.
+- Health: with no request measured, Warm miss reads `no request measured yet` (dim) instead of a green `none`.
+
+### Docs
+- README: "Three tabs … and a report to take along" – the table's fourth row is `/tokens report`, not a tab.
+- README FAQ: why the chart starts empty after `/tui` or a resume, and what to do when a click on a tab selects text instead (fullscreen, touch or trackpad).
+- README: how to update (`claude plugin update cache-meter@cache-meter`, or auto-update for the marketplace).
+
 ## [0.8.0] – 2026-10-12
 
 Context under control: what fills the conversation, when it compacts, and a report to share.
@@ -166,6 +188,7 @@ Changes for Anthropic's plugin directory, whose validation blocked 0.5.1.
 - Pane `/tokens`: per-request token history, totals, plan limits, cost.
 - `/keepwarm`.
 
+[0.9.0]: https://github.com/florian101010/cache-meter/compare/e830ded...edf5849
 [0.8.0]: https://github.com/florian101010/cache-meter/compare/899ec58...e830ded
 [0.7.0]: https://github.com/florian101010/cache-meter/compare/b0b9980...899ec58
 [0.6.0]: https://github.com/florian101010/cache-meter/compare/92aef39...b0b9980

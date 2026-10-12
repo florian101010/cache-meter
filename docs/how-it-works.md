@@ -24,7 +24,7 @@ Calls: `$.clock.now/every`, `$.command.register`, `$.env.get` (three literal nam
 
 ## State
 
-All drawn values live in `$.state`, declared in `types/index.d.ts` (*interface › Keep a value in $.state*). They survive a reload of the module and are reset by `/clear`, `/resume` and `/branch`.
+All drawn values live in `$.state`, declared in `types/index.d.ts` (*interface › Keep a value in $.state*). They survive a reload of the module and are reset by `/clear`, `/resume` and `/branch`, and gone after a relaunch – `/tui` relaunches Claude Code with the conversation intact (*fullscreen › Enable fullscreen rendering*). When the transcript already holds prompts but no request is recorded (`$.session.turns()` > 0 at that point), the pane says `No request since <time>` and counts requests from there, so an empty chart is not mistaken for an idle session.
 
 | Key | Holds |
 |---|---|
@@ -132,7 +132,7 @@ After each turn the `session.measure` hook reads `$.session.usage({ breakdown: '
 | Warm-miss cause | in this order: the model or an effort that splits the cache changed since the last main request; the pause was ≥ 5 min while a longer TTL was assumed; the loaded MCP tools differ (a fresh `breakdown: 'summary'` estimate – no request – against the last one), only when no tool is behind tool search, because loading a deferred tool keeps the prefix (prompt-caching › *Connecting or removing an MCP server*) and only when both maps carry tool names; an effort change on a model that keeps the cache only with an API key or a subscription; else the causes a mod cannot observe – fast mode, a code-intelligence plugin's LSP tool, a tool deny rule, removed images (prompt-caching › *Actions that invalidate the cache*). Cause and count are written together |
 | Notice | option `expiryNotice`: sent count and the `reason` of the last `{ isSent: false }` (`disabled`, `no-channel`, `no-surface`, `refused`; types: `UiNotifyResult`) or the message of a rejection (a `Notification` hook's deny, a failed write). Sent is not delivered: a terminal does not report back. Fired from the 15 s tick once per cache window (`cache.lastAt`) at 17 % of the TTL left, only interactive, warm, keepwarm off, no request or ping running, TTL one hour, ≥ 10k tokens – `$.ui.notify` sets no rate limit of its own |
 | Subagents | top five by tokens: tokens, requests, hit rate and cache saving – writes priced at the five-minute rate, the subagents' default TTL, or the one-hour rate with `ENABLE_PROMPT_CACHING_1H` (prompt-caching › *Subagents and the cache*, › *Choose the TTL yourself*); `subagentPromptCacheTtl` and an agent's own `cacheTtl` are not read. A failed type-and-task lookup is retried at the agent's next request |
-| Cache check | `PostModelSwitch.prompt_cache_warm` and, on resume/fork, `SessionStart.prompt_cache_likely_expired` – Claude Code's verdict – against Cache Meter's countdown at that moment, taken before either is acted on; skipped while Cache Meter has seen no request (its state is empty after `/resume`) |
+| Cache check | `PostModelSwitch.prompt_cache_warm` and, on resume/fork, `SessionStart.prompt_cache_likely_expired` – Claude Code's verdict – against Cache Meter's countdown at that moment, taken before either is acted on; skipped while Cache Meter has seen no request (its state is empty after `/resume`). A resume that carries no verdict (`prompt_cache_likely_expired` is optional) is named with its time instead of reading as *no resume yet* |
 
 ## Band layout
 
@@ -186,3 +186,19 @@ From `measure.history` (the context size after each turn, last 12): the run sinc
 ## `/tokens report`
 
 Handled before the tab names, so it never opens, closes or switches the pane. It gathers what the pane shows into Markdown (`reportMarkdown` in `hooks/lib.ts`) and passes it to `$.ui.copy`. The command's own output is only a confirmation, in fixed words even when the copy fails: Claude reads a command's text (mods › api › Add a command). `isCopied: true` is not proof – an OSC 52 write does not report back (types: `UiCopyResult`) – so the confirmation asks to paste and check.
+
+## Last stretch, heartbeat, hover
+
+**Redraws.** The 15-second tick redraws the band and pane. While the cache is in its last stretch (17 % of the TTL) or a keepwarm heartbeat shows, a second timer (`$.clock.every(1000)`) redraws once a second and cancels itself when neither holds – far below the terminal's limit of 30 redraws a second (*reference › Limits*). In that stretch the band's dot alternates between normal and dim each second; under a minute the label counts seconds.
+
+**Heartbeat.** After a ping that read the cache, the band shows `· ping ok · <tokens> read` and a bold `↻` for five seconds.
+
+**Hover.** The request chart is one `Raster` per request (two cells wide), each inside its own keyed `Box` in the flow with `hover: { scope }` – a keyed Box is a hover scope "while the pointer is anywhere over it" (types: `BoxProps.key`); an absolutely placed trigger would not work, because "the pointer on it is on its parent" (types: `BoxProps.position`). A hidden row per request (`display: "none"`, `hover: { scope, display: "flex" }`) lies over the time row and is revealed while the pointer is on its column. The surface does this itself – no hook runs. The terminal reports the pointer only in the fullscreen renderer, and the test kit cannot press a hover, so this one is checked by hand.
+
+## Session budget
+
+Option `sessionBudget` (dollars, `0` = off) against `cost.usd`, checked after every main request (see *Live during a turn*) and after each turn – the figure `/cost` and the band show: real spend on an API key, API value on a subscription. The band's cost segment reads `of $<budget>` and turns yellow at 80 % and red at 100 %; `session.measure` and every main request raise a toast when a level is first passed (once per level). A load at session start warns from 0; a reload in a running session, and `/clear`, `/resume`, `/branch`, take the level the current cost has reached without a toast – so a reload repeats no warning, and a `/clear` that starts the cost over warns again.
+
+## Live during a turn
+
+`session.measure` fires after each turn (*reference › Session*), so a long first turn used to show no context fill and no cost. After every main request `turn.step` now reads the plain `$.session.usage()` – "the plain call costs nothing" (types: `$.session.usage`) – and updates `measure`'s fill, tokens, cost, plan limits and their window starts, then checks the session budget. An empty limit list ("empty when none has a reading", types) keeps the last limits and window starts instead of wiping them. The context history, the prompt count and the auto-compact point stay per turn, from `session.measure`, so the auto-compact forecast keeps counting prompts. Whether Claude Code has already added the newest response's cost at that moment is not documented; at the latest the next request or the end of the turn brings it.
