@@ -89,7 +89,8 @@ const Cafe: ClientModule<CafeProps, Local> = (props, surface: ClientSurface<Loca
     surface.setState({ f: 0 })
   }
   const f = surface.state?.f ?? 0
-  const state = CAPTION[props.state] === undefined ? 'warm' : props.state
+  // An unknown word claims nothing: the empty cup.
+  const state = CAPTION[props.state] === undefined ? 'empty' : props.state
   const draw = (seg: Seg) => (
     <Text color={seg.c} backgroundColor={seg.bg} dimColor={seg.dim} bold={seg.bold}>
       {seg.t}
@@ -99,12 +100,7 @@ const Cafe: ClientModule<CafeProps, Local> = (props, surface: ClientSurface<Loca
   if (surface.rows < SCENE_ROWS || surface.columns < SCENE_COLUMNS) {
     return (
       <Text wrap="truncate-end">
-        <Text color={BODY}>▐</Text>
-        <Text color={EYES} backgroundColor={BODY}>
-          {state === 'cold' ? '──' : '●●'}
-        </Text>
-        <Text color={BODY}>▌</Text>
-        <Text dimColor> {CAPTION[state]}</Text>
+        <Text dimColor>{state === 'cold' || state === 'empty' ? '◌' : '⌇'} {CAPTION[state]}</Text>
       </Text>
     )
   }

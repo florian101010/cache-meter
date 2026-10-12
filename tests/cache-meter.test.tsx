@@ -2194,3 +2194,130 @@ test('animation: off with animations = off – the new figure at once, no shine'
   expect(await ui.find({ type: 'Text', text: /^≈? ?\$2\.00$/ })).toBeDefined()
   await ui.unmount()
 })
+
+test('animation: a new column still grows in past the 80 kept requests', async ($, on) => {
+  const { clock, next } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  for (let i = 0; i < 81; i++) await step($)
+  const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  next.write = 150_000
+  next.read = 0
+  await step($)
+  const lastKey = async () => {
+    for (let i = 79; i >= 0; i--) if (await ui.find({ type: 'Raster', key: `requests-${i}` })) return `requests-${i}`
+
+    return ''
+  }
+  const key = await lastKey()
+  const ink = async () =>
+    rasterOf((await ui.find({ type: 'Raster', key }))?.props.cells)
+      .filter(c => c.cp >= 0x2581 && c.cp <= 0x2588)
+      .reduce((sum, c) => sum + (c.cp - 0x2580), 0)
+  await clock.advance(50)
+  const mid = await ink()
+  await clock.advance(600)
+  expect(mid).toBeLessThan(await ink())
+  await ui.unmount()
+})
+
+test('animation: no flash and no count after a tab switch – only changes seen on the Overview', async ($, on) => {
+  const { clock, next } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  next.usd = 1
+  await step($)
+  const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  await ui.press({ key: 'tab-context' })
+  next.usd = 2
+  await step($)
+  await clock.advance(60_000)
+  await ui.press({ key: 'tab-overview' })
+  expect(await digitColor(ui as never)).toBe('success')
+  expect(await ui.find({ type: 'Text', text: /^≈? ?\$2\.00$/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('animation: no shine with animations = off', { options: { animations: 'off' } }, async ($, on) => {
+  const { clock } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  const colours = async () => [...new Set(rasterOf((await ui.find({ type: 'Raster', key: 'countdown' }))?.props.cells).map(c => c.fg))].sort()
+  const before = await colours()
+  await clock.advance(60_250)
+  // The bar is a cell shorter after a minute, so its track colour may appear; a shine would add a
+  // lightened fill colour, which must not.
+  const TRACK_COLOUR = 0x45475a
+  expect((await colours()).filter(c => !before.includes(c) && c !== TRACK_COLOUR)).toEqual([])
+  await ui.unmount()
+})
+
+test('café wiring: the state follows the cache – working, warm, cold', async ($, on) => {
+  const { clock } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  await clock.advance(13_000)
+  const ui = await $.ui.mount({ surface: 'terminal', ...DOCK })
+  const state = async () => ((await ui.find({ key: 'cafe' }))?.props.props as { state: CafeState } | undefined)?.state
+  expect(await state()).toBe('warm')
+  await $.turn.start({ turnId: 't1' } as never)
+  expect(await state()).toBe('working')
+  await $.turn.complete({ turnId: 't1', isAborted: false } as never)
+  await clock.advance(61 * 60_000)
+  expect(await state()).toBe('cold')
+  await ui.unmount()
+})
+
+test('café module: the full scene advances its frames; 19 columns are the one-line fallback', () => {
+  const tag = (type: string) => (props: object) => ({ type, props })
+  let sets = 0
+  let tick: () => void = () => {}
+  const surface = (columns: number) => ({
+    elements: { Box: tag('Box'), Text: tag('Text') },
+    state: undefined,
+    setState: () => (sets += 1),
+    columns,
+    rows: SCENE_ROWS,
+    every: (ms: number, fn: () => void) => {
+      tick = fn
+
+      return () => {}
+    },
+    onPointer: () => () => {},
+    onKey: () => () => {},
+    post: () => {},
+  })
+  expect(JSON.stringify(Cafe({ state: 'warm' }, surface(19) as never))).not.toContain('╭─────╮')
+  sets = 0
+  Cafe({ state: 'warm' }, surface(40) as never)
+  tick()
+  expect(sets).toBe(2)
+})
+
+test('band: the Compact button leaves and comes back on a mounted band', async ($, on) => {
+  world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  const ui = await $.ui.mount({ surface: 'terminal', ...band(120) })
+  expect(await ui.find({ type: 'Button', key: 'compact' })).toBeDefined()
+  await run($, 'tokens', '')
+  expect(await ui.find({ type: 'Button', key: 'compact' })).toBeUndefined()
+  await run($, 'tokens', '')
+  expect(await ui.find({ type: 'Button', key: 'compact' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('pane header: the boundaries – 50 and 36 columns', async ($, on) => {
+  world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  const title = async (bodyColumns: number) => {
+    const ui = await $.ui.mount({ surface: 'terminal', ...PANE, props: { ...PANE.props, bodyColumns } })
+    const t = (await ui.find({ type: 'Text', text: /^◉/ }))?.text
+    const over = (await ui.find({ type: 'Text', text: /^(Overview|Over)$/ }))?.text
+    await ui.unmount()
+
+    return `${t}|${over}`
+  }
+  expect(await title(50)).toBe('◉ Cache Meter|Overview')
+  expect(await title(49)).toBe('◉|Overview')
+  expect(await title(36)).toBe('◉|Overview')
+  expect(await title(35)).toBe('◉|Over')
+})
