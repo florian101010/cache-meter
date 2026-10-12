@@ -1,6 +1,6 @@
 # Cache Meter for Claude Code
 
-**Know before your prompt cache expires.** Cache Meter is a [Claude Code mod](https://code.claude.com/docs/en/plugins/mods/overview) that puts the prompt cache on screen: a countdown until it expires, the hit rate of every request, how full the context is and what each request cost – and, if you ask, it keeps the cache warm while you step away.
+**Keep your prompt cache warm – and see when it is about to expire.** Cache Meter is a [Claude Code mod](https://code.claude.com/docs/en/plugins/mods/overview) that puts the prompt cache on screen – a countdown until it expires, the hit rate of every request, how full the context is – and with **`/keepwarm`** keeps it alive through a break, so you don't pay to re-write your whole conversation when you come back.
 
 [![CI](https://github.com/florian101010/cache-meter/actions/workflows/ci.yml/badge.svg)](https://github.com/florian101010/cache-meter/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -15,19 +15,51 @@
 
 Claude Code re-sends your whole conversation with every message and relies on the prompt cache so the API doesn't reprocess it. The cache lives for one hour after the last request on a Claude subscription, five minutes on an API key. Step away longer and the next message re-writes the entire context – a [noticeably slower turn](https://code.claude.com/docs/en/prompt-caching#cache-lifetime), billed at the [cache write rate](https://code.claude.com/docs/en/prompt-caching#check-cache-performance) – and nothing on screen tells you it is about to happen.
 
-Cache Meter shows it, all the time:
+Cache Meter fixes both halves of that:
 
-- **A countdown** until the cache expires, turning yellow when it is about to.
+- **`/keepwarm`** keeps the cache alive through a break – lunch, a meeting, a long review. A ping costs about **1/20 of a re-write** (see [below](#keep-the-cache-warm-with-keepwarm)), with hard limits so it never runs up your plan.
+- **A countdown** until the cache expires, turning yellow when it is about to – so you know when a break gets expensive.
 - **The hit rate** of every request, so a cache that keeps missing stands out.
 - **Context fill** against the auto-compact point, with a Compact button.
-- **Every request's tokens** in a pane – read from cache, written to cache, uncached – plus subagents, cost and your 5-hour and weekly plan limits.
-- **`/keepwarm`** to keep the cache alive through a break, with hard limits so it never runs up your plan.
+- **Every request's tokens** in a pane – read from cache, written to cache, uncached – plus subagents, cost, cold re-writes and your 5-hour and weekly plan limits.
 
 It only listens and draws: it never touches your prompts or tool calls, writes nothing to disk and calls nothing except the pings you start.
 
 > **What is a Claude Code mod?** A mod is a Claude Code plugin whose TypeScript hooks run *inside* Claude Code: it can draw above the prompt, open panes, add slash commands and react to events such as each model request. See the official [mods overview](https://code.claude.com/docs/en/plugins/mods/overview). Cache Meter is a mod only – no skills, no MCP server, no settings hooks.
 
 > **For AI coding agents:** start with **[AGENTS.md](AGENTS.md)** – what the mod does, how to install it for a user, how to verify and test it, and the rules for changing it, on one page. Machine-readable index: [llms.txt](llms.txt).
+
+## Keep the cache warm with `/keepwarm`
+
+Before you step away, type:
+
+```text
+/keepwarm          # 2 hours
+/keepwarm 4h       # any window from 10m to 8h
+/keepwarm off      # stop early
+```
+
+The band shows `↻` while it runs. Whenever 10 minutes or less of the one-hour TTL are left and no request is running, Cache Meter sends one tiny request over your conversation (`$.model.fork`, answer: `warm`). It reads the cached context, and a cache read keeps the entry alive for the duration of the original write – one hour for the main conversation ([pricing › prompt caching](https://platform.claude.com/docs/en/about-claude/pricing): cache read, *"same duration as the preceding write"*). That is roughly one ping every 50 minutes.
+
+**What it costs, compared with letting the cache expire** (multipliers of the base input price, from the [pricing page](https://platform.claude.com/docs/en/about-claude/pricing)):
+
+| | Re-write after expiry (1-hour cache write) | One ping (cache read) | Pings that cost as much as one re-write |
+|---|---|---|---|
+| Most models | 2× | 0.1× | ≈ 20 |
+| Claude Opus 5.5, Claude Sonnet 5.5 | 2× | 0.05× | ≈ 40 |
+| Claude Fable 5.1 | 2× | 0.025× | ≈ 80 |
+
+Each ping also pays for its few uncached tokens and its one-word answer. On a subscription these are shares of your plan limits rather than dollars; how cache reads count towards the 5-hour and weekly limits is not documented, so watch the limits in `/tokens`.
+
+**Safety limits** – keepwarm switches itself off, with a toast, when:
+
+- a ping reads less than half of the context, nothing at all, or writes 10 % or more of what it read (the cache was not what it should be, so further pings would be full re-writes);
+- 12 pings are done, the window ends, the cache is empty or expired, or a ping gets no answer;
+- the TTL is five minutes (API key, cloud provider, or a plan limit reached) – it refuses to start there.
+
+It runs only in interactive sessions, never drops a message, and after an expensive cold re-write it only *suggests* `/keepwarm` – it never switches itself on.
+
+**Check that it works on your setup:** 10–50 minutes after a ping, run `/usage` – the *Prompt cache (main)* line should say warm – or watch the hit rate of your next request in the band.
 
 ## Quick start
 
@@ -151,7 +183,7 @@ Data flow, state, the cold-rewrite rule and every threshold: [docs/how-it-works.
 | Topic | Status |
 |---|---|
 | TTL | derived, not measured: no mod interface reports it per request. The pane shows the rule that produced it. Check with `/usage` → *Prompt cache (main)* |
-| Does a `/keepwarm` ping extend the one-hour cache? | **Not officially documented, but observed.** Forks get the five-minute TTL themselves ([which TTL each request gets](https://code.claude.com/docs/en/prompt-caching#which-ttl-each-request-gets)); the mixed case is undocumented. [karanb192/cache-tax](https://github.com/karanb192/cache-tax) observed a fork ping keeping the one-hour cache alive in one run (Fable 5.1, subscription, 2026-09-19). Verify on your setup with `/usage` 6–50 minutes after a ping |
+| Does a `/keepwarm` ping extend the one-hour cache? | **Documented for cache reads in general**: a cache hit lasts the "same duration as the preceding write" ([pricing › prompt caching](https://platform.claude.com/docs/en/about-claude/pricing)), one hour for the main conversation. Forks get the five-minute TTL for what they *write* ([which TTL each request gets](https://code.claude.com/docs/en/prompt-caching#which-ttl-each-request-gets)), but a keepwarm fork writes nothing of its own ("its own tail never cached", `$.model.fork` in the type declarations). Also observed in practice with the same mechanism by [karanb192/cache-tax](https://github.com/karanb192/cache-tax) (Fable 5.1, subscription, 2026-09-19). Verify on your setup with `/usage` |
 | Does a ping reach the mod's own `turn.step` hook? | **Undocumented.** If it does, the ping shows as one row in the history; the countdown stays right. There is no filter, because a filter would drop real requests that end during a ping |
 | Countdown after `--resume` | `seconds_since_last_response` counts from the end of the last response, so the countdown is optimistic by that response's duration. If Claude Code reports `prompt_cache_likely_expired`, the cache is shown cold |
 | Dollar amounts | only Claude Code's own estimates and the `/cost` total – no price table of its own |
@@ -168,7 +200,9 @@ More in [SECURITY.md](SECURITY.md).
 
 ## FAQ
 
-**Does it cost anything?** No – except `/keepwarm`, which you start yourself. Each ping reads your context from the cache at the cache-read price and counts against your plan; it stops after 12 pings at most.
+**Does it cost anything?** No – except `/keepwarm`, which you start yourself. Each ping reads your context at the cache-read price – about 1/20 of re-writing it after expiry (1/40 on Opus 5.5 and Sonnet 5.5, 1/80 on Fable 5.1) – and counts against your plan; at most 12 pings per run.
+
+**Does `/keepwarm` really keep the cache alive?** A cache read keeps the entry for the duration of its original write – one hour for the main conversation ([pricing](https://platform.claude.com/docs/en/about-claude/pricing)). Check it on your setup with `/usage` after a break (see [above](#keep-the-cache-warm-with-keepwarm)).
 
 **Isn't this what `/usage` shows?** `/usage` reports the session's hit ratio and whether the cache is warm, when you ask. Cache Meter shows how long it stays warm, all the time, per request, with history – and can keep it warm.
 

@@ -2,7 +2,7 @@
   "name": "cache-meter",
   "displayName": "Cache Meter",
   "version": "0.3.0",
-  "description": "Claude Code mod: see when your prompt cache expires, its hit rate, context fill and every request's tokens above the prompt – and keep the cache warm through a break with /keepwarm.",
+  "description": "Claude Code mod: keep your prompt cache warm through a break with /keepwarm, and see when it expires, its hit rate, context fill and every request's tokens above the prompt.",
   "author": {
     "name": "Florian Grimmer",
     "url": "https://github.com/florian101010"
@@ -15,12 +15,12 @@
     "claude-code-mod",
     "prompt-caching",
     "prompt-cache",
-    "cache",
+    "keepwarm",
+    "cache-warming",
     "tokens",
     "token-usage",
     "context-window",
     "auto-compact",
-    "keepwarm",
     "cost"
   ],
   "documentationUrl": "https://github.com/florian101010/cache-meter#readme",
