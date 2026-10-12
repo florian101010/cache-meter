@@ -2,6 +2,18 @@
 
 All notable changes to Cache Meter, a Claude Code mod. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] – 2026-10-12
+
+A café that acts out the cache.
+
+### Added
+- **The café** (option `animations`, on by default): docked beside the chat, the room under the request chart shows a pixel barista and a cup – stirring while Claude works, coffee dripping into the cup when a fresh cache is written, steam and a sip while it is warm, thin steam and a watched clock in the last stretch, a puff on a keepwarm ping, a grey cup and a nap once it is cold. A separate surface module (`hooks/cafe.tsx`, a `Client`) with its own frame clock at four frames a second, only while the Overview is on screen; it gets nothing but the cache's state word. With too little room, one line.
+- **Minute flash:** the big countdown lights up once at each new minute.
+- `ui.fault`: if the café's file fails, the pane leaves it out.
+
+### Docs
+- README: new screenshots – the full terminal with the docked dashboard, crops of Overview, Context and Health, the band; a section on the café; FAQ on turning animations off. PRIVACY, SECURITY, AGENTS, CONTRIBUTING, llms.txt and how-it-works describe the animation file.
+
 ## [0.9.0] – 2026-10-12
 
 Alive: the band moves when it matters, and a budget keeps a session in check.
@@ -188,7 +200,8 @@ Changes for Anthropic's plugin directory, whose validation blocked 0.5.1.
 - Pane `/tokens`: per-request token history, totals, plan limits, cost.
 - `/keepwarm`.
 
-[0.9.0]: https://github.com/florian101010/cache-meter/compare/feat/v0.8-context...HEAD
+[0.10.0]: https://github.com/florian101010/cache-meter/compare/feat/v0.9-alive...HEAD
+[0.9.0]: https://github.com/florian101010/cache-meter/compare/feat/v0.8-context...feat/v0.9-alive
 [0.8.0]: https://github.com/florian101010/cache-meter/compare/feat/v0.7-why-and-when...feat/v0.8-context
 [0.7.0]: https://github.com/florian101010/cache-meter/compare/feat/v0.6-saves-money...feat/v0.7-why-and-when
 [0.6.0]: https://github.com/florian101010/cache-meter/compare/92aef39...feat/v0.6-saves-money

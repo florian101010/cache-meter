@@ -5,9 +5,12 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
+import Cafe, { FRAME_MS, SCENE_ROWS, sceneRows } from '../hooks/cafe'
+import type { CafeState } from '../hooks/cafe'
 import {
   FIVE_MIN,
   HOUR,
+  cafeState,
   cacheSaving,
   columnCells,
   forecast,
@@ -1838,4 +1841,127 @@ test('Health: a resume without Claude Code\'s verdict is named, not "no resume y
   await $.classic.SessionStart({ source: 'resume', seconds_since_last_response: 60, context_tokens: 100_000 } as never)
   expect(await healthText($, /^Resumed \d\d:\d\d – Claude Code gave no verdict on the cache then/)).toBeDefined()
   expect(await healthText($, /No model switch or resume yet/)).toBeUndefined()
+})
+
+
+const DOCK = { ...PANE, props: { ...PANE.props, placement: 'dock' as const } }
+
+test('café: docked on the Overview, a Client with the cache state grows into the room left', async ($, on) => {
+  world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  const ui = await $.ui.mount({ surface: 'terminal', ...DOCK })
+  const cafe = await ui.find({ key: 'cafe' })
+  expect(cafe?.props).toMatchObject({ module: 'hooks/cafe.tsx', flexGrow: 1 })
+  expect((cafe?.props.props as { state: CafeState }).state).toBe('brewing')
+  await ui.unmount()
+})
+
+test('café: not above the prompt, not on another tab', async ($, on) => {
+  world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  let ui = await $.ui.mount({ surface: 'terminal', ...PANE, props: { ...PANE.props, placement: 'inline' as const } })
+  expect(await ui.find({ key: 'cafe' })).toBeUndefined()
+  await ui.unmount()
+  await run($, 'tokens', 'context')
+  ui = await $.ui.mount({ surface: 'terminal', ...DOCK })
+  expect(await ui.find({ key: 'cafe' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('café: off with animations = off', { options: { animations: 'off' } }, async ($, on) => {
+  world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  const ui = await $.ui.mount({ surface: 'terminal', ...DOCK })
+  expect(await ui.find({ key: 'cafe' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('café state: a ping first, then brewing, work, cold, empty, the last stretch, warm', () => {
+  expect(cafeState('warm', false, true, true, true)).toBe('ping')
+  expect(cafeState('warm', false, true, false, true)).toBe('brewing')
+  expect(cafeState('expired', false, true, false, false)).toBe('working')
+  expect(cafeState('expired', false, false, false, false)).toBe('cold')
+  expect(cafeState('empty', false, false, false, false)).toBe('empty')
+  expect(cafeState('warm', true, false, false, false)).toBe('last')
+  expect(cafeState('warm', false, false, false, false)).toBe('warm')
+})
+
+test('café scene: steam while warm, z\'s while cold, a clock in the last stretch, a cup that fills while brewing', () => {
+  const text = (state: CafeState, f: number) => sceneRows(state, f).map(r => r.map(s => s.t).join(''))
+  expect(sceneRows('warm', 1)).toHaveLength(SCENE_ROWS - 1)
+  expect(text('warm', 1).slice(0, 2).join('')).toMatch(/[()]/)
+  expect(text('cold', 1).slice(0, 2).join('')).not.toMatch(/[()]/)
+  expect(text('cold', 1).slice(0, 2).join('')).toMatch(/z/i)
+  expect(text('last', 1)[0]).toMatch(/[◷◶◵◴]/)
+  expect(text('empty', 1)[3]).toContain('│     ├')
+  const fill = (f: number) => (text('brewing', f)[3]!.match(/▓/g) ?? []).length
+  expect(fill(4)).toBeGreaterThan(fill(0))
+  // Every row of the art keeps the cup in the same columns.
+  const cup = text('warm', 1).slice(2).map(r => r.search(/[╭│╰]/))
+  expect(new Set(cup).size).toBe(1)
+  // It moves: two frames apart, the steam differs.
+  expect(text('warm', 1).slice(0, 2)).not.toEqual(text('warm', 2).slice(0, 2))
+})
+
+test('café module: one frame timer, a one-line fallback without room', async () => {
+  // Stand-ins for the surface's element table: each element becomes plain data the test can read.
+  const tag = (type: string) => (props: object) => ({ type, props })
+  const elements = { Box: tag('Box'), Text: tag('Text') }
+  let timers = 0
+  let sets = 0
+  const surface = (rows: number) => ({
+    elements,
+    state: undefined,
+    setState: () => (sets += 1),
+    columns: 40,
+    rows,
+    every: (ms: number) => {
+      expect(ms).toBe(FRAME_MS)
+      timers += 1
+
+      return () => {}
+    },
+    onPointer: () => () => {},
+    onKey: () => () => {},
+    post: () => {},
+  })
+  const small = JSON.stringify(Cafe({ state: 'cold' }, surface(3) as never))
+  expect(small).toContain('cache cold · napping')
+  expect(small).not.toContain('╭─────╮')
+  expect(timers).toBe(1)
+  expect(sets).toBe(1)
+  const full = JSON.stringify(Cafe({ state: 'warm' }, surface(SCENE_ROWS) as never))
+  expect(full).toContain('╭─────╮')
+  expect(full).toContain('cache warm · sipping')
+})
+
+async function digitColor(ui: { find: (q: never) => Promise<{ props: Record<string, unknown> } | undefined> }) {
+  return (await ui.find({ type: 'Text', text: /[█▀▄]{2}/ } as never))?.props.color
+}
+
+test('countdown: a new minute flashes the digits once, then they return to the state colour', async ($, on) => {
+  const { clock } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  const ui = await $.ui.mount({ surface: 'terminal', ...DOCK })
+  // The first draw does not flash.
+  expect(await digitColor(ui as never)).toBe('success')
+  await clock.advance(60_000)
+  expect(await digitColor(ui as never)).toBe('text')
+  await clock.advance(500)
+  expect(await digitColor(ui as never)).toBe('success')
+  await ui.unmount()
+})
+
+test('countdown: no flash with animations = off', { options: { animations: 'off' } }, async ($, on) => {
+  const { clock } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  const ui = await $.ui.mount({ surface: 'terminal', ...DOCK })
+  await clock.advance(60_000)
+  expect(await digitColor(ui as never)).toBe('success')
+  await ui.unmount()
 })

@@ -1,5 +1,6 @@
 // Pure helpers of cache-meter: no `$`, so the tests call them directly.
 
+import type { CafeState } from './cafe'
 import type { CacheInfo, ContextMap, Limit, LimitStart, ToolResults, Usage4 } from '../types'
 
 export const HOUR = 3_600_000
@@ -754,4 +755,21 @@ export function reportMarkdown(r: ReportData): string {
   lines.push('', '_Made with [Cache Meter](https://github.com/florian101010/cache-meter)._')
 
   return lines.join('\n')
+}
+
+/** The café's word for the cache: what the barista and the cup act out. */
+export function cafeState(
+  kind: 'empty' | 'warm' | 'expired',
+  isLow: boolean,
+  isWorking: boolean,
+  isBeating: boolean,
+  isBrewing: boolean,
+): CafeState {
+  if (isBeating) return 'ping'
+  if (isBrewing) return 'brewing'
+  if (isWorking) return 'working'
+  if (kind === 'expired') return 'cold'
+  if (kind === 'empty') return 'empty'
+
+  return isLow ? 'last' : 'warm'
 }

@@ -42,7 +42,7 @@ Type **`/keepwarm`** before lunch or a meeting. Shortly before expiry one tiny p
 </tr>
 </table>
 
-**New in 0.6–0.9:** cost under every answer · warnings before a switch re-writes the cache · the cause of every warm miss · what fills your conversation · auto-compact forecast · per-subagent use · expiry notification · session budget · live last minute and keepwarm heartbeat · hover details · `/tokens report`. → [changelog](CHANGELOG.md)
+**New in 0.6–0.10:** a barista who acts out your cache · cost under every answer · warnings before a switch re-writes the cache · the cause of every warm miss · what fills your conversation · auto-compact forecast · per-subagent use · expiry notification · session budget · live last minute and keepwarm heartbeat · a flash at each new minute · hover details · `/tokens report`. → [changelog](CHANGELOG.md)
 
 **Install** – in your shell, then start a new Claude Code session:
 
@@ -71,11 +71,11 @@ Safe by design: it never changes your prompts, answers or tool calls, never keep
 
 The band above the prompt, always there:
 
-![The band above the prompt: cache 60m with a green countdown bar, 100% hit, context 15%, auto-compact at 97%, API value $1.06 and a Compact button](https://raw.githubusercontent.com/florian101010/cache-meter/assets/screenshots/band.png)
+![The band above the prompt: cache 56m with a green countdown bar, 98% hit, context 11%, auto-compact at 97%, API value $0.48 and a Compact button, above the prompt and Claude Code's status line](https://raw.githubusercontent.com/florian101010/cache-meter/assets/screenshots/v0.9/band.webp)
 
 `/tokens` – the dashboard, here as a sidebar beside the chat (Claude Code's fullscreen renderer):
 
-<img src="https://raw.githubusercontent.com/florian101010/cache-meter/assets/screenshots/overview.png" width="640" alt="The /tokens overview: a big 60-minute countdown marked WARM with the expiry time and where keepwarm would ping, a keepwarm card with a 'Keep warm 2h' button, the context gauge with the auto-compact marker, session totals with 'cache saved 40% of input cost' and the plan limits, and a column chart of every request">
+<img src="https://raw.githubusercontent.com/florian101010/cache-meter/assets/screenshots/v0.9/full-overview.webp" width="100%" alt="Claude Code on a Mac in the fullscreen renderer: the conversation on the left, and docked on the right the /tokens dashboard – a big 59-minute countdown marked WARM with a 98% hit rate, the keepwarm card, context at 11% of 1.0M, the session with 44% saved by caching and plan limits at 12% and 39%, and the request chart from 20:09 to 20:22">
 
 > **What is a Claude Code mod?** A mod is a Claude Code plugin whose TypeScript hooks run *inside* Claude Code: it can draw above the prompt, open panes, add slash commands and react to events such as each model request. See the official [mods overview](https://code.claude.com/docs/en/plugins/mods/overview). Cache Meter is a mod only – no skills, no MCP server, no settings hooks.
 
@@ -154,9 +154,32 @@ It runs only in interactive sessions, never drops a message, and after an expens
 | **Report** | Everything above as Markdown on the clipboard – to share, file or compare | `/tokens report` |
 
 <p>
-<img src="https://raw.githubusercontent.com/florian101010/cache-meter/assets/screenshots/context.png" width="49%" alt="The Context tab: where the context goes by category, the heaviest memory files, MCP servers, skills listed of total and agents">
-<img src="https://raw.githubusercontent.com/florian101010/cache-meter/assets/screenshots/health.png" width="49%" alt="The Health tab: session age, prompts, cost as API value per prompt, tokens per prompt, stop reasons, API errors, server-side tool calls and the cache check">
+<img src="https://raw.githubusercontent.com/florian101010/cache-meter/assets/screenshots/v0.9/overview.webp" width="32%" alt="The Overview tab: countdown 59 minutes WARM, hit 98%, keepwarm off with a 'Keep warm 2h' button, context 11%, session with cache saved 44%, plan limits and the request chart">
+<img src="https://raw.githubusercontent.com/florian101010/cache-meter/assets/screenshots/v0.9/context.webp" width="32%" alt="The Context tab: context 11%, where it goes by category with messages and memory files largest, and the heaviest items – CLAUDE.md files, MCP servers, skills and agents">
+<img src="https://raw.githubusercontent.com/florian101010/cache-meter/assets/screenshots/v0.9/health.webp" width="32%" alt="The Health tab: session age, prompts and requests, cost as API value per hour and per prompt, tokens per prompt, stops and errors, and Claude Code's cache check">
 </p>
+
+<details>
+<summary>The Context and Health tabs in the full terminal</summary>
+
+<img src="https://raw.githubusercontent.com/florian101010/cache-meter/assets/screenshots/v0.9/full-context.webp" width="100%" alt="Claude Code in the fullscreen renderer with the /tokens dashboard docked on the Context tab">
+<img src="https://raw.githubusercontent.com/florian101010/cache-meter/assets/screenshots/v0.9/full-health.webp" width="100%" alt="Claude Code in the fullscreen renderer with the /tokens dashboard docked on the Health tab">
+</details>
+
+### A barista who keeps an eye on your cache
+
+Docked beside the chat, the free room under the request chart becomes a small café – a pixel barista in Claude-orange and a cup that act out the cache, four frames a second:
+
+| The cache | The café |
+|---|---|
+| Claude is working | the barista stirs |
+| fresh cache written | coffee drips into the cup |
+| warm | steam rises, the barista takes a sip now and then |
+| last stretch | the steam thins out, the barista watches the clock |
+| keepwarm ping | a puff of steam – topped up |
+| cold | the cup goes grey, the barista naps |
+
+The big countdown flashes once at each new minute. Both run only while the Overview is on screen and stop with the option `animations` set to `off`. The café is a separate file that gets nothing but that one word – no session data, no files, no network.
 
 **Where it shows.** In Claude Code's classic renderer the pane sits above the prompt, and your next prompt closes it so the conversation keeps its room. In the fullscreen renderer (`/tui fullscreen`) it docks beside the chat as a sidebar, opens there by itself at session start (option [`autoSidebar`](#configuration)) and stays open while you work.
 
@@ -283,7 +306,7 @@ or `/plugin` → **Installed** → Cache Meter → **Update now**. To update aut
 
 ## Configuration
 
-Five options. Set them with `/config` → `cache-meter.<option>`, or in `~/.claude/settings.json` under `pluginConfigs` → `"cache-meter@cache-meter"` (marketplace install) or `"cache-meter@inline"` (loaded with `--plugin-dir` or `CLAUDE_CODE_PLUGIN_DIRS`) → `options`.
+Six options. Set them with `/config` → `cache-meter.<option>`, or in `~/.claude/settings.json` under `pluginConfigs` → `"cache-meter@cache-meter"` (marketplace install) or `"cache-meter@inline"` (loaded with `--plugin-dir` or `CLAUDE_CODE_PLUGIN_DIRS`) → `options`.
 
 | Option | Values | What it does |
 |---|---|---|
@@ -292,6 +315,7 @@ Five options. Set them with `/config` → `cache-meter.<option>`, or in `~/.clau
 | `turnLine` | `on` (default), `off` | The line under each answer with what it cost and how it used the cache. `off`: no line |
 | `sessionBudget` | `0` (default, off) or dollars, e.g. `5` | A budget for one session, compared with the figure the band shows (spend on an API key, API value on a subscription): the band shows `of $5.00`, turns yellow at 80 % and red at 100 %, and a toast appears once at each. The Health tab shows the share |
 | `expiryNotice` | `off` (default), `on` | `on`: a terminal notification once per cache window when about 10 minutes are left and keepwarm is off – only with a one-hour TTL and at least 10k tokens of context. The Health tab shows how many were sent (a terminal does not confirm delivery), or why one was not (`disabled`, `no-channel`, …) |
+| `animations` | `on` (default), `off` | `on`: in the docked dashboard a small café under the request chart acts out the cache, and the big countdown flashes once at each new minute. `off`: neither – for a calm screen, or a terminal app that leaves traces when parts of the screen redraw |
 
 With `auto`, Cache Meter follows Claude Code's own TTL controls and your plan state ([full order](docs/how-it-works.md#how-the-ttl-is-derived)). On an API key or a cloud provider Claude Code's default is five minutes: set `cacheTtl` to `5m`, or set `promptCacheTtl`.
 
@@ -326,6 +350,7 @@ With `auto`, Cache Meter follows Claude Code's own TTL controls and your plan st
 | `command.run` (`/tokens`, `/keepwarm` only) | Answers its own two commands; `/tokens report` puts a Markdown report on the clipboard (`$.ui.copy`) and prints only a confirmation | Other commands are not matched |
 | `prompt.submit` | Closes its own pane above the prompt when you send a prompt | Nothing – the prompt is not read, changed or dropped |
 | `ui.close` | Notes that you closed its pane, so it doesn't reopen | Nothing – it never keeps a pane open |
+| `ui.fault` | Notes that the café's animation file failed to load or run, and leaves the café out from then on | Nothing – the rest of the pane draws as before |
 | `ui.render` (band, its own pane) | Draws the band – keeping what other mods draw below it – and the `/tokens` pane | Only its own drawing |
 
 `claude plugin validate .` prints this list for the version you have.
@@ -377,6 +402,12 @@ Claude Code places it, not the mod: beside the chat only in its fullscreen rende
 <summary><b>Why does the request chart start empty after <code>/tui</code> or a resume?</b></summary>
 
 Cache Meter keeps its history in memory only, never on disk. `/tui fullscreen` and `/tui default` switch the renderer by relaunching Claude Code with the conversation intact ([fullscreen › Enable fullscreen rendering](https://code.claude.com/docs/en/fullscreen#enable-fullscreen-rendering)), and so does `claude --resume`: the conversation comes back, the history does not. The pane then says `No request since <time>` and counts requests from there; the countdown continues from Claude Code's own report of the last answer.
+</details>
+
+<details>
+<summary><b>Can I turn the animations off?</b></summary>
+
+Yes: `/config` → `cache-meter.animations` → `off`. The café under the request chart and the minute flash go away; the band's last-stretch pulse and the keepwarm heartbeat stay, because they tell you something. Worth it on a terminal app that leaves traces of redrawn cells behind (seen with Termius on an iPad), or simply for a calmer screen.
 </details>
 
 <details>

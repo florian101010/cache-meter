@@ -117,6 +117,7 @@ Images (README screenshots, header, icon and social preview sources) live on the
 hooks/hooks.json                  points to the hooks module
 hooks/register.tsx                all hooks: data sources, band, pane, commands, keepwarm
 hooks/lib.ts                      pure functions without $ (TTL derivation, formatting) – unit-testable
+hooks/cafe.tsx                    the café animation, a surface module (Client) without $ – not in hooks.json
 types/index.d.ts                  type contract of every $.state value
 tests/cache-meter.test.tsx        tests run by `claude plugin test`
 docs/how-it-works.md              design and data flow

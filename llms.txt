@@ -20,6 +20,7 @@
 - [.claude-plugin/plugin.json](https://raw.githubusercontent.com/florian101010/cache-meter/main/.claude-plugin/plugin.json): manifest and the cacheTtl option
 - [hooks/register.tsx](https://raw.githubusercontent.com/florian101010/cache-meter/main/hooks/register.tsx): all hooks
 - [hooks/lib.ts](https://raw.githubusercontent.com/florian101010/cache-meter/main/hooks/lib.ts): pure functions
+- [hooks/cafe.tsx](https://raw.githubusercontent.com/florian101010/cache-meter/main/hooks/cafe.tsx): the café animation (a Client surface module, no mods API)
 
 ## Official Claude Code documentation
 

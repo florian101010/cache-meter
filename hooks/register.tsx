@@ -78,6 +78,7 @@ import {
   tally,
   stopLabel,
   errorLabel,
+  cafeState,
 } from './lib'
 import type { BreakdownLike, Mark } from './lib'
 
@@ -165,6 +166,19 @@ let lastResumeAt: number | null = null
 let openTurns: Record<string, { usd: number | null; requests: number }> = {}
 // Where the surface last seated the pane: beside a fullscreen transcript (dock) or above the prompt (inline).
 let seat: 'dock' | 'inline' | null = null
+// Option animations: the café under the request chart and the countdown's flash at each new minute.
+let animations = true
+// The café's Client failed on a surface (ui.fault): left out from then on, the pane drawn without it.
+let isCafeBroken = false
+// When a request last wrote a fresh cache (first or cold): the café brews for a moment.
+let brewedAt: number | null = null
+// The countdown's minute as last drawn, and until when its digits flash after it changed.
+let shownMinute: string | null = null
+let flashUntil = 0
+let isFlashPending = false
+const FLASH_MS = 450
+// How long the café brews after a request wrote a fresh cache.
+const BREW_MS = 12_000
 // Opening the dashboard as a sidebar by itself (option autoSidebar): only once the band has been drawn
 // fullscreen, once per load, and never again after the person closed it.
 let autoSidebar = 'auto'
@@ -697,6 +711,12 @@ export const register: Register = (on, options) => {
   historySince = null
   lastResumeAt = null
   openTurns = {}
+  animations = options.animations !== 'off'
+  isCafeBroken = false
+  brewedAt = null
+  shownMinute = null
+  flashUntil = 0
+  isFlashPending = false
 
   on('session.start', async ($, e, next) => {
     const result = await next(e)
@@ -819,6 +839,7 @@ export const register: Register = (on, options) => {
         // start, after /compact or /clear) writes the cache for the first time: not a loss.
         const isCold = wasCold && before !== null && u.write >= COLD_MIN && u.read < u.write
         const kind = isCold ? ('cold' as const) : before === null ? ('first' as const) : undefined
+        if (kind !== undefined) brewedAt = await $.clock.now()
         await update($, stepsA, list => [...list, { ...u, at: startedAt, model: usage.model, ...(kind ? { kind } : {}) }].slice(-STEPS_KEPT))
         await update($, totalsA, t => ({ ...t, main: add(t.main, u), mainSteps: t.mainSteps + 1 }))
         // A warm cache re-written anyway: counted with the pause before it and its most likely cause, in
@@ -911,6 +932,8 @@ export const register: Register = (on, options) => {
       usd = null
     }
     openTurns = { ...openTurns, [e.turnId]: { usd, requests: 0 } }
+    // The café shows Claude at work.
+    if (animations) $.ui.invalidate('ui.render')
 
     return next(e)
   })
@@ -925,6 +948,7 @@ export const register: Register = (on, options) => {
     const open = openTurns[e.turnId]
     const { [e.turnId]: _done, ...rest } = openTurns
     openTurns = rest
+    if (animations) $.ui.invalidate('ui.render')
     const result = await next(e)
     // Only where a person reads it: under -p and the SDK nothing of Cache Meter's is drawn (README › Requirements).
     if (!isMain || !showTurnLine || !isInteractive || e.isAborted || !e.usage || open === undefined || open.requests === 0) return result
@@ -1102,6 +1126,14 @@ export const register: Register = (on, options) => {
   })
 
   // The person closed the dashboard (its close mark or ctrl+x x): it stays closed this session.
+  // The café's surface module failed (did not load, draw or run): the engine draws the pane again by
+  // itself, and the pane leaves the Client out from then on (reference › ui.fault).
+  on('ui.fault', async ($, e, next) => {
+    isCafeBroken = true
+
+    return next(e)
+  })
+
   on('ui.close', async ($, e, next) => {
     if (e.id === PANE && e.origin.kind === 'person') isDismissed = true
 
@@ -1312,7 +1344,20 @@ export const register: Register = (on, options) => {
     const stateColor = isWarm ? (isLow ? 'warning' : 'success') : 'error'
     const remaining = isWarm ? status.remaining : 0
     const isSeconds = isWarm && remaining < 60_000
-    const digits = tall(isWarm ? String(Math.ceil(remaining / (isSeconds ? 1000 : 60_000))) : '--')
+    const number = isWarm ? String(Math.ceil(remaining / (isSeconds ? 1000 : 60_000))) : '--'
+    const digits = tall(number)
+    // A new minute on the Overview flashes the digits once (option animations): not on the first
+    // draw, after a reload, on another tab, nor while the last minute counts seconds.
+    const minuteNow = animations && tab === 'overview' && isWarm && !isSeconds ? number : null
+    if (minuteNow !== null && shownMinute !== null && minuteNow !== shownMinute) {
+      flashUntil = now + FLASH_MS
+      if (!isFlashPending) {
+        isFlashPending = true
+        $.clock.after(FLASH_MS + 50, () => endFlash($))
+      }
+    }
+    shownMinute = minuteNow
+    const isFlash = minuteNow !== null && now < flashUntil
     const lastAt = cache !== null && cache.lastAt > 0 ? cache.lastAt : null
     const stateWord = isWarm ? 'WARM' : status.kind === 'empty' ? 'EMPTY' : 'EXPIRED'
     const stateNote = isWarm
@@ -1336,7 +1381,7 @@ export const register: Register = (on, options) => {
         <Box flexDirection="row">
           <Box flexDirection="column">
             {digits.map(row => (
-              <Text color={stateColor} bold>
+              <Text color={isFlash ? 'text' : stateColor} bold>
                 {row}
               </Text>
             ))}
@@ -1988,8 +2033,13 @@ export const register: Register = (on, options) => {
       </Button>
     )
 
+    // The café under the request chart (option animations): only docked, where the pane has the room's
+    // height; the outer Box takes it, and the café grows into what the cards leave (BoxProps.flexGrow).
+    const Client = 'Client' in elements ? elements.Client : null
+    const showCafe = animations && !isCafeBroken && Client !== null && e.props.placement === 'dock' && tab === 'overview'
+
     return (
-      <Box flexDirection="column">
+      <Box flexDirection="column" minHeight={showCafe ? e.props.scroll.bodyRows : undefined}>
         <Box flexDirection="row" justifyContent="space-between">
           <Box flexDirection="row" columnGap={2}>
             <Text color="claude" bold>
@@ -2024,6 +2074,14 @@ export const register: Register = (on, options) => {
             </Box>
           ))}
         {tab === 'overview' && requestsCard}
+        {showCafe && Client !== null && (
+          <Client
+            key="cafe"
+            module="./cafe.tsx"
+            props={{ state: cafeState(status.kind, isLow, Object.keys(openTurns).length > 0, heartbeat !== null && heartbeat.until > now, brewedAt !== null && now - brewedAt < BREW_MS) }}
+            flexGrow={1}
+          />
+        )}
         {tab === 'context' && contextView}
         {tab === 'health' && healthView}
         <Box flexDirection="row" justifyContent="space-between">
@@ -2125,3 +2183,10 @@ function columnDetail(s: Step, width: number): string {
 
   return text.padEnd(width)
 }
+
+// The countdown's flash ends: one redraw after it, at most one pending at a time.
+function endFlash($: EngineInterface) {
+  isFlashPending = false
+  $.ui.invalidate('ui.render')
+}
+

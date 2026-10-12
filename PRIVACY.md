@@ -12,10 +12,12 @@ Only what Claude Code reports to mods within your session:
 - **Per subagent:** its type and task description, as Claude Code lists it, and its token counts.
 - **At a model switch:** Claude Code's own estimate of what re-writing the context costs, and whether it thinks the cache is warm.
 - **Per session:** context fill and its breakdown – including the paths of your memory files (CLAUDE.md, rules) and the names of MCP servers, skills and agents with their token counts – cost as `/cost` shows it, plan-limit percentages and reset times, the number of prompts, the session's start time, the kinds of API errors a turn ended on, and Claude Code's own verdict on whether the prompt cache is warm.
-- **Settings:** the prompt-cache TTL controls (`FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL`, `ENABLE_PROMPT_CACHING_1H`, `promptCacheTtl`) and its own five options. Claude Code hands a mod the whole merged settings object at once (`$.settings.read`, no per-key read); Cache Meter takes only `promptCacheTtl` from it and keeps nothing else.
+- **Settings:** the prompt-cache TTL controls (`FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL`, `ENABLE_PROMPT_CACHING_1H`, `promptCacheTtl`) and its own six options. Claude Code hands a mod the whole merged settings object at once (`$.settings.read`, no per-key read); Cache Meter takes only `promptCacheTtl` from it and keeps nothing else.
 - **Your prompts:** when you send one it notes only that you did (to close its pane above the prompt), not the text.
 
 It never reads the text of your prompts, and no files. Claude's answer is only compared with what the turn returned, to keep another mod's line, never kept. Of tool calls it reads only what the list above names: the result's text is measured for its length and dropped; for Bash only a word that looks like a program name becomes the label – anything with `$`, quotes, `;`, `|`, `&` or a leading `-` gives just `Bash`. The line it shows under an answer is its own; the answer is not changed. Whether Claude reads that line is not documented.
+
+The café animation (option `animations`) is a separate file that runs where the pane is drawn. It receives one word from the mod – the cache's state, such as `warm` or `cold` – and has no access to the session, your files or the network: the mods API is not available to it (types: `ClientSurface`).
 
 What Claude does read: the short replies of its commands (`/tokens`, `/keepwarm`, `/tokens report`) – Claude Code adds a command's text to the conversation (mods › api › Add a command). They hold confirmations, never your data.
 
