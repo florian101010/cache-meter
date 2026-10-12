@@ -1860,7 +1860,7 @@ export const register: Register = (on, options) => {
     const healthView = (
       <Box flexDirection="column">
         <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="column">
-          {/* The one place in the pane that tells you the session can be shared. */}
+          {/* The one place in the pane that names the report: the session as Markdown on your own clipboard. */}
           <Box flexDirection="row" justifyContent="space-between">
             <Box flexShrink={0} marginRight={1}>
               <Text color="claude" bold>
@@ -1868,7 +1868,7 @@ export const register: Register = (on, options) => {
               </Text>
             </Box>
             <Text dimColor wrap="truncate-end">
-              {tier === 'narrow' ? '/tokens report' : 'share it: /tokens report (Markdown to the clipboard)'}
+              {tier === 'narrow' ? '/tokens report' : 'copy as Markdown: /tokens report'}
             </Text>
           </Box>
           <Text wrap="truncate-end">

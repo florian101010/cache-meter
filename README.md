@@ -188,20 +188,20 @@ The big countdown flashes once at each new minute. Both run only while the Overv
 
 **Where the numbers come from.** Everything is what Claude Code reports to mods – token counts per request, context breakdown, cost, plan limits, stop reasons, errors. Tool-result sizes are estimates (characters ÷ 4 of the text the model reads), shown beside Claude Code's own total for all messages. Nothing is sent anywhere; only **Count exactly** in the Context tab asks the API to count tokens, once, when you press it.
 
-### Share a session
+### Copy the session as Markdown
 
-<p align="center"><img src="https://raw.githubusercontent.com/florian101010/cache-meter/assets/brand/feature-report.svg" width="100%" alt="Share it – /tokens report: a Markdown session report fills line by line and lands on a clipboard with a check mark."></p>
+<p align="center"><img src="https://raw.githubusercontent.com/florian101010/cache-meter/assets/brand/feature-report.svg" width="100%" alt="Copy it – /tokens report: a Markdown session report fills line by line and lands on your own clipboard with a check mark."></p>
 
 `/tokens report` puts the whole session on your clipboard as Markdown – cost, hit rate, cold re-writes and warm misses with their cause, context fill and the auto-compact forecast, the heaviest files, servers and tool results, subagents and plan limits. Paste it into an issue, a pull request or your notes. Paths are shortened to `~` and Bash commands appear only by program name; review it before you post it publicly.
 
-The dashboard reminds you where it matters: the Health tab's Session card reads *share it: /tokens report*.
+It stays on your Mac: the report goes to your own clipboard, nowhere else. The Health tab's Session card reminds you: *copy as Markdown: /tokens report*.
 
 ## Contents
 
 - [Every answer, priced](#every-answer-priced)
 - [Warned before the cache breaks](#warned-before-the-cache-breaks)
 - [Keep the cache warm with `/keepwarm`](#keep-the-cache-warm-with-keepwarm)
-- [See everything with `/tokens`](#see-everything-with-tokens) · [Share a session](#share-a-session)
+- [See everything with `/tokens`](#see-everything-with-tokens) · [Copy the session as Markdown](#copy-the-session-as-markdown)
 - [Features](#features)
 - [Requirements](#requirements)
 - [Installation](#installation) · [Update](#update)
@@ -386,7 +386,7 @@ A cache read keeps the entry for the duration of its original write – one hour
 ### Using it
 
 <details>
-<summary><b>How do I share what a session cost?</b></summary>
+<summary><b>How do I get the whole session as text – to keep, compare or paste into an issue?</b></summary>
 
 `/tokens report` puts a Markdown summary on your clipboard: cost, hit rate, cold re-writes and warm misses with their cause, context fill and the auto-compact forecast, the heaviest files, servers and tool results, subagents and plan limits. Paths are shortened to `~` and Bash commands appear only by program name; still, review it before you post it publicly.
 </details>
