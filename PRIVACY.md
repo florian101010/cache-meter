@@ -23,7 +23,7 @@ Everything stays in memory, in Claude Code's session state and the mod's own var
 
 ## What you copy
 
-`/tokens report` puts a summary on your clipboard – the figures of the pane, home-shortened paths and the tool labels above – only when you run it. What you paste it into is up to you.
+`/tokens report` puts a summary on your clipboard – the figures of the pane, the names of your memory files (home directory shortened to `~`), MCP servers and their call counts, the tool labels above, and each subagent's type and task description – only when you run it. What you paste it into is up to you.
 
 ## What it sends
 

@@ -1,6 +1,6 @@
 // Pure helpers of cache-meter: no `$`, so the tests call them directly.
 
-import type { CacheInfo, ContextMap, Limit, Usage4 } from '../types'
+import type { CacheInfo, ContextMap, Limit, LimitStart, ToolResults, Usage4 } from '../types'
 
 export const HOUR = 3_600_000
 export const FIVE_MIN = 300_000
@@ -462,8 +462,8 @@ export function serverCalls(toolNames: readonly string[], calls: Readonly<Record
 export const FORECAST_MIN_MS = 10 * 60_000
 
 /**
- * When a plan limit reaches 100 % at the pace since its first reading in this session, or null:
- * too early, no rise, or not before the window resets.
+ * When a plan limit reaches 100 % at the pace since its first reading in this window, or null:
+ * too early, no rise, no known reset time, or not before the window resets.
  */
 export function limitForecast(
   start: { at: number; pct: number } | undefined,
@@ -474,9 +474,10 @@ export function limitForecast(
   if (start === undefined || now - start.at < FORECAST_MIN_MS || pct <= start.pct || pct >= 100) return null
   const perMs = (pct - start.pct) / (now - start.at)
   const at = now + (100 - pct) / perMs
+  // Without a reset time the window may free up first: no forecast rather than a wrong one.
   const reset = resetsAt === undefined ? Number.NaN : Date.parse(resetsAt)
 
-  return Number.isNaN(reset) || at < reset ? at : null
+  return !Number.isNaN(reset) && at < reset ? at : null
 }
 
 /** The line under an answer: what the turn cost and how well it hit the cache. Cost only when known. */
@@ -493,11 +494,11 @@ export function turnLine(u: Usage4, requests: number, usd: number | null, isPlan
  * percentage fell, or the reset time moved), so the forecast does not die after the first reset.
  */
 export function nextLimitStarts(
-  prev: Readonly<Record<string, { at: number; pct: number; resetsAt: string | null }>>,
-  limits: readonly { kind: string; percentUsed: number; resetsAt?: string }[],
+  prev: Readonly<Record<string, LimitStart>>,
+  limits: readonly Limit[],
   now: number,
-): Record<string, { at: number; pct: number; resetsAt: string | null }> {
-  const next: Record<string, { at: number; pct: number; resetsAt: string | null }> = {}
+): Record<string, LimitStart> {
+  const next: Record<string, LimitStart> = {}
   for (const l of limits) {
     const old = prev[l.kind]
     const resetsAt = l.resetsAt ?? null
@@ -518,8 +519,10 @@ export function isUnexpectedWrite(wasCold: boolean, hadCache: boolean, u: Usage4
 }
 
 /** The note at a model switch while the cache is warm: what Claude Code estimates the switch re-writes. */
-export function switchNote(tokens: number, usd: number, isListPrice: boolean, remainingMs: number | null): string {
-  const price = `≈ $${usd.toFixed(2)}${isListPrice ? '' : ' (estimate)'}`
+export function switchNote(tokens: number, usd: number, isKnownPrice: boolean, remainingMs: number | null): string {
+  // 'catalog' (list price) and 'configured' (the organization's modelPricing) are known prices; 'default'
+  // means the target model was unknown and a default tier was assumed (types: PreModelSwitch pricing).
+  const price = `≈ $${usd.toFixed(2)}${isKnownPrice ? '' : ' (estimate)'}`
   const warm = remainingMs === null ? '' : ` · cache warm ${remainingLabel(remainingMs)} more`
 
   return `Model switch re-writes ${short(tokens)} tokens to the cache (${price})${warm} – after it expires, switching adds nothing`
@@ -557,7 +560,7 @@ export function toolDiff(before: readonly string[], after: readonly string[]): {
 
 /**
  * Why a warm cache was re-written, from what is observable: the model, an effort that splits the
- * cache, the tool set, a pause longer than the real TTL, an effort change on a model that keeps the
+ * cache, a pause longer than the real TTL, the tool set (only without tool search), an effort change on a model that keeps the
  * cache only with an API key or a subscription. The rest is named, not guessed
  * (prompt-caching › Actions that invalidate the cache).
  */
@@ -569,15 +572,15 @@ export function breakCause(i: {
   ttlMs: number
 }): string {
   if (i.change !== null) return `${i.change} – each splits the cache`
-  if (i.tools !== null && (i.tools.added > 0 || i.tools.removed > 0)) {
-    return `tool set changed (+${i.tools.added} / −${i.tools.removed} MCP tools)`
-  }
   if (i.idleMs !== null && i.idleMs >= FIVE_MIN && i.ttlMs > FIVE_MIN) {
     return `after ${duration(i.idleMs)} idle: the real TTL is likely 5m, not ${duration(i.ttlMs)} (option cacheTtl)`
   }
+  if (i.tools !== null && (i.tools.added > 0 || i.tools.removed > 0)) {
+    return `tool set changed (+${i.tools.added} / −${i.tools.removed} MCP tools)`
+  }
   if (i.effortOnly !== null) return `${i.effortOnly} – keeps the cache on this model only with an API key or a subscription`
 
-  return 'not observable here: fast mode turned on, a plugin reload, a tool deny rule, or removed images'
+  return 'not observable here: fast mode turned on, a code-intelligence plugin (LSP tool), a tool deny rule, or removed images'
 }
 
 /** The expiry notification's text. */
@@ -611,24 +614,20 @@ export function toolLabel(tool: string, input: Readonly<Record<string, unknown>>
   const path = typeof input.file_path === 'string' ? input.file_path : typeof input.notebook_path === 'string' ? input.notebook_path : null
   if (path !== null) return `${tool} ${homePath(path)}`
   if (tool === 'Bash' && typeof input.command === 'string') {
-    const program = input.command
-      .trim()
-      .split(/\s+/)
-      .find(word => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(word))
-    return program === undefined || program === '' ? tool : `${tool} ${program.split('/').pop()}`
+    // Leading VAR=value assignments go, quoted values included; then the first word. Anything left that
+    // still looks like part of a value (=, a quote, $, a backtick) gives just "Bash": never a guess.
+    const rest = input.command.trim().replace(/^(?:[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|[^\s"']*)\s+)*/, '')
+    const program = rest.split(/\s+/)[0] ?? ''
+    const name = program.split('/').pop() ?? ''
+
+    return name === '' || /[="'$`\\]/.test(name) ? tool : `${tool} ${name}`
   }
 
   return tool
 }
 
 /** Adds one tool result to the tally: per tool, and the five largest single results. */
-export function addToolResult(
-  prev: { byTool: Readonly<Record<string, { count: number; tokens: number }>>; largest: readonly { label: string; tokens: number; at: number }[]; since: number | null },
-  tool: string,
-  label: string,
-  tokens: number,
-  at: number,
-) {
+export function addToolResult(prev: ToolResults, tool: string, label: string, tokens: number, at: number): ToolResults {
   const sum = prev.byTool[tool] ?? { count: 0, tokens: 0 }
 
   return {

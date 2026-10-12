@@ -62,7 +62,7 @@
     "expiryNotice": {
       "type": "string",
       "title": "Notification before the cache expires",
-      "description": "on: once per cache window, when about 10 minutes are left (17 % of the TTL) and keepwarm is off, a native notification through your own notification channel (Claude Code's preferredNotifChannel setting) – so you can still type /keepwarm. Only with a one-hour TTL and at least 10k tokens of context. off: none.",
+      "description": "on: once per cache window, when about 10 minutes are left (17 % of the TTL) and keepwarm is off, a terminal notification through your own notification channel (Claude Code's preferredNotifChannel setting) – so you can still type /keepwarm. Only with a one-hour TTL and at least 10k tokens of context. off: none.",
       "options": [
         "off",
         "on"

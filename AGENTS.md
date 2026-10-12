@@ -65,7 +65,7 @@ Code conventions enforced by `validate`: helpers that take `$` are top-level fun
 
 | Path | What |
 |---|---|
-| `.claude-plugin/plugin.json` | manifest: name, version, `types` contract, the `cacheTtl` option |
+| `.claude-plugin/plugin.json` | manifest: name, version, `types` contract, the options (`userConfig`) |
 | `.claude-plugin/marketplace.json` | makes the repository a one-plugin marketplace (`cache-meter@cache-meter`) |
 | `hooks/hooks.json` → `hooks/register.tsx` | every hook: data sources, band, pane, commands, keepwarm |
 | `hooks/lib.ts` | pure functions: TTL derivation, hit rate, formatting, thresholds |
