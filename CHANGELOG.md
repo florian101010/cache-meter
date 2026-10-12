@@ -11,7 +11,7 @@ Saves money: each feature points at a cost before or while it happens.
 - **Model switch note:** while the cache is warm, a note with Claude Code's own re-write estimate and the minutes the cache has left. It never blocks or approves a switch (`ask` would refuse switches from `/config` and the SDK).
 - **Limit forecast:** in the overview, when a plan limit is full at the pace since its first reading in this window, if before its reset. The pace starts again after a reset.
 - **MCP calls per server** in the Context tab; a server with no call after three prompts is marked *unused so far*.
-- **Warm miss** in the Health tab: how often a warm cache was re-written anyway, with the pause before the last one – after seconds something early in the prompt changed (CLAUDE.md, MCP tools, settings), after minutes the cache lives shorter than the TTL assumed.
+- **Warm miss** in the Health tab: how often a warm cache was re-written anyway, with the pause before the last one – after seconds the model, effort, fast mode or the tool set changed (editing CLAUDE.md keeps the cache), after minutes the cache lives shorter than the TTL assumed.
 - **Compact hint** in the band: when the cache has expired and the context is half full or more, `cold: good time to [ Compact ]`.
 
 ## [0.5.4] – 2026-10-12

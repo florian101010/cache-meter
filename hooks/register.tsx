@@ -1429,7 +1429,7 @@ export const register: Register = (on, options) => {
           </Text>
           {unexpected.count > 0 && (
             <Text dimColor wrap="truncate-end">
-              {''.padEnd(10)}after seconds: something early in the prompt changed (CLAUDE.md, MCP tools, settings); after minutes: the cache lives shorter than assumed (option cacheTtl)
+              {''.padEnd(10)}after seconds: model, effort, fast mode or the tool set changed (not CLAUDE.md edits); after minutes: the cache lives shorter than assumed (option cacheTtl)
             </Text>
           )}
         </Box>

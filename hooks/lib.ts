@@ -510,7 +510,8 @@ export function nextLimitStarts(
 
 /**
  * A main request that re-wrote the cache although it was warm by the clock: something early in the
- * prompt changed (CLAUDE.md, tools, settings). Not after a known cold point (start, /compact, a switch).
+ * prompt changed (model, effort, tool definitions; prompt-caching › Actions that invalidate the cache –
+ * editing CLAUDE.md is not one), or the real TTL is shorter than assumed. Not after a known cold point (start, /compact, a switch).
  */
 export function isUnexpectedWrite(wasCold: boolean, hadCache: boolean, u: Usage4): boolean {
   return !wasCold && hadCache && u.write >= COLD_MIN && u.read < u.write
