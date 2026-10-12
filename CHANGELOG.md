@@ -21,7 +21,7 @@ A café that acts out the cache.
 - **The café** (option `animations`, on by default): docked beside the chat, the room under the request chart shows a pixel barista (orange, with a brown cap and a white apron – a figure of its own) and a cup – stirring while Claude works, coffee dripping into the cup when a fresh cache is written, steam and a sip while it is warm, thin steam and a watched clock in the last stretch, a puff on a keepwarm ping, a grey cup and a nap once it is cold. A separate surface module (`hooks/cafe.tsx`, a `Client`) with its own frame clock at four frames a second, only while the Overview is on screen; it gets nothing but the cache's state word. With too little room, one line.
 - **Minute flash:** the big countdown lights up once at each new minute, and a shine runs across its bar.
 - **Short animations on the Overview:** a new request column grows in from below, cost and the cache saving count up to a new figure, and the keepwarm arrow turns while keepwarm runs (`hooks/spin.tsx`, a `Client` of its own). One redraw train for all of them, at most 10 redraws a second; none on the first draw, after a reload or a tab switch; all off with `animations: off`.
-- `ui.fault`: if the café's file fails, the pane leaves it out.
+- `ui.fault`: if the café's or the arrow's file fails, the pane leaves that one out and writes the reason to the debug log.
 - With too little room the café's one-line fallback stands still: its frame clock asks for no redraw, so terminal apps that repaint badly see no traffic there.
 
 ### Changed
@@ -68,7 +68,7 @@ Context under control: what fills the conversation, when it compacts, and a repo
 
 ### Changed
 - Privacy: Cache Meter now reads the name, a short label and the result length of each tool call (not the result's text, not a command's arguments). README, PRIVACY.md and SECURITY.md say so.
-- Privacy hardening of the labels: a Bash command shows only an allow-listed program name, split at shell whitespace; file labels only for the file tools (Read, Write, Edit, MultiEdit, NotebookEdit), never a URL, with query and fragment cut; token-like path parts appear as `…`; labels are one line of at most 80 characters.
+- Privacy hardening of the labels: a Bash command shows only a word that looks like a program name (a pattern check, credential-like names excluded), split at shell whitespace; file labels only for the file tools (Read, Write, Edit, MultiEdit, NotebookEdit), never a URL, with query and fragment cut; token-like path parts appear as `…`; labels are one line of at most 80 characters.
 - Plugin description names what each answer costs and what broke the cache.
 
 ## [0.7.0] – 2026-10-12

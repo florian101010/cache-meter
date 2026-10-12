@@ -178,14 +178,16 @@ let seat: 'dock' | 'inline' | null = null
 let animations = true
 // The café's Client failed on a surface (ui.fault): left out from then on, the pane drawn without it.
 let isCafeBroken = false
+// The same for the turning keepwarm arrow: a still ↻ from then on.
+let isSpinBroken = false
 // When a request last wrote a fresh cache (first or cold): the café brews for a moment.
 let brewedAt: number | null = null
 // The countdown's minute as last drawn, and until when its digits flash after it changed.
 let shownMinute: string | null = null
 let flashUntil = 0
 // Short animations on the Overview (option animations): one redraw train for all of them, every
-// ANIM_FRAME_MS until the last one ends – far under the 30 redraws a second of the shown pane
-// (reference › Limits). Each animation keeps only its start; the drawing reads progress off the clock.
+// ANIM_FRAME_MS until the last one ends – 10 redraws a second at most: the general limit, raised to 30
+// for the shown pane in the terminal (reference › Limits). Each animation keeps only its start; the drawing reads progress off the clock.
 let animEnd = 0
 let isAnimPending = false
 // The shine over the countdown bar, started with the minute flash.
@@ -793,6 +795,7 @@ export const register: Register = (on, options) => {
   openTurns = {}
   animations = options.animations !== 'off'
   isCafeBroken = false
+  isSpinBroken = false
   brewedAt = null
   shownMinute = null
   flashUntil = 0
@@ -954,7 +957,11 @@ export const register: Register = (on, options) => {
         // start, after /compact or /clear) writes the cache for the first time: not a loss.
         const isCold = wasCold && before !== null && u.write >= COLD_MIN && u.read < u.write
         const kind = isCold ? ('cold' as const) : before === null ? ('first' as const) : undefined
-        if (kind !== undefined) brewedAt = await $.clock.now()
+        if (kind !== undefined) {
+          brewedAt = await $.clock.now()
+          // The café brews for BREW_MS; one redraw then, not the next 15-second tick.
+          if (animations) $.clock.after(BREW_MS + 50, () => $.ui.invalidate('ui.render'))
+        }
         await update($, stepsA, list => [...list, { ...u, at: startedAt, model: usage.model, ...(kind ? { kind } : {}) }].slice(-STEPS_KEPT))
         await update($, totalsA, t => ({ ...t, main: add(t.main, u), mainSteps: t.mainSteps + 1 }))
         // A warm cache re-written anyway: counted with the pause before it and its most likely cause, in
@@ -1247,15 +1254,19 @@ export const register: Register = (on, options) => {
     }
   })
 
-  // The person closed the dashboard (its close mark or ctrl+x x): it stays closed this session.
-  // The café's surface module failed (did not load, draw or run): the engine draws the pane again by
-  // itself, and the pane leaves the Client out from then on (reference › ui.fault).
+  // A surface module failed (did not load, draw or run): the engine draws the pane again by itself,
+  // and the pane leaves that Client out from then on (reference › ui.fault).
   on('ui.fault', async ($, e, next) => {
-    isCafeBroken = true
+    // Per module (types: UiFaultInput.module, the path under the plugin's folder): a failed arrow
+    // leaves the café alone and the other way round. The reason goes to the debug log once.
+    if (e.module.endsWith('cafe.tsx')) isCafeBroken = true
+    if (e.module.endsWith('spin.tsx')) isSpinBroken = true
+    $.ui.log(`${e.module} failed (${e.phase}): ${e.reason}`, { to: 'debug' })
 
     return next(e)
   })
 
+  // The person closed the dashboard (its close mark or ctrl+x x): it stays closed this session.
   on('ui.close', async ($, e, next) => {
     if (e.id === PANE && e.origin.kind === 'person') isDismissed = true
     // The band takes its Compact button back once the pane is gone.
@@ -1484,7 +1495,7 @@ export const register: Register = (on, options) => {
     if (minuteNow !== null && shownMinute !== null && minuteNow !== shownMinute) {
       flashUntil = now + FLASH_MS
       shineStart = now
-      animate($, now + Math.max(FLASH_MS, SHINE_MS) + 50)
+      animate($, now + Math.max(FLASH_MS, SHINE_MS) + 50, now)
     }
     shownMinute = minuteNow
     const isFlash = minuteNow !== null && now < flashUntil
@@ -1568,19 +1579,22 @@ export const register: Register = (on, options) => {
 
     // --- keepwarm -----------------------------------------------------------------------------
     const pingIn = isWarm ? Math.max(0, remaining - ttl.ms * PING_SHARE) : 0
+    const isSpinning = isKeeping && animations && Client !== null && !isSpinBroken
     const keepCard = (
       <Box borderStyle="round" borderColor="claude" borderDimColor={!isKeeping} paddingX={1} flexDirection="column">
         <Box flexDirection="row" justifyContent="space-between">
           {/* While keepwarm runs the arrow turns (option animations), in a Client of its own. */}
-          {isKeeping && animations && Client !== null && <Client key="keep-spin" module="./spin.tsx" width={1} />}
-          <Text wrap="truncate-end">
-            <Text color="claude" bold>
-              {isKeeping && animations && Client !== null ? ' Keepwarm on' : isKeeping ? '↻ Keepwarm on' : '↻ Keepwarm'}
+          <Box flexDirection="row" flexShrink={1}>
+            {isSpinning && Client !== null && <Client key="keep-spin" module="./spin.tsx" width={1} />}
+            <Text wrap="truncate-end">
+              <Text color="claude" bold>
+                {isSpinning ? ' Keepwarm on' : isKeeping ? '↻ Keepwarm on' : '↻ Keepwarm'}
+              </Text>
+              <Text dimColor>
+                {isKeeping && keep.until !== null ? ` until ${hhmm(keep.until)}` : ` off${keep.pings > 0 && tier !== 'narrow' ? ` · last run ${keep.pings} pings` : ''}`}
+              </Text>
             </Text>
-            <Text dimColor>
-              {isKeeping && keep.until !== null ? ` until ${hhmm(keep.until)}` : ` off${keep.pings > 0 && tier !== 'narrow' ? ` · last run ${keep.pings} pings` : ''}`}
-            </Text>
-          </Text>
+          </Box>
           {isKeeping ? (
             <Button key="keepwarm-stop" plain hotkey="s" onPress={() => pressKeepWarm($, null)}>
               <Text color="claude" bold>
@@ -1656,7 +1670,7 @@ export const register: Register = (on, options) => {
     if (isCounting && usdNow !== null && shownUsd !== null && usdNow !== shownUsd) {
       usdFrom = tween(usdFrom, shownUsd, progress(usdStart, now, COUNT_MS))
       usdStart = now
-      animate($, now + COUNT_MS + 50)
+      animate($, now + COUNT_MS + 50, now)
     }
     shownUsd = isCounting ? usdNow : null
     const usdShown = usdNow === null || !isCounting || now >= usdStart + COUNT_MS ? usdNow : tween(usdFrom, usdNow, progress(usdStart, now, COUNT_MS))
@@ -1664,7 +1678,7 @@ export const register: Register = (on, options) => {
     if (isCounting && saving !== null && shownSaving !== null && saving !== shownSaving) {
       savingFrom = tween(savingFrom, shownSaving, progress(savingStart, now, COUNT_MS))
       savingStart = now
-      animate($, now + COUNT_MS + 50)
+      animate($, now + COUNT_MS + 50, now)
     }
     shownSaving = isCounting ? saving : null
     const savingShown =
@@ -1690,7 +1704,7 @@ export const register: Register = (on, options) => {
             </Text>
           </Box>
           {saving !== null && savingShown !== null && (
-            <Text bold color={saving >= 0 ? 'success' : 'warning'} wrap="truncate-end">
+            <Text bold color={savingShown >= 0 ? 'success' : 'warning'} wrap="truncate-end">
               {savingShown >= 0 ? `cache saved ${savingShown}%${tier === 'narrow' ? '' : ' of input cost'}` : `cache cost +${-savingShown}%`}
             </Text>
           )}
@@ -1779,11 +1793,12 @@ export const register: Register = (on, options) => {
     const lastHit = last === undefined ? null : hitPct(last)
     // The newest request column grows in on the Overview (option animations); not on the first draw.
     const isGrowing = animations && tab === 'overview'
-    if (isGrowing && shownSteps !== null && steps.length > shownSteps) {
+    if (isGrowing && shownSteps !== null && totals.mainSteps > shownSteps) {
       growStart = now
-      animate($, now + GROW_MS + 50)
+      animate($, now + GROW_MS + 50, now)
     }
-    shownSteps = isGrowing ? steps.length : null
+    // The request count, not the kept history (capped at STEPS_KEPT): it keeps growing past 80.
+    shownSteps = isGrowing ? totals.mainSteps : null
     const grow = isGrowing && now < growStart + GROW_MS ? progress(growStart, now, GROW_MS) : 1
     const columns = shown.map((s, i) => {
       const all = s.input + s.read + s.write
@@ -2394,8 +2409,11 @@ function columnDetail(s: Step, width: number): string {
 
 // Keeps the Overview redrawing every ANIM_FRAME_MS until `until` (the latest end asked for); one train
 // at a time, so animations that overlap share it instead of stacking timers.
-function animate($: EngineInterface, until: number) {
+function animate($: EngineInterface, until: number, now: number) {
   if (!animations) return
+  // A train that went quiet – a refused timer runs never (types: $.clock.after) – would block every
+  // later animation: one without a frame for three frame lengths past its end is taken as gone.
+  if (isAnimPending && now > animEnd + 3 * ANIM_FRAME_MS) isAnimPending = false
   animEnd = Math.max(animEnd, until)
   if (isAnimPending) return
   isAnimPending = true
@@ -2403,12 +2421,14 @@ function animate($: EngineInterface, until: number) {
 }
 
 async function animTick($: EngineInterface) {
-  $.ui.invalidate('ui.render')
-  const now = await $.clock.now()
-  if (now < animEnd) {
-    $.clock.after(ANIM_FRAME_MS, () => animTick($))
-  } else {
-    isAnimPending = false
+  let isGoing = false
+  try {
+    $.ui.invalidate('ui.render')
+    const now = await $.clock.now()
+    isGoing = now < animEnd
+    if (isGoing) $.clock.after(ANIM_FRAME_MS, () => animTick($))
+  } finally {
+    if (!isGoing) isAnimPending = false
   }
 }
 

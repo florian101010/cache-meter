@@ -56,6 +56,11 @@ jobs:
           git -C "$tmp" init -q && echo '{}' > "$tmp/package-lock.json" && git -C "$tmp" add -A
           if bash "$tmp/.github/scripts/directory-checks.sh" > "$tmp/out.txt"; then echo "directory-checks.sh passed a planted lockfile"; exit 1; fi
           grep -q lockfile "$tmp/out.txt"
+          # …and a planted merge-conflict marker.
+          rm "$tmp/package-lock.json" && git -C "$tmp" rm -q --cached package-lock.json
+          printf '<<<<<<< HEAD\nx\n' > "$tmp/conflicted.md" && git -C "$tmp" add conflicted.md
+          if bash "$tmp/.github/scripts/directory-checks.sh" > "$tmp/out.txt"; then echo "directory-checks.sh passed a planted conflict marker"; exit 1; fi
+          grep -q "merge-conflict markers" "$tmp/out.txt"
       # Manifest, marketplace, hooks module and state contract; warnings fail the build.
       - run: claude plugin validate --strict .
       # The mod's tests run against the engine with no session, sign-in or network.
