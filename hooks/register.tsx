@@ -81,6 +81,7 @@ import {
   stopLabel,
   errorLabel,
   cafeState,
+  isWarnedWindow,
   dockTip,
   DOCK_COLUMNS,
   compactNote,
@@ -88,6 +89,7 @@ import {
   hogNote,
   isContextHog,
   shareOfRequest,
+  faultTarget,
   progress,
   shineCells,
   tween,
@@ -211,7 +213,7 @@ let usdStart = 0
 let shownSaving: number | null = null
 // Option limitNotice, and the plan-limit windows already warned about (kind@resetsAt).
 let limitNotice = false
-let warnedLimits = new Set<string>()
+let warnedLimits: { kind: string; resetsAt: string }[] = []
 // What ended at a /clear, read at session.end while the session's state may still hold it; shown once
 // the new conversation starts.
 let pendingSummary: string | null = null
@@ -220,8 +222,8 @@ let pendingSummary: string | null = null
 // unknown – after a reload in a running conversation – then the summary names no cost).
 let convo = { steps: 0, main: { input: 0, read: 0, write: 0, output: 0 } as Usage4, coldCount: 0, coldWritten: 0 }
 let convoUsdBase: number | null = null
-// A resumed conversation is counted from the resume on: its earlier requests are not in this session.
-let isConvoResumed = false
+// A resumed or branched conversation is counted from there on: its earlier requests are not in this session.
+let convoFrom: 'start' | 'resume' | 'fork' = 'start'
 // The last large-tool-result toast, so ten large reads in a row raise one word, not ten.
 let lastHogAt = 0
 let savingFrom = 0
@@ -637,7 +639,8 @@ async function notify($: EngineInterface, text: string, what: string) {
     const sent = await $.ui.notify(text, { title: 'Cache Meter' })
     if (!sent.isSent) $.ui.log(`${what} notification not sent: ${sent.reason}`, { to: 'debug' })
   } catch (error) {
-    $.ui.log(`${what} notification refused: ${error instanceof Error ? error.message : String(error)}`, { to: 'debug' })
+    // A hook's deny or a failed write (types: $.ui.notify); its words, one cleaned line.
+    $.ui.log(`${what} notification failed: ${cleanLabel(error instanceof Error ? error.message : String(error))}`, { to: 'debug' })
   }
 }
 
@@ -650,15 +653,14 @@ async function checkLimits($: EngineInterface, quiet = false) {
   const now = await $.clock.now()
   for (const l of measure?.limits ?? []) {
     if (l.percentUsed < LIMIT_NOTE_PCT || l.resetsAt === undefined) continue
-    const start = measure?.limitStart?.[l.kind]
-    const full = limitForecast(start, l.percentUsed, now, l.resetsAt)
-    // The window as the forecast tells it (nextLimitStarts): where it began. Kept in the session state, so
-    // a reload names the same window.
-    const key = `${l.kind}@${start?.at ?? l.resetsAt}`
-    if (full === null || warnedLimits.has(key)) continue
-    warnedLimits.add(key)
+    const full = limitForecast(measure?.limitStart?.[l.kind], l.percentUsed, now, l.resetsAt)
+    // The window by its reset time, within a minute (as nextLimitStarts tells windows apart) – not by its
+    // start in the session state, which /clear resets while this list (a module variable) stays.
+    if (full === null || isWarnedWindow(warnedLimits, l.kind, l.resetsAt)) continue
+    warnedLimits = [...warnedLimits, { kind: l.kind, resetsAt: l.resetsAt }]
     if (quiet) continue
-    const text = `${limitName(l.kind)} limit at ${l.percentUsed}% – full ≈ ${hhmm(full)} at this pace (resets ${resetLabel(l.resetsAt)})`
+    const name = l.kind === 'spend_limit' ? 'Spend limit' : `${limitName(l.kind)} limit`
+    const text = `${name} at ${l.percentUsed}% – full ≈ ${hhmm(full)} at this pace (resets ${resetLabel(l.resetsAt)})`
     $.ui.toast(text, { timeoutMs: 10_000 })
     if (limitNotice) await notify($, text, 'limit')
   }
@@ -666,10 +668,10 @@ async function checkLimits($: EngineInterface, quiet = false) {
 
 // A conversation begins (a fresh session, /clear, /resume, /branch): its figures start at zero, its
 // cost is counted from the session cost now.
-function startConversation(usd: number | null, isResumed: boolean) {
+function startConversation(usd: number | null, from: 'start' | 'resume' | 'fork') {
   convo = { steps: 0, main: { input: 0, read: 0, write: 0, output: 0 }, coldCount: 0, coldWritten: 0 }
   convoUsdBase = usd
-  isConvoResumed = isResumed
+  convoFrom = from
 }
 
 // What the conversation that just ended came to – only figures it measured, kept in module variables
@@ -692,7 +694,9 @@ async function conversationSummary($: EngineInterface): Promise<string | null> {
     convo.coldCount > 0 ? `${convo.coldCount} cold re-write${convo.coldCount === 1 ? '' : 's'} (${short(convo.coldWritten)} tokens)` : null,
   ].filter((p): p is string => p !== null)
 
-  return `Conversation cleared – ${isConvoResumed ? 'since you resumed it, it' : 'it'} came to ${parts.join(' · ')}`
+  const since = convoFrom === 'resume' ? 'since you resumed it, it' : convoFrom === 'fork' ? 'since the branch, it' : 'it'
+
+  return `Conversation cleared – ${since} came to ${parts.join(' · ')}`
 }
 
 async function checkBudget($: EngineInterface) {
@@ -900,11 +904,11 @@ export const register: Register = (on, options) => {
   usdStart = 0
   shownSaving = null
   limitNotice = options.limitNotice === 'on'
-  warnedLimits = new Set()
+  warnedLimits = []
   pendingSummary = null
   convo = { steps: 0, main: { input: 0, read: 0, write: 0, output: 0 }, coldCount: 0, coldWritten: 0 }
   convoUsdBase = null
-  isConvoResumed = false
+  convoFrom = 'start'
   lastHogAt = 0
   savingFrom = 0
   savingStart = 0
@@ -930,7 +934,7 @@ export const register: Register = (on, options) => {
       // A reload keeps the state, not the module's variables: /keepwarm auto carries on.
       autoMs = (await read($, keepA)).auto
     } else {
-      startConversation((await read($, measureA))?.usd ?? null, false)
+      startConversation((await read($, measureA))?.usd ?? null, 'start')
     }
     // Hooks also run under -p and the SDK, where nothing draws (overview § Where mods run).
     if (e.isInteractive) {
@@ -973,7 +977,7 @@ export const register: Register = (on, options) => {
         pendingSummary = await conversationSummary($)
       } catch (error) {
         pendingSummary = null
-        $.ui.log(`summary at /clear failed: ${error instanceof Error ? error.message : String(error)}`, { to: 'debug' })
+        $.ui.log(`summary at /clear failed: ${cleanLabel(error instanceof Error ? error.message : String(error))}`, { to: 'debug' })
       }
     }
 
@@ -997,7 +1001,7 @@ export const register: Register = (on, options) => {
       const ms = autoMs
       await update($, keepA, k => ({ ...k, until: null, auto: ms, pausePings: 0 }))
     }
-    startConversation((await read($, measureA))?.usd ?? null, e.source !== 'clear')
+    startConversation((await read($, measureA))?.usd ?? null, e.source === 'resume' || e.source === 'fork' ? e.source : 'start')
     if (e.source === 'resume' || e.source === 'fork') lastResumeAt = await $.clock.now()
     if ((e.source === 'resume' || e.source === 'fork') && e.seconds_since_last_response !== undefined) {
       if (e.prompt_cache_likely_expired !== undefined) await recordCheck($, !e.prompt_cache_likely_expired, 'resume')
@@ -1382,9 +1386,10 @@ export const register: Register = (on, options) => {
   // and the pane leaves that Client out from then on (reference › ui.fault).
   on('ui.fault', async ($, e, next) => {
     // Per module (types: UiFaultInput.module, the path under the plugin's folder): a failed arrow
-    // leaves the café alone and the other way round. The reason goes to the debug log once.
-    if (e.module.endsWith('cafe.tsx')) isCafeBroken = true
-    if (e.module.endsWith('spin.tsx')) isSpinBroken = true
+    // leaves the café alone and the other way round. Each fault's reason goes to the debug log.
+    const target = faultTarget(e.module)
+    if (target === 'cafe') isCafeBroken = true
+    if (target === 'spin') isSpinBroken = true
     $.ui.log(`${e.module} failed (${e.phase}): ${e.reason}`, { to: 'debug' })
 
     return next(e)

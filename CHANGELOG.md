@@ -23,12 +23,11 @@ Words when they matter – only measured figures, no guessed savings.
 - **/compact note** in the Context tab when the conversation's messages are 20k tokens or more and a quarter of the context – what is re-sent, and that `/compact` summarizes it as one large request; no saving is promised.
 - **MCP servers:** each server's share of every request's context, beside its tools and calls.
 - **After /clear:** what the ended conversation came to – cost, requests, share from the cache, cold re-writes – from the mod's own figures (after `/resume` counted from there; after a reload without the cost).
-
 - **Quickstart** at the top of the README, and a tip where the pane opens above the prompt: the `/tokens` reply and a line on the Overview say that `/tui fullscreen` puts it beside the chat as a sidebar (from 110 columns; in fullscreen, a wider window) – in a terminal only.
 
 ### Changed
-- **Labels:** a credential prefix inside a path part (`backup-ghp_…`) and long runs of letters and digits mixed are masked as `…` too, not only a prefix at the start.
-- **Plan limits:** a reset time that moves by under a minute is the same window – the pace no longer starts over.
+- **Labels:** a credential prefix inside a path part (`backup-ghp_…`), more prefixes (`tskey-`, `ya29.`, `dckr_pat_`, `hvs.` …) and long runs of letters and digits mixed (also base64 with `+ = .`) are masked as `…` too, in file paths and Bash program names.
+- **Plan limits:** a reset time that moves by under a minute is the same window – the pace no longer starts over, and a `/clear` does not warn about the same window twice.
 
 ## [0.10.0] – 2026-10-12
 

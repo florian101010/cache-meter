@@ -18,7 +18,7 @@ Version and requirements: `.claude-plugin/plugin.json` (`version`), Claude Code 
 ## Install it for a user
 
 1. Check the version: `claude --version` must be ≥ 2.1.287.
-2. Install from GitHub (shell, non-interactive):
+2. Install from GitHub (shell, non-interactive – this form needs Claude Code ≥ 2.1.292; below that use the in-session form underneath):
 
    ```bash
    claude plugin install cache-meter --marketplace florian101010/cache-meter --scope user

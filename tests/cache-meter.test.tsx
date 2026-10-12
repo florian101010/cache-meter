@@ -16,6 +16,7 @@ import {
   hogNote,
   isContextHog,
   shareOfRequest,
+  faultTarget,
   cacheSaving,
   columnCells,
   forecast,
@@ -43,6 +44,8 @@ import {
   toolDiff,
   toolLabel,
   isSecretLikePart,
+  isSameReset,
+  isWarnedWindow,
   dockTip,
   parseKeepCommand,
   durationLabel,
@@ -2826,4 +2829,78 @@ test('/keepwarm auto: the band asks no /keepwarm? while auto waits between break
   const ui = await $.ui.mount({ surface: 'terminal', ...band(160) })
   expect(await ui.find({ type: 'Text', text: / · \/keepwarm\?/ })).toBeUndefined()
   await ui.unmount()
+})
+
+test('ui.fault: which animation a failed module is', () => {
+  expect(faultTarget('hooks/cafe.tsx')).toBe('cafe')
+  expect(faultTarget('hooks/spin.tsx')).toBe('spin')
+  expect(faultTarget('cafe.tsx')).toBe('cafe')
+  expect(faultTarget('hooks/notcafe.tsx')).toBeNull()
+  expect(faultTarget('hooks/register.tsx')).toBeNull()
+})
+
+test('café: brewing ends by itself after BREW_MS', async ($, on) => {
+  const { clock } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await clock.advance(1_000)
+  const ui = await $.ui.mount({ surface: 'terminal', ...DOCK })
+  const state = async () => ((await ui.find({ key: 'cafe' }))?.props.props as { state: CafeState } | undefined)?.state
+  await step($)
+  expect(await state()).toBe('brewing')
+  await clock.advance(12_200)
+  expect(await state()).toBe('warm')
+  await ui.unmount()
+})
+
+test('café module: an unknown state word shows the empty cup', () => {
+  const tag = (type: string) => (props: object) => ({ type, props })
+  const surface = { elements: { Box: tag('Box'), Text: tag('Text') }, state: { f: 0 }, setState: () => {}, columns: 19, rows: 3, every: () => () => {}, onPointer: () => () => {}, onKey: () => () => {}, post: () => {} }
+  const out = JSON.stringify(Cafe({ state: 'bogus' as CafeState }, surface as never))
+  expect(out).toContain('◌')
+  expect(out).toContain('cup empty')
+})
+
+test('limit windows: told apart by the reset time within a minute – not by the start /clear resets', () => {
+  expect(isSameReset('2026-10-12T20:00:00Z', '2026-10-12T20:00:40Z')).toBe(true)
+  expect(isSameReset('2026-10-12T20:00:00Z', '2026-10-12T20:02:00Z')).toBe(false)
+  const warned = [{ kind: 'five_hour', resetsAt: '2026-10-12T20:00:00Z' }]
+  expect(isWarnedWindow(warned, 'five_hour', '2026-10-12T20:00:07Z')).toBe(true)
+  expect(isWarnedWindow(warned, 'seven_day', '2026-10-12T20:00:00Z')).toBe(false)
+  expect(isWarnedWindow(warned, 'five_hour', '2026-10-13T01:00:00Z')).toBe(false)
+})
+
+test('limit warning: the spend limit reads "Spend limit at", not "Spend limit limit"', async ($, on) => {
+  const { clock, toasts } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  const spend = (pct: number) => ({ ...limitAt(pct), rateLimits: [{ kind: 'spend_limit', percentUsed: pct, resetsAt: '2026-10-12T20:00:00Z' }] })
+  await $.session.measure(spend(20) as never)
+  await clock.advance(HOUR)
+  await $.session.measure(spend(60) as never)
+  expect(toasts.filter(t => /^Spend limit at 60% – full/.test(t))).toHaveLength(1)
+})
+
+test('labels: more token formats are masked – base64 runs, newer prefixes, and in a Bash program name', () => {
+  expect(isSecretLikePart('Zm9vYmFyYmF6cXV4+Zm9vYmFyYmF6cXV4/Zm9vYmFy==')).toBe(true)
+  expect(isSecretLikePart('tskey-auth-abc')).toBe(true)
+  expect(isSecretLikePart('token-ya29.a0Af')).toBe(true)
+  expect(isSecretLikePart('dckr_pat_abc')).toBe(true)
+  expect(isSecretLikePart('package.json')).toBe(false)
+  expect(toolLabel('Bash', { command: 'tskey-auth-abc123 --x' })).toBe('Bash')
+  expect(toolLabel('Bash', { command: 'aB3dE5fG7hJ9kL1mN3pQ5rS7tU9vW1xY --x' })).toBe('Bash')
+  expect(toolLabel('Bash', { command: 'git status' })).toBe('Bash git')
+})
+
+test('after /clear: a branch says so; a cost reading that went back names no cost; /compact keeps the count', async ($, on) => {
+  const { toasts, next } = world(on)
+  on('session.end', ($, e) => ({ sessionId: e.sessionId }))
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  next.usd = 1
+  await $.classic.SessionStart({ source: 'fork' } as never)
+  await step($)
+  await $.classic.SessionStart({ source: 'compact' } as never)
+  await step($)
+  next.usd = 0.5
+  await $.session.end({ reason: 'clear', sessionId: 's1', resume: {} } as never)
+  await $.classic.SessionStart({ source: 'clear' } as never)
+  expect(toasts.filter(t => t.startsWith('Conversation cleared'))).toEqual([expect.stringMatching(/^Conversation cleared – since the branch, it came to 2 requests · \d+% from cache$/)])
 })

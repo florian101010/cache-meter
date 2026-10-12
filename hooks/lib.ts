@@ -518,6 +518,16 @@ export function turnLine(u: Usage4, requests: number, usd: number | null, isPlan
   return `◉ Cache Meter · ${cost}${parts.filter(Boolean).join(' · ')}`
 }
 
+/** Two reset times of one limit window: under a minute apart (a reading may move by seconds). */
+export function isSameReset(a: string, b: string): boolean {
+  return Math.abs(Date.parse(a) - Date.parse(b)) < 60_000
+}
+
+/** Whether a limit window was already warned about: the same kind, and the same reset within a minute. */
+export function isWarnedWindow(warned: readonly { kind: string; resetsAt: string }[], kind: string, resetsAt: string): boolean {
+  return warned.some(w => w.kind === kind && isSameReset(w.resetsAt, resetsAt))
+}
+
 /**
  * Where each plan limit's pace starts: its first reading, renewed when the window reset (the
  * percentage fell, or the reset time moved), so the forecast does not die after the first reset.
@@ -531,8 +541,8 @@ export function nextLimitStarts(
   for (const l of limits) {
     const old = prev[l.kind]
     const resetsAt = l.resetsAt ?? null
-    // A later reset time is a new window; one that moves by under a minute is the same window read again.
-    const isMoved = old?.resetsAt != null && resetsAt !== null && Math.abs(Date.parse(resetsAt) - Date.parse(old.resetsAt)) >= 60_000
+    // A reset time that moves by a minute or more is a new window; under a minute, the same one read again.
+    const isMoved = old?.resetsAt != null && resetsAt !== null && !isSameReset(resetsAt, old.resetsAt)
     const isNewWindow = old === undefined || l.percentUsed < old.pct || isMoved
     next[l.kind] = isNewWindow ? { at: now, pct: l.percentUsed, resetsAt } : old
   }
@@ -645,17 +655,18 @@ export function homePath(path: string): string {
 /** The tools whose `file_path` / `notebook_path` is a file on disk (types: claude-code-tools). */
 const FILE_TOOLS = new Set(['Read', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit'])
 
-/** Words that look like a credential, never shown as a program name. */
-const SECRET_LIKE = /^(gh[poursa]_|github_pat_|sk-|sk_|xox[abprs]-|akia|asia|aiza|glpat-|hf_|npm_|pypi-|dop_v1_|shpat_)/i
+/** How credentials begin (GitHub, OpenAI/Stripe, Slack, AWS, Google, GitLab, Hugging Face, npm, PyPI, DigitalOcean, Shopify, Tailscale, Docker, Linear, Vault, age): never shown in a label. */
+const SECRET_PREFIXES = 'gh[poursa]_|github_pat_|sk-|sk_|rk_(?:live|test)_|xox[abprs]-|xapp-|akia|asia|aiza|ya29\\.|glpat-|glrt-|glptt-|hf_|npm_|pypi-|dop_v1_|shpat_|tskey-|dckr_pat_|lin_api_|hvs\\.|age-secret-key-'
 /** The same prefixes anywhere after a separator ("backup-ghp_…"), or a long run of letters and digits
  * mixed, as tokens and keys are: a path part like that is shown as "…" – masking a harmless name is the
  * cheaper mistake. */
-const SECRET_INSIDE = /(^|[^A-Za-z0-9])(gh[poursa]_|github_pat_|sk-|sk_|xox[abprs]-|akia|asia|aiza|glpat-|hf_|npm_|pypi-|dop_v1_|shpat_)/i
+const SECRET_INSIDE = new RegExp(`(^|[^A-Za-z0-9])(${SECRET_PREFIXES})`, 'i')
 
 /** True for a path part that may hold a credential. */
 export function isSecretLikePart(part: string): boolean {
   if (SECRET_INSIDE.test(part)) return true
-  return (part.match(/[A-Za-z0-9_-]{32,}/g) ?? []).some(run => /[A-Za-z]/.test(run) && /\d/.test(run))
+  // base64 and dotted tokens too: + = . do not end a run.
+  return (part.match(/[A-Za-z0-9_+=.-]{32,}/g) ?? []).some(run => /[A-Za-z]/.test(run) && /\d/.test(run))
 }
 
 /** A label as it is stored and shown: one line, no control characters, at most 80 characters (the end kept). */
@@ -692,7 +703,7 @@ export function toolLabel(tool: string, input: Readonly<Record<string, unknown>>
     // A home directory itself is no program name (it would show the user name).
     if (homePath(program) === '~') return tool
     const name = program.split('/').pop() ?? ''
-    const isProgram = /^[A-Za-z0-9_.+][A-Za-z0-9_.+-]*$/.test(name) && name.length <= 32 && !SECRET_LIKE.test(name) && !/\d{8}/.test(name)
+    const isProgram = /^[A-Za-z0-9_.+][A-Za-z0-9_.+-]*$/.test(name) && name.length <= 32 && !isSecretLikePart(name) && !/\d{8}/.test(name)
 
     return isProgram ? `${tool} ${name}` : tool
   }
@@ -900,7 +911,7 @@ export const DOCK_COLUMNS = 110
 /**
  * Why the pane sits above the prompt and how it gets beside the chat, for a terminal only: on the main
  * screen `/tui fullscreen` (it saves the setting and relaunches with the conversation – fullscreen ›
- * Switch – so the mod's in-memory figures start over), in fullscreen a wider window. Null when it already
+ * Enable fullscreen rendering – so the mod's in-memory figures start over), in fullscreen a wider window. Null when it already
  * docks or nothing is known.
  */
 export function dockTip(isFullscreen: boolean | undefined, columns: number | undefined, size: 'sentence' | 'line' | 'short'): string | null {
@@ -913,6 +924,14 @@ export function dockTip(isFullscreen: boolean | undefined, columns: number | und
   if (isFullscreen === true && columns !== undefined && columns < DOCK_COLUMNS) {
     return size === 'short' ? `tip: ${DOCK_COLUMNS}+ columns put this beside the chat` : `tip: a window ${DOCK_COLUMNS} columns or wider puts this beside the chat as a sidebar`
   }
+
+  return null
+}
+
+/** Which animation a failed surface module is (types: UiFaultInput.module, its path under the plugin's folder). */
+export function faultTarget(module: string): 'cafe' | 'spin' | null {
+  if (/(^|\/)cafe\.tsx$/.test(module)) return 'cafe'
+  if (/(^|\/)spin\.tsx$/.test(module)) return 'spin'
 
   return null
 }

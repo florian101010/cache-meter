@@ -46,11 +46,13 @@ Type **`/keepwarm`** before lunch or a meeting. Shortly before expiry one tiny p
 
 ## Quickstart
 
-**1 · Install** – in your shell:
+**1 · Install** – in your shell (Claude Code 2.1.292 or later for this command):
 
 ```bash
 claude plugin install cache-meter --marketplace florian101010/cache-meter --scope user
 ```
+
+On an older Claude Code, type `/plugin install cache-meter --marketplace florian101010/cache-meter` in a session instead.
 
 Or let Claude Code do it – paste this into a session (it runs the same command; Claude Code may ask you to approve it):
 
@@ -232,7 +234,7 @@ Small touches go with it, each a fraction of a second: the big countdown flashes
 
 **Switching tabs.** `/tokens context` or `/tokens health` – a prefix is enough; after `/tokens ` Claude Code shows the tab names and `report` as a hint. Or click a tab (fullscreen renderer), or press <kbd>Ctrl</kbd>+<kbd>X</kbd>, then <kbd>Tab</kbd> until the pane turns orange (*keys here*), then `1`–`3`.
 
-**Where the numbers come from.** Everything is what Claude Code reports to mods – token counts per request, context breakdown, cost, plan limits, stop reasons, errors. Tool-result sizes are estimates (characters ÷ 4 of the text the model reads), shown beside Claude Code's own total for all messages. Nothing is sent anywhere; only **Count exactly** in the Context tab asks the API to count tokens, once, when you press it.
+**Where the numbers come from.** Everything is what Claude Code reports to mods – token counts per request, context breakdown, cost, plan limits, stop reasons, errors. Tool-result sizes are estimates (characters ÷ 4 of the text the model reads), shown beside Claude Code's own total for all messages. Showing them sends nothing: only **Count exactly** in the Context tab asks the API to count tokens, once, when you press it (what `/keepwarm` sends is under [Privacy, cost and permissions](#privacy-cost-and-permissions)).
 
 ### Copy the session as Markdown
 
@@ -311,7 +313,7 @@ In a Claude Code terminal session:
 /plugin install cache-meter --marketplace florian101010/cache-meter
 ```
 
-Answer `y` to add the marketplace, then pick a scope. Or from your shell:
+Answer `y` to add the marketplace, then pick a scope. Or from your shell (Claude Code 2.1.292 or later – [cli-reference › plugin install](https://code.claude.com/docs/en/plugins/cli-reference)):
 
 ```bash
 claude plugin install cache-meter --marketplace florian101010/cache-meter --scope user
@@ -381,8 +383,8 @@ With `auto`, Cache Meter follows Claude Code's own TTL controls and your plan st
 
 | | | Source |
 |---|---|---|
-| **Reads** | What Claude Code reports to mods: token counts, model, stop reason and server-side tool calls of each request; context fill and its breakdown (Claude Code's free local estimate, including the paths of your CLAUDE.md files and the names of MCP servers, skills and agents); cost as `/cost` shows it; plan-limit percentages; number of prompts and the session's start time; API errors; of each tool call: the tool's name, a short label (file path, or a Bash command's program name) and the length of the result as the model reads it – for MCP tools also counted per server; the type and task description of each subagent, as `$.agent.list()` gives them; Claude Code's own verdict on the cache and its re-write estimate at model switches and resumes; whether the session is fullscreen. Plus the TTL controls `FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL`, `ENABLE_PROMPT_CACHING_1H` and the `promptCacheTtl` setting | The code ([`hooks/register.tsx`](hooks/register.tsx)); `claude plugin validate .` lists every event it hooks and every call it makes. Data sources: [events › Follow a turn](https://code.claude.com/docs/en/plugins/mods/events#follow-a-turn), [reference › Mods API methods](https://code.claude.com/docs/en/plugins/mods/reference#mods-api-methods) (`$.session.usage`, `$.session.turns`), [events › Handle the settings hook events](https://code.claude.com/docs/en/plugins/mods/events#hook-the-settings-hook-events) |
-| **Keeps** | Everything in memory for the session only – gone when it ends, after `/clear`, `/resume` or `/branch`, and when Claude Code relaunches (`/tui` switches renderer that way). Nothing on disk | [interface › Keep state](https://code.claude.com/docs/en/plugins/mods/interface#keep-state) (`$.state` lasts until the session ends or `/clear`, `/resume`, `/branch`); no `$.fs` or `$.store` call in the code – check with `claude plugin validate .` |
+| **Reads** | What Claude Code reports to mods: token counts, model, stop reason and server-side tool calls of each request; context fill and its breakdown (Claude Code's free local estimate, including the paths of your CLAUDE.md files and the names of MCP servers, skills and agents); cost as `/cost` shows it; plan-limit percentages; number of prompts and the session's start time; API errors; of each tool call: the tool's name, a short label (file path, or a Bash command's program name) and the length of the result as the model reads it – for MCP tools also counted per server; the type and task description of each subagent, as `$.agent.list()` gives them; Claude Code's own verdict on the cache and its re-write estimate at model switches and resumes; whether the session is fullscreen. Plus the TTL controls `FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL`, `ENABLE_PROMPT_CACHING_1H` and the `promptCacheTtl` setting | The code ([`hooks/register.tsx`](hooks/register.tsx)); `claude plugin validate .` lists every event it hooks and every call it makes. Data sources: [events › Follow a turn](https://code.claude.com/docs/en/plugins/mods/events#follow-a-turn), [reference › Mods API methods](https://code.claude.com/docs/en/plugins/mods/reference#mods-api-methods) (`$.session.usage`, `$.session.turns`), [events › Handle the settings hook events](https://code.claude.com/docs/en/plugins/mods/events#where-settings-hooks-run-in-the-order) |
+| **Keeps** | Everything in memory for the session only – gone when it ends and when Claude Code relaunches (`/tui` switches renderer that way). The session state is reset by `/clear`, `/resume` and `/branch`; a few figures in the mod's own variables stay over them on purpose – which plan-limit windows were warned about, the budget level, the ended conversation's totals for the `/clear` toast, and whether `/keepwarm auto` is on (its break length). Nothing on disk | [interface › Keep state](https://code.claude.com/docs/en/plugins/mods/interface#keep-state) (`$.state` lasts until the session ends or `/clear`, `/resume`, `/branch`); no `$.fs` or `$.store` call in the code – check with `claude plugin validate .` |
 | **Sends** | Nothing on its own until you switch it on. When you ask: `/keepwarm` pings and **Count exactly** in the Context tab – through Claude Code, with your credentials, to the provider your session already uses. Once you type `/keepwarm auto`, its pings go out by themselves whenever you have been away long enough, until `/keepwarm off` or the session ends. Once you switch them on, `expiryNotice` and `limitNotice` raise a notification by themselves – through your own notification channel and your `Notification` hooks, never to a server of the mod's | [api › Call a model](https://code.claude.com/docs/en/plugins/mods/api#call-a-model) (`$.model.fork` uses the session's credentials); `$.session.usage({ breakdown: 'full' })` sends token-count requests (type declaration `SessionUsageArgs`); no `$.http` or `$.process` call in the code; `$.ui.notify` goes through “the person's own notification channel, the one their `preferredNotifChannel` names” (type declaration) |
 | **Costs** | Nothing, except what you start: the **Compact** button runs `/compact` (a summarisation request, as typing it would), and `/keepwarm`: each ping reads your whole context at the model's cache-read price – billed like any request on an API key, counted against your limits on a plan. How cache reads count towards the 5-hour and weekly limits is **not documented**; watch them in the pane. **Count exactly** uses token counting, which is free on the API; whether Claude Code counts it against plan limits is **not documented** | [pricing › Prompt caching](https://platform.claude.com/docs/en/about-claude/pricing#prompt-caching) (cache read 0.1×, 0.05× or 0.025× of the input price); [api › Call a model](https://code.claude.com/docs/en/plugins/mods/api#call-a-model) (“bill to the user's plan, API key, or cloud provider”); [token counting › Pricing and rate limits](https://platform.claude.com/docs/en/build-with-claude/token-counting#pricing-and-rate-limits) (“free to use”) |
 
