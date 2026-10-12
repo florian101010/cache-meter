@@ -2039,3 +2039,19 @@ test('pane header: narrow docks keep every tab – the title shrinks to its mark
   expect(await header(44)).toEqual({ title: '◉', names: [true, true, true], over: 'Overview' })
   expect(await header(30)).toEqual({ title: '◉', names: [true, true, true], over: 'Over' })
 })
+
+test('pane footer: names the two other tabs, not the one on screen', async ($, on) => {
+  world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  const footer = async (tabName: string) => {
+    await run($, 'tokens', tabName)
+    const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+    const text = (await ui.find({ type: 'Text', text: /\/tokens \w+ \| \w+ · / }))?.text
+    await ui.unmount()
+
+    return String(text).match(/\/tokens \w+ \| \w+/)?.[0]
+  }
+  expect(await footer('overview')).toBe('/tokens context | health')
+  expect(await footer('context')).toBe('/tokens overview | health')
+  expect(await footer('health')).toBe('/tokens overview | context')
+})

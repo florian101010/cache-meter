@@ -2118,7 +2118,7 @@ export const register: Register = (on, options) => {
             <Text dimColor wrap="truncate-end">
               {tier === 'narrow'
                 ? `${canClick ? 'click a tab · ' : ''}ctrl+x tab: keys`
-                : `${canClick ? 'click a tab or ' : ''}/tokens context | health · ctrl+x, then tab: keys here (again if another pane lights up)`}
+                : `${canClick ? 'click a tab or ' : ''}/tokens ${TABS.filter(t => t !== tab).join(' | ')} · ctrl+x, then tab: keys here (again if another pane lights up)`}
             </Text>
           )}
           {/* The hint truncates; the button keeps its width and a gap (it ran into the hint at ~80 columns). */}
