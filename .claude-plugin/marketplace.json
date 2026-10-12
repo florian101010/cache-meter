@@ -1,6 +1,6 @@
 {
   "name": "cache-meter",
-  "description": "Cache Meter – stop wasting tokens in Claude Code.",
+  "description": "Cache Meter – a Claude Code mod that stops wasted tokens.",
   "owner": {
     "name": "Florian Grimmer",
     "url": "https://github.com/florian101010"
