@@ -673,8 +673,10 @@ export const register: Register = (on, options) => {
       'context '.length +
       pct.length +
       (showButton ? '[ Compact ]'.length + 1 : 0)
-    // What the session would cost at API prices: Claude Code's own figure, the one /cost shows.
-    const costText = measure?.usd == null ? '' : ` · API $${measure.usd.toFixed(2)}`
+    // Claude Code's own cost figure, the one /cost shows: on a subscription a comparison value (what an
+    // API key would pay), on an API key or a cloud provider real spend. Hidden at $0.00.
+    const usd = measure?.usd ?? null
+    const costText = usd === null || usd < 0.005 ? '' : isPlan(measure) ? ` · API value $${usd.toFixed(2)}` : ` · spent $${usd.toFixed(2)}`
     const minBar = 6
     const showRewrite = rewriteText !== '' && base + rewriteText.length + autoText.length + minBar < cols
     const showAuto = autoText !== '' && base + autoText.length + (showRewrite ? rewriteText.length : 0) + minBar < cols
@@ -949,8 +951,8 @@ export const register: Register = (on, options) => {
         </Text>
         <Text wrap="truncate-end">
           <Text dimColor>{totals.mainSteps} requests · </Text>
-          <Text bold>{measure?.usd == null ? '–' : `≈ $${measure.usd.toFixed(2)}`}</Text>
-          <Text dimColor> at API prices{tier === 'narrow' ? '' : ' (as /cost)'}</Text>
+          <Text bold>{measure?.usd == null ? '–' : `${isPlan(measure) ? '≈ ' : ''}$${measure.usd.toFixed(2)}`}</Text>
+          <Text dimColor>{measure?.usd == null ? '' : costLabel(measure, tier !== 'narrow')}</Text>
         </Text>
         {totals.subSteps > 0 && (
           <Text dimColor wrap="truncate-end">
@@ -1204,9 +1206,9 @@ export const register: Register = (on, options) => {
           </Text>
           <Text wrap="truncate-end">
             {label('Cost')}
-            <Text bold>{usd === null ? '–' : `≈ $${usd.toFixed(2)}`}</Text>
+            <Text bold>{usd === null ? '–' : `${isPlan(measure) ? '≈ ' : ''}$${usd.toFixed(2)}`}</Text>
             <Text dimColor>
-              {usd === null ? '' : ' at API prices'}
+              {usd === null ? '' : costLabel(measure, false)}
               {usd !== null && hours >= 0.05 ? ` · $${(usd / hours).toFixed(2)}/h` : ''}
               {usd !== null && prompts ? ` · $${(usd / prompts).toFixed(2)}/prompt` : ''}
             </Text>
@@ -1275,6 +1277,9 @@ export const register: Register = (on, options) => {
       </Box>
     )
 
+    // Clicks reach a pane only in Claude Code's fullscreen renderer, which captures the mouse
+    // (fullscreen › Use the mouse); in the classic renderer the terminal keeps it.
+    const canClick = e.viewport?.isFullscreen === true
     const tabButton = (id: typeof tab, name: string, hotkey: string, warn = false) => (
       <Button
         key={`tab-${id}`}
@@ -1333,8 +1338,8 @@ export const register: Register = (on, options) => {
         <Box flexDirection="row" justifyContent="space-between">
           <Text dimColor wrap="truncate-end">
             {tier === 'narrow'
-              ? 'click a tab · keys: ctrl+x tab'
-              : `click a tab, or ctrl+x tab for keys: 1–3 · ${isKeeping ? 's stop · ' : canKeep ? 'w keep warm · ' : ''}c compact`}
+              ? `${canClick ? 'click a tab · ' : ''}/tokens health`
+              : `${canClick ? 'click a tab or ' : ''}/tokens context | health · keys: ctrl+x tab, then 1–3 · ${isKeeping ? 's stop · ' : canKeep ? 'w keep warm · ' : ''}c compact`}
           </Text>
           <Button key="pane-compact" plain hotkey="c" onPress={() => compactNow($)}>
             Compact
@@ -1388,4 +1393,19 @@ function hitColor(pct: number | null): string | undefined {
 /** A home directory as `~`, so paths stay short and screenshots show no user name. */
 function homeShort(path: string): string {
   return path.replace(/^\/(Users|home)\/[^/]+(?=\/|$)/, '~')
+}
+
+/**
+ * A subscription: Claude Code reports plan limits only there (types: SessionMeasureInput.rateLimits,
+ * "empty off a subscription or before the first reading").
+ */
+function isPlan(measure: Measure | null): boolean {
+  return (measure?.limits.length ?? 0) > 0
+}
+
+/** What the cost figure means here: a comparison value on a plan, real spend on an API key. */
+function costLabel(measure: Measure | null, isLong: boolean): string {
+  if (isPlan(measure)) return isLong ? ' API value (API-key price)' : ' API value'
+
+  return isLong ? ' spent (as /cost)' : ' spent'
 }

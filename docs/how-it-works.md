@@ -103,7 +103,7 @@ saved = 1 − (new + read × r + written × w) ÷ (new + read + written)
 
 ### Where the pane sits
 
-The surface seats the pane, not the mod (*interface › Pick where to draw*): docked as a sidebar beside the transcript in the fullscreen renderer from 110 columns, otherwise inline above the prompt. The mod reads where it was seated (`Pane.placement`) and acts on it: inline, your next own prompt (`prompt.submit` with `origin.kind` `composer`) closes the pane, since the band already carries the summary; docked, it stays. `/tokens` toggles. `closeOnEscape` (Esc at an empty prompt closes the pane) is set only when the pane will sit above the prompt: `command.run`'s `presentation` says whether the session is fullscreen and how wide the terminal is, and from 110 columns in fullscreen the pane docks – there Esc only hands the keys back. Keys reach the pane only while it has focus: click it, or ctrl+x then Tab (*interface › Keyboard focus and hotkeys*). No `focus` on open: a focused pane takes the keys, and its hotkeys would swallow typing.
+The surface seats the pane, not the mod (*interface › Pick where to draw*): docked as a sidebar beside the transcript in the fullscreen renderer from 110 columns, otherwise inline above the prompt. The mod reads where it was seated (`Pane.placement`) and acts on it: inline, your next own prompt (`prompt.submit` with `origin.kind` `composer`) closes the pane, since the band already carries the summary; docked, it stays. `/tokens` toggles. `closeOnEscape` (Esc at an empty prompt closes the pane) is set only when the pane will sit above the prompt: `command.run`'s `presentation` says whether the session is fullscreen and how wide the terminal is, and from 110 columns in fullscreen the pane docks – there Esc only hands the keys back. Keys reach the pane only while it has focus: ctrl+x then Tab, or a click – clicks only in the fullscreen renderer, which captures the mouse (*interface › Keyboard focus and hotkeys*; *fullscreen › Use the mouse*). `/tokens <tab>` switches tabs without focus; the footer names it and offers clicking only when `e.viewport.isFullscreen`. No `focus` on open: a focused pane takes the keys, and its hotkeys would swallow typing.
 
 ## Context tab
 
@@ -114,7 +114,7 @@ After each turn the `session.measure` hook reads `$.session.usage({ breakdown: '
 | Row | Source |
 |---|---|
 | Age, prompts | `$.session.usage().startedAt` (`/clear` starts it over), `$.session.turns()`, read in `session.measure` |
-| Cost, $/h, $/prompt | `cost.usd` (as `/cost`, at API prices) over age and prompts |
+| Cost, $/h, $/prompt | `cost.usd` (as `/cost`) over age and prompts; labelled *API value* when plan limits are reported (a subscription: `rateLimits` is empty off one, types `SessionMeasureInput`), *spent* otherwise |
 | Stops | `turn.step` result `stopReason` of main requests; `end_turn`, `tool_use` and none are normal, the rest is counted (*events › Follow a turn*) |
 | Errors | settings hook event `StopFailure` (`classic.StopFailure`, observed with `next(e)`), its `error`; `agent_id` set = subagent, counted apart |
 | Server | `turn.step` result `serverToolUses` (v2.1.290+): tool calls the API ran itself, such as the advisor; no `tool.call` fires for them. Duration = `endedAt − startedAt`, `–` without `endedAt` |
@@ -122,7 +122,7 @@ After each turn the `session.measure` hook reads `$.session.usage({ breakdown: '
 
 ## Band layout
 
-The band is one row sized to `e.props.bodyColumns`. The width of every segment is computed first; on a narrow terminal the re-write hint goes first, then the auto-compact note, then the bar (minimum six cells). The `[ Compact ]` button is hidden while `e.props.isWorking`. The weather symbols are single-width characters, not emoji, so the row lines up in every terminal font.
+The band is one row sized to `e.props.bodyColumns`. The width of every segment is computed first; on a narrow terminal the re-write hint goes first, then the auto-compact note, then the bar (minimum six cells). The cost segment (`API value $X` on a subscription, `spent $X` otherwise, hidden at $0) is dropped first, before the auto-compact note. The `[ Compact ]` button is hidden while `e.props.isWorking`. The weather symbols are single-width characters, not emoji, so the row lines up in every terminal font.
 
 ## Tests
 

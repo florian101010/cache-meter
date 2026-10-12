@@ -763,19 +763,33 @@ test('first write of a cache is blue in the request chart, a warm request green'
   await ui.unmount()
 })
 
-test('band: the API value shows when there is room and is dropped first', async ($, on) => {
+test('band: cost as API value on a plan, as spent on an API key; dropped first when narrow', async ($, on) => {
   world(on)
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   await step($)
+  // No plan limits reported: an API key or a cloud provider, where the figure is real spend.
   await $.session.measure({ context: { tokens: 100_000, window: 1_000_000, percent: 10 }, rateLimits: [], cost: { usd: 2.5 }, changed: ['context', 'cost'] })
   let ui = await $.ui.mount({ surface: 'terminal', ...band(130) })
-  expect(await ui.find({ type: 'Text', text: ' · API $2.50' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ' · spent $2.50' })).toBeDefined()
+  await ui.unmount()
+  // Plan limits reported: a subscription, where the figure only compares with an API key.
+  await $.session.measure({
+    context: { tokens: 100_000, window: 1_000_000, percent: 10 },
+    rateLimits: [{ kind: 'five_hour', percentUsed: 12 }],
+    cost: { usd: 2.5 },
+    changed: ['rateLimits'],
+  })
+  ui = await $.ui.mount({ surface: 'terminal', ...band(130) })
+  expect(await ui.find({ type: 'Text', text: ' · API value $2.50' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: ' (auto-compact 97%)' })).toBeDefined()
   await ui.unmount()
   ui = await $.ui.mount({ surface: 'terminal', ...band(80) })
-  expect(await ui.find({ type: 'Text', text: ' · API $2.50' })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: ' · API value $2.50' })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: ' (auto-compact 97%)' })).toBeDefined()
   await ui.unmount()
+  const pane = await $.ui.mount({ surface: 'terminal', ...PANE })
+  expect(await pane.find({ type: 'Text', text: ' API value (API-key price)' })).toBeDefined()
+  await pane.unmount()
 })
 
 test('cache check: nothing is counted while Cache Meter knows nothing of the cache', async ($, on) => {
@@ -833,4 +847,17 @@ test('/tokens <tab> opens on that tab and switches an open pane instead of closi
   expect(pane.isOpen).toBe(true)
   // Without a tab /tokens still toggles.
   expect((await run($, 'tokens', '')).text).toMatch(/^Closed/)
+})
+
+test('pane footer: offers clicks only in the fullscreen renderer, which captures the mouse', async ($, on) => {
+  world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  const footer = /\/tokens context \| health · keys: ctrl\+x tab, then 1–3/
+  let ui = await $.ui.mount({ surface: 'terminal', ...PANE, viewport: { columns: 190, rows: 50, isFullscreen: false } })
+  expect(await ui.find({ type: 'Text', text: footer })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^click a tab/ })).toBeUndefined()
+  await ui.unmount()
+  ui = await $.ui.mount({ surface: 'terminal', ...PANE, viewport: { columns: 190, rows: 50, isFullscreen: true } })
+  expect(await ui.find({ type: 'Text', text: /^click a tab or \/tokens context \| health/ })).toBeDefined()
+  await ui.unmount()
 })

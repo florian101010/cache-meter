@@ -26,7 +26,7 @@ claude plugin install cache-meter --marketplace florian101010/cache-meter --scop
 The band above the prompt, always there:
 
 ```text
-● cache 38m ■■■■■■■■■■■■■□□□□□□□ 99% hit · ☀ context 15% (auto-compact 97%) · API $1.10 [ Compact ]
+● cache 38m ■■■■■■■■■■■■■□□□□□□□ 99% hit · ☀ context 15% (auto-compact 97%) · API value $1.10 [ Compact ]
 ```
 
 `/tokens`, the dashboard (example values; colors in your terminal):
@@ -41,7 +41,7 @@ The band above the prompt, always there:
 │ expiry costs a re-write of ≈ 150k tokens      │ ╭────────────────────────────────────────────────╮
 ╰───────────────────────────────────────────────╯ │ Session          cache saved 54% of input cost │
 ╭───────────────────────────────────────────────╮ │ read 460k · written 122k · new 8 · out 1.3k    │
-│ ↻ Keepwarm off                w: Keep warm 2h │ │ 4 requests · ≈ $1.09 at API prices (as /cost)  │
+│ ↻ Keepwarm off                w: Keep warm 2h │ │ 4 requests · ≈ $1.09 API value (API-key price) │
 │ Break ahead? A ping ≈ 1/20 of a re-write.     │ │ Cold       None – warm for every request.      │
 ╰───────────────────────────────────────────────╯ │ 5 hours    ██░░░░░░░░░  12% · resets Mon 17:10 │
                                                   ╰────────────────────────────────────────────────╯
@@ -54,7 +54,7 @@ The band above the prompt, always there:
 │ 14:02                                                                                      15:31 │
 │ last 150.2k in · 99% hit · out 570                                                               │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-click a tab, or ctrl+x tab for keys: 1–3 · w keep warm · c compact                        c: Compact
+/tokens context | health · keys: ctrl+x tab, then 1–3 · w keep warm · c compact           c: Compact
 ```
 
 > **What is a Claude Code mod?** A mod is a Claude Code plugin whose TypeScript hooks run *inside* Claude Code: it can draw above the prompt, open panes, add slash commands and react to events such as each model request. See the official [mods overview](https://code.claude.com/docs/en/plugins/mods/overview). Cache Meter is a mod only – no skills, no MCP server, no settings hooks.
@@ -126,7 +126,7 @@ In the new session the band appears above the prompt after the first answer; typ
 | `93% hit` | Cache hit rate of the last main request = read ÷ (new + read + written) |
 | `☀ context 9%` | Context fill against the model's window; the symbol tracks the distance to the auto-compact point (☀ ☁ ☂ ☇ ↯) |
 | `(auto-compact 97%)` | Where auto-compact triggers, on the same scale (`off` when disabled) |
-| `· API $1.10` | What the session would cost at API prices – Claude Code's own figure, the one `/cost` shows (dropped first on narrow terminals) |
+| `· API value $1.10` | On a subscription: what the session would cost on an API key – a comparison, Claude Code's own figure as `/cost` shows it. On an API key or a cloud provider it reads `· spent $1.10`. Hidden at $0, dropped first on narrow terminals |
 | `↻` | `/keepwarm` is running |
 | `· rewrite ≈ …` | When the cache has expired: what the next request will re-write (in $ when Claude Code estimated it, otherwise in tokens) |
 | `[ Compact ]` | Runs `/compact`; hidden while a turn is running |
@@ -184,7 +184,7 @@ To load the clone in every session, add its **absolute** path to `CLAUDE_CODE_PL
 | See cache and context | the band above the prompt, always on |
 | Open the full view | `/tokens` – again to close; Esc at an empty prompt closes it above the prompt |
 | Open a tab directly | `/tokens context`, `/tokens health`, `/tokens overview` (a prefix is enough: `/tokens h`) – switches an open pane instead of closing it |
-| Switch tabs by key | click a tab, or press ctrl+x, then Tab (the pane gets the keys), then `1`–`3`; Esc hands the keys back |
+| Switch tabs | `/tokens health` etc.; or press ctrl+x, then Tab (the pane gets the keys), then `1`–`3` – Esc hands the keys back; clicking a tab works only in Claude Code's fullscreen renderer, which captures the mouse |
 | Count the context exactly | `x` or **Count exactly** in the Context tab – one API request per tool and memory file, as `/context` |
 | Pane beside the chat | `/tui fullscreen` (Claude Code's fullscreen renderer): from 110 columns the pane docks as a sidebar and stays open while you chat; `/tui default` switches back |
 | Keep the cache warm | `/keepwarm` (2 h), `/keepwarm 30m` … `/keepwarm 8h`, also `/keepwarm 120m` – interactive sessions only |
@@ -215,6 +215,8 @@ More in [SECURITY.md](SECURITY.md).
 **Isn't this what `/usage` shows?** `/usage` reports the session's hit ratio and whether the cache is warm, when you ask. Cache Meter shows how long it stays warm, all the time, per request, with history – and can keep it warm.
 
 **Does it work with an API key or a cloud provider?** Yes. Claude Code's default TTL there is five minutes; set `cacheTtl` to `5m` (see [Configuration](#configuration)). `/keepwarm` is disabled at a five-minute TTL.
+
+**Does “API value” mean I am paying that?** Not on a subscription: it is what the same session would cost on an API key, as `/cost` computes it – a comparison. Your plan's usage is the 5-hour and weekly limits in the pane. On an API key or a cloud provider the band says `spent` instead, because there it is real cost. Cache Meter tells the two apart by whether Claude Code reports plan limits.
 
 **Does it read or change my prompts?** No. It hooks model requests only to read their token counts, stop reasons and server-side tool calls.
 
