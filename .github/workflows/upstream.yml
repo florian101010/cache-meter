@@ -30,6 +30,7 @@ jobs:
         run: echo "version=$(claude --version | head -n 1)" >> "$GITHUB_OUTPUT"
       - id: check
         continue-on-error: true
+        shell: bash
         run: claude plugin validate --strict . && claude plugin test .
       - name: Open or update an issue
         if: steps.check.outcome == 'failure'
@@ -52,6 +53,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - id: check
         continue-on-error: true
+        # shell: bash runs with -o pipefail; the default for a step without it does not, and the
+        # pipeline's status would be tee's – always success (GitHub › workflow syntax › defaults.run.shell).
+        shell: bash
         run: bash .github/scripts/upstream-docs.sh --check | tee changed.txt
       - name: Open or update an issue
         if: steps.check.outcome == 'failure'

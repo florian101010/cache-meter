@@ -146,6 +146,7 @@ let notifiedFor: number | null = null
 // The last stretch before expiry redraws every second (seconds in the last minute, the pulsing dot);
 // the timer runs only then. A keepwarm ping flashes the band for a few seconds (heartbeat).
 let fastTimer: { cancel: () => void } | null = null
+let lastBeat: number | null = null
 let heartbeat: { until: number; read: number } | null = null
 const HEARTBEAT_MS = 5_000
 // Option sessionBudget ($, 0 = off) and the highest warning already shown (80 or 100 %).
@@ -280,7 +281,11 @@ async function tick($: EngineInterface) {
   $.ui.invalidate('ui.render')
   await maybeAutoOpen($)
   await maybeNotify($)
-  await paceRedraws($)
+  try {
+    await paceRedraws($)
+  } catch {
+    // Only the redraw pace: keepwarm below must run regardless.
+  }
   const keep = await read($, keepA)
   // No ping while a main request runs: that request touches the cache anyway.
   if (keep.until === null || isPinging || mainRequests > 0) return
@@ -510,6 +515,13 @@ async function refreshMeasure($: EngineInterface) {
     return
   }
   const now = await $.clock.now()
+  if ((await read($, measureA)) === null) {
+    // No first reading yet (it failed at start): take the full one now.
+    await measureNow($)
+  }
+  // rateLimits is "empty when none has a reading" (types): an empty list keeps the last limits and
+  // their window starts instead of wiping them mid-turn.
+  const hasLimits = usage.rateLimits.length > 0
   await update($, measureA, m =>
     m === null
       ? m
@@ -517,9 +529,9 @@ async function refreshMeasure($: EngineInterface) {
           ...m,
           percent: usage.context.percent ?? m.percent,
           tokens: usage.context.tokens ?? m.tokens,
-          limits: usage.rateLimits.map(l => ({ kind: l.kind, percentUsed: l.percentUsed, resetsAt: l.resetsAt })),
+          limits: hasLimits ? usage.rateLimits.map(l => ({ kind: l.kind, percentUsed: l.percentUsed, resetsAt: l.resetsAt })) : m.limits,
           usd: usage.cost?.usd ?? m.usd,
-          limitStart: nextLimitStarts(m.limitStart ?? {}, usage.rateLimits, now),
+          limitStart: hasLimits ? nextLimitStarts(m.limitStart ?? {}, usage.rateLimits, now) : m.limitStart,
         },
   )
   await checkBudget($)
@@ -527,6 +539,13 @@ async function refreshMeasure($: EngineInterface) {
 
 // Option sessionBudget: a toast when the session's cost (Claude Code's figure, as in the band) passes
 // 80 % and 100 % of it, each once per session.
+// The level reached so far, set without a toast: after a reload in a running session (its state
+// survives, interface › Keep state) and after /clear, /resume, /branch, so no warning repeats.
+async function settleBudget($: EngineInterface) {
+  const usd = (await read($, measureA))?.usd ?? null
+  budgetWarned = budget <= 0 || usd === null ? 0 : usd >= budget ? 100 : usd >= budget * 0.8 ? 80 : 0
+}
+
 async function checkBudget($: EngineInterface) {
   // Only where a person reads it: no toast under -p or the SDK.
   if (budget <= 0 || !isInteractive) return
@@ -547,7 +566,8 @@ async function checkBudget($: EngineInterface) {
 
 // Every second while the cache is in its last stretch (17 % of the TTL) or a heartbeat shows; off
 // otherwise, so an idle session redraws only on the 15-second tick (reference › Limits: redraws are
-// throttled to 30 a second in the terminal, so one a second is far below it).
+// throttled to 10 a second, 30 for the visible pane and the expanded band in the terminal – one a second
+// is far below either).
 async function paceRedraws($: EngineInterface) {
   if (!isInteractive) return
   const now = await $.clock.now()
@@ -555,7 +575,14 @@ async function paceRedraws($: EngineInterface) {
   const status = cacheStatus(await read($, cacheA), now, ttl.ms)
   const isLast = status.kind === 'warm' && status.remaining <= ttl.ms * PING_SHARE
   const isBeating = heartbeat !== null && heartbeat.until > now
+  // A refused period ends the interval (types: $.clock.every): a timer without a beat for over two
+  // seconds is treated as gone, so the next tick starts a new one.
+  if (fastTimer !== null && lastBeat !== null && now - lastBeat > 2_500) {
+    fastTimer.cancel()
+    fastTimer = null
+  }
   if ((isLast || isBeating) && fastTimer === null) {
+    lastBeat = now
     fastTimer = $.clock.every(1_000, () => fastTick($))
   } else if (!isLast && !isBeating && fastTimer !== null) {
     fastTimer.cancel()
@@ -564,6 +591,7 @@ async function paceRedraws($: EngineInterface) {
 }
 
 async function fastTick($: EngineInterface) {
+  lastBeat = await $.clock.now()
   $.ui.invalidate('ui.render')
   await paceRedraws($)
 }
@@ -650,6 +678,7 @@ export const register: Register = (on, options) => {
   lastMain = null
   notifiedFor = null
   fastTimer = null
+  lastBeat = null
   heartbeat = null
   budget = typeof options.sessionBudget === 'number' && options.sessionBudget > 0 ? options.sessionBudget : 0
   budgetWarned = 0
@@ -661,6 +690,10 @@ export const register: Register = (on, options) => {
     await loadTtlConfig($)
     await measureNow($)
     promptBase = await turnsNow($)
+    // session.start is the first event of every load: a fresh session warns from 0; a reload in a running
+    // one (requests already counted, state kept) takes the level reached without a toast.
+    budgetWarned = 0
+    if ((await read($, stepsA)).length > 0) await settleBudget($)
     // Hooks also run under -p and the SDK, where nothing draws (overview § Where mods run).
     isInteractive = e.isInteractive
     if (e.isInteractive) {
@@ -696,6 +729,7 @@ export const register: Register = (on, options) => {
     promptBase = await turnsNow($)
     // A new transcript: no last main request to compare the next one with.
     lastMain = null
+    await settleBudget($)
     if ((e.source === 'resume' || e.source === 'fork') && e.seconds_since_last_response !== undefined) {
       if (e.prompt_cache_likely_expired !== undefined) await recordCheck($, !e.prompt_cache_likely_expired, 'resume')
       const now = await $.clock.now()
@@ -1546,26 +1580,35 @@ export const register: Register = (on, options) => {
         {steps.length === 0 && <Text dimColor>No request measured yet.</Text>}
         {steps.length > 0 && Raster && (
           <Box flexDirection="column">
-            <Raster key="requests" columns={fullIn} rows={chartRows} cells={rasterCells(columnCells(columns, fullIn, chartRows))} />
+            {/* One keyed Box per request column, in the flow: a keyed Box is a hover scope "while the
+                pointer is anywhere over it" (types: BoxProps.key). An absolute Box would not do – the
+                pointer on it counts as on its parent (types: BoxProps.position). Hovering a column
+                (fullscreen renderer, which captures the mouse) reveals its row over the time line;
+                the surface does it, no hook runs (types: BoxHoverProps.scope). */}
+            <Box flexDirection="row">
+              {slots > shown.length && (
+                <Raster key="requests-empty" columns={(slots - shown.length) * 2} rows={chartRows} cells={rasterCells(columnCells([], (slots - shown.length) * 2, chartRows))} />
+              )}
+              {columns.map((c, i) => (
+                <Box key={`req-${i}`} width={2} hover={{ scope: `cache-meter-req-${i}` }}>
+                  <Raster key={`requests-${i}`} columns={2} rows={chartRows} cells={rasterCells(columnCells([c], 2, chartRows))} />
+                </Box>
+              ))}
+            </Box>
             <Box flexDirection="row" justifyContent="space-between">
               <Text dimColor>{hhmm(shown[0]!.at)}</Text>
               <Text dimColor>{hhmm(shown.at(-1)!.at)}</Text>
             </Box>
-            {/* Hover a column (fullscreen renderer, which captures the mouse): its details cover the
-                time row. Surface-side only – no hook runs (types: BoxProps.hover, BoxHoverProps.scope). */}
             {shown.map((s, i) => (
               <Box
-                key={`req-${i}`}
+                key={`req-detail-${i}`}
                 position="absolute"
-                top={0}
-                left={(slots - shown.length + i) * 2}
-                width={2}
-                height={chartRows}
-                hover={{ scope: `cache-meter-req-${i}` }}
-              />
-            ))}
-            {shown.map((s, i) => (
-              <Box position="absolute" top={chartRows} left={0} width={fullIn} display="none" hover={{ scope: `cache-meter-req-${i}`, display: 'flex' }}>
+                top={chartRows}
+                left={0}
+                width={fullIn}
+                display="none"
+                hover={{ scope: `cache-meter-req-${i}`, display: 'flex' }}
+              >
                 <Text wrap="truncate-end">{columnDetail(s, fullIn)}</Text>
               </Box>
             ))}
@@ -1765,9 +1808,13 @@ export const register: Register = (on, options) => {
             {budget <= 0 ? (
               <Text dimColor>off – option sessionBudget warns at 80 % and 100 %</Text>
             ) : (
-              <Text color={usd !== null && usd >= budget ? 'error' : usd !== null && usd >= budget * 0.8 ? 'warning' : 'success'}>
-                {usd === null ? '–' : `${Math.round((usd / budget) * 100)}%`} of ${budget.toFixed(2)}
-              </Text>
+              usd === null ? (
+                <Text dimColor>cost unknown yet · budget ${budget.toFixed(2)}</Text>
+              ) : (
+                <Text color={usd >= budget ? 'error' : usd >= budget * 0.8 ? 'warning' : 'success'}>
+                  {Math.round((usd / budget) * 100)}% of ${budget.toFixed(2)}
+                </Text>
+              )
             )}
           </Text>
           <Text wrap="truncate-end">

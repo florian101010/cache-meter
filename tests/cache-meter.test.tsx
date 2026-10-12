@@ -711,7 +711,9 @@ test('pane widths: a narrow dock drops secondary text, from 110 columns two colu
   expect(await ui.find({ key: 'columns' })).toBeDefined()
   // The countdown spans one column of two: (140 - 1) / 2 = 69, minus 4 of card chrome.
   expect((await ui.find({ type: 'Raster', key: 'countdown' }))?.props.columns).toBe(65)
-  expect((await ui.find({ type: 'Raster', key: 'requests' }))?.props.columns).toBe(136)
+  // One Raster per request column (2 cells, each in its own hover scope) plus the empty slots: 136 in all.
+  const empty = Number((await ui.find({ type: 'Raster', key: 'requests-empty' }))?.props.columns)
+  expect(empty + 2).toBe(136)
   await ui.unmount()
 })
 
@@ -813,16 +815,16 @@ test('first write of a cache is blue in the request chart, a warm request green'
   await step($)
   await step($)
   const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
-  const chart = await ui.find({ type: 'Raster', key: 'requests' })
-  const cells = Array.from(atob(String(chart?.props.cells)), c => c.charCodeAt(0))
-  // u32 little-endian triplets; the bottom row's last four cells are the two requests.
-  const words: number[] = []
-  for (let i = 0; i < cells.length; i += 4) words.push(cells[i]! | (cells[i + 1]! << 8) | (cells[i + 2]! << 16) | (cells[i + 3]! << 24))
-  const columns = Number(chart?.props.columns)
-  const bottom = words.slice(-columns * 3)
-  const fg = (x: number) => bottom[x * 3 + 1]
-  expect(fg(columns - 4)).toBe(0x7088f0)
-  expect(fg(columns - 1)).toBe(0x40c070)
+  // Each request is its own 2-cell Raster; u32 little-endian triplets, the bottom row's first cell.
+  const bottomColor = async (i: number) => {
+    const chart = await ui.find({ type: 'Raster', key: `requests-${i}` })
+    const cells = Array.from(atob(String(chart?.props.cells)), c => c.charCodeAt(0))
+    const words: number[] = []
+    for (let k = 0; k < cells.length; k += 4) words.push(cells[k]! | (cells[k + 1]! << 8) | (cells[k + 2]! << 16) | (cells[k + 3]! << 24))
+    return words.slice(-2 * 3)[1]
+  }
+  expect(await bottomColor(0)).toBe(0x7088f0)
+  expect(await bottomColor(1)).toBe(0x40c070)
   await ui.unmount()
 })
 
@@ -1567,9 +1569,14 @@ test('request chart: a hover area per column reveals its details over the time r
   await step($)
   const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
   // The kit's find does not report hover props (surface-side); the areas and hidden rows are checked.
+  // A hover scope must be a keyed Box in the flow (an absolute one passes the pointer to its parent).
   const area = await ui.find({ key: 'req-1' })
-  expect(area?.props).toMatchObject({ position: 'absolute', width: 2, height: 4 })
-  expect(await ui.find({ type: 'Text', text: /^\d\d:\d\d · 100\.0k in · 93% hit · 6\.0k written · out 500 *$/ })).toBeDefined()
+  expect(area?.props).toEqual({ key: 'req-1', width: 2 })
+  // Each detail row is hidden until its column is hovered, and covers the whole time row.
+  const detail = await ui.find({ key: 'req-detail-0' })
+  expect(detail?.props).toMatchObject({ position: 'absolute', display: 'none' })
+  const row = await ui.find({ type: 'Text', text: /^\d\d:\d\d · 100\.0k in · 93% hit · 6\.0k written · out 500 *$/ })
+  expect(String(row?.text).length).toBe(Number(detail?.props.width))
   expect(await ui.find({ type: 'Text', text: /· first write *$/ })).toBeDefined()
   await ui.unmount()
 })
@@ -1709,5 +1716,89 @@ test('live during a turn: the auto-compact forecast still counts prompts, not re
   // Four requests, no finished turn: no pace to forecast from.
   const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
   expect(await ui.find({ type: 'Text', text: /prompts? at this pace/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('live during a turn: an empty limit list keeps the plan limits and the forecast pace', async ($, on) => {
+  const { clock } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  const at = (pct: number) => ({ context: { tokens: 100_000, window: 1_000_000, percent: 10 }, rateLimits: [{ kind: 'five_hour', percentUsed: pct, resetsAt: '2026-10-12T20:00:00Z' }], changed: ['rateLimits'] })
+  await $.session.measure(at(20) as never)
+  // The stub's plain usage() reports no limits: a request mid-turn must not wipe them.
+  await step($)
+  const mid = await $.ui.mount({ surface: 'terminal', ...PANE })
+  expect(await mid.find({ type: 'Text', text: /5 hours/ })).toBeDefined()
+  await mid.unmount()
+  await clock.advance(HOUR)
+  await step($)
+  await $.session.measure(at(40) as never)
+  const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  expect(await ui.find({ type: 'Text', text: /5 hours/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ` · full ≈ ${hhmm(T0 + 4 * HOUR)} at this pace` })).toBeDefined()
+  await ui.unmount()
+})
+
+test('session budget: colours in band and Health – yellow from 80 %, red from 100 %', { options: { sessionBudget: 2 } }, async ($, on) => {
+  const { next } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  const colorOf = async (usd: number) => {
+    next.usd = usd
+    await step($)
+    const band160 = await $.ui.mount({ surface: 'terminal', ...band(160) })
+    const cost = (await band160.find({ type: 'Text', text: / of \$2\.00$/ }))?.props.color
+    await band160.unmount()
+    const share = (await healthText($, /^\d+% of \$2\.00$/))?.props.color
+
+    return [cost, share]
+  }
+  expect(await colorOf(1)).toEqual([undefined, 'success'])
+  expect(await colorOf(1.7)).toEqual(['warning', 'warning'])
+  expect(await colorOf(2.1)).toEqual(['error', 'error'])
+})
+
+test('session budget: warns again after /clear starts the cost over, not again after a reload', { options: { sessionBudget: 2 } }, async ($, on) => {
+  const { next, toasts } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  next.usd = 1.7
+  await step($)
+  expect(toasts.filter(t => /budget/.test(t)).length).toBe(1)
+  // A reload in the running session (session.start again, state kept): no repeat.
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  expect(toasts.filter(t => /budget/.test(t)).length).toBe(1)
+  // /clear: the cost starts over, so the next crossing warns again.
+  next.usd = 0.2
+  await $.classic.SessionStart({ source: 'clear' })
+  next.usd = 1.8
+  await step($)
+  expect(toasts.filter(t => /budget/.test(t)).length).toBe(2)
+})
+
+test('last stretch: no one-second timer without a screen', async ($, on) => {
+  const { clock } = world(on)
+  let redraws = 0
+  on('ui.invalidate', () => {
+    redraws += 1
+    return { value: undefined }
+  })
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
+  await step($)
+  await clock.advance(52 * 60_000)
+  redraws = 0
+  await clock.advance(10_000)
+  expect(redraws).toBe(0)
+})
+
+test('live during a turn: requests between prompts leave the auto-compact forecast as it is', async ($, on) => {
+  const { next } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  for (const tokens of [100_000, 200_000, 300_000]) {
+    next.contextTokens = tokens + 50_000
+    await step($)
+    await step($)
+    await $.session.measure({ context: { tokens, window: 1_000_000, percent: tokens / 10_000 }, rateLimits: [], changed: ['context'] })
+  }
+  const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  expect(await ui.find({ type: 'Text', text: ' · in ≈ 7 prompts at this pace' })).toBeDefined()
   await ui.unmount()
 })

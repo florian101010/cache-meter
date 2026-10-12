@@ -18,7 +18,9 @@ while IFS= read -r f; do
   esac
   size=$(wc -c <"$f")
   if ((size > 262144)); then echo "over 256 KiB (held for a reviewer): $f ($size bytes)"; fail=1; fi
-  if ! LC_ALL=C grep -Iq . "$f" 2>/dev/null && [[ -s "$f" ]]; then echo "binary content (held for a reviewer): $f"; fail=1; fi
+  # Binary = holds a NUL byte (a file of blank lines is still text).
+  nul=$(LC_ALL=C tr -dc '\000' <"$f" | wc -c)
+  if ((nul > 0)); then echo "binary content (held for a reviewer): $f"; fail=1; fi
 done <<<"$files"
 
 for f in .npmrc bunfig.toml uv.toml; do
@@ -27,9 +29,11 @@ done
 if printf '%s\n' "$files" | grep -qE '(^|/)(package-lock\.json|npm-shrinkwrap\.json|bun\.lockb?)$'; then
   echo "lockfile: Claude Code would install packages (held for a reviewer)"; fail=1
 fi
-if grep -rEn '\b(npx|bunx|uvx|pnpm dlx|yarn dlx|pipx run|uv run)\b' hooks/ .claude-plugin/plugin.json 2>/dev/null; then
-  echo "package launcher in the plugin's hooks or manifest"; fail=1
-fi
+# grep: 0 = found, 1 = none, 2 = could not read – the last must fail, not pass.
+rc=0
+grep -rEn '\b(npx|bunx|uvx|pnpm dlx|yarn dlx|pipx run|uv run)\b' hooks/ .claude-plugin/plugin.json || rc=$?
+if ((rc == 0)); then echo "package launcher in the plugin's hooks or manifest"; fail=1; fi
+if ((rc > 1)); then echo "could not read hooks/ or .claude-plugin/plugin.json"; fail=1; fi
 python3 - <<'PY' || fail=1
 import json, sys
 h = json.load(open('hooks/hooks.json'))

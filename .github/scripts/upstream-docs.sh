@@ -15,6 +15,7 @@ if command -v sha256sum >/dev/null 2>&1; then hash() { sha256sum | cut -c1-16; }
 TMP_DIR=$(mktemp -d)
 trap 'rm -rf "$TMP_DIR"' EXIT
 changed=0
+unreachable=0
 while read -r old page; do
   # Comment and empty lines are copied as they are.
   if [[ -z "${old}" || "${old}" == \#* ]]; then
@@ -22,8 +23,9 @@ while read -r old page; do
     continue
   fi
   # Hashed byte for byte from the file: a command substitution would drop trailing newlines.
-  if ! curl -sfL --max-time 30 -o "$TMP_DIR/page" "$BASE/$page.md"; then
+  if ! curl -sfL --retry 2 --max-time 30 -o "$TMP_DIR/page" "$BASE/$page.md"; then
     echo "unreachable  $BASE/$page.md"
+    unreachable=1
     printf '%s  %s\n' "$old" "$page" >>"$TMP_DIR/new"
     changed=1
     continue
@@ -37,6 +39,8 @@ while read -r old page; do
 done <"$FILE"
 
 if [[ "$MODE" == --write ]]; then
+  # An unreachable page keeps its old hash; writing would hide that it was never compared.
+  if ((unreachable)); then echo "not written: a page was unreachable" >&2; exit 1; fi
   cp "$TMP_DIR/new" "$FILE"
   echo "wrote $FILE"
   exit 0
