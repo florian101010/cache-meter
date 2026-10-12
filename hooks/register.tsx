@@ -786,8 +786,8 @@ async function compactNow($: EngineInterface) {
 
       return
     }
-    // $.session.compact runs every hook but the caller's, so the session.compact hook below may
-    // not see this one; resetting here too is idempotent.
+    // The session.compact hook below sees this compaction too ($.session.compact skips only the calling
+    // hook, types – this is a button's handler); resetting the countdown here as well is idempotent.
     await resetCache($)
   } catch (error) {
     $.ui.toast(`Compact is not possible right now: ${error instanceof Error ? error.message : String(error)}`)
