@@ -396,7 +396,8 @@ export function contextMapOf(b: BreakdownLike, detail: ContextMap['detail'], at:
     detail,
     at,
     categories: heaviest(b.categories.filter(c => c.kind === 'used')).map(c => ({ name: c.name, tokens: c.tokens })),
-    memoryFiles: heaviest(b.memoryFiles).map(f => ({ name: f.path, tokens: f.tokens })),
+    // Kept home-shortened: other loaded mods can read this state (types: $.state).
+    memoryFiles: heaviest(b.memoryFiles).map(f => ({ name: homePath(f.path), tokens: f.tokens })),
     mcpServers: heaviest(Object.entries(servers).map(([name, sum]) => ({ name, ...sum }))),
     deferredMcpTools: b.mcpTools.filter(t => !t.isLoaded).length,
     agents: heaviest(b.agents).map(a => ({ name: a.agentType, tokens: a.tokens })),
@@ -603,7 +604,11 @@ export function estimateTokens(text: string): number {
 
 /** A home directory as `~`, so paths stay short and screenshots show no user name. */
 export function homePath(path: string): string {
-  return path.replace(/^\/(Users|home)\/[^/]+(?=\/|$)/, '~')
+  return path
+    .replace(/^\/(Users|home)\/[^/]+(?=\/|$)/, '~')
+    .replace(/^\/root(?=\/|$)/, '~')
+    .replace(/^\/mnt\/[a-z]\/Users\/[^/]+(?=\/|$)/i, '~')
+    .replace(/^[A-Za-z]:\\Users\\[^\\]+(?=\\|$)/, '~')
 }
 
 /**
@@ -614,14 +619,17 @@ export function toolLabel(tool: string, input: Readonly<Record<string, unknown>>
   const path = typeof input.file_path === 'string' ? input.file_path : typeof input.notebook_path === 'string' ? input.notebook_path : null
   if (path !== null) return `${tool} ${homePath(path)}`
   if (tool === 'Bash' && typeof input.command === 'string') {
-    // Leading VAR=value assignments go, quoted values included; then the first word. Anything left that
-    // still looks like part of a value (=, a quote, $, a backtick) gives just "Bash": never a guess.
-    const rest = input.command.trim().replace(/^(?:[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|[^\s"']*)\s+)*/, '')
+    // Leading VAR=value assignments go, but only plain ones (a value of safe characters, or quoted
+    // without $ or a backtick). The first word left must look like a program name; anything else –
+    // $(…), ;, |, &&, a quote, an option such as -pSECRET – gives just "Bash": never a guess.
+    const rest = input.command.trim().replace(/^(?:[A-Za-z_][A-Za-z0-9_]*=(?:"[^"$`\\]*"|'[^']*'|[A-Za-z0-9_.,:/@%+=-]*)\s+)*/, '')
     const program = rest.split(/\s+/)[0] ?? ''
+    // Only the last path segment is shown, so only it needs to pass.
     const name = program.split('/').pop() ?? ''
 
-    return name === '' || /[="'$`\\]/.test(name) ? tool : `${tool} ${name}`
+    return /^[A-Za-z0-9_.+][A-Za-z0-9_.+-]*$/.test(name) ? `${tool} ${name}` : tool
   }
+
 
   return tool
 }

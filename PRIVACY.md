@@ -15,15 +15,19 @@ Only what Claude Code reports to mods within your session:
 - **Settings:** the prompt-cache TTL controls (`FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL`, `ENABLE_PROMPT_CACHING_1H`, `promptCacheTtl`) and its own five options.
 - **Your prompts:** when you send one it notes only that you did (to close its pane above the prompt), not the text.
 
-It never reads the text of your prompts or Claude's answers, and no files. Of tool calls it reads only what the list above names: the result's text is measured for its length and dropped. The line it shows under an answer is its own; the answer is not changed.
+It never reads the text of your prompts, and no files. Claude's answer is only compared with what the turn returned, to keep another mod's line, never kept. Of tool calls it reads only what the list above names: the result's text is measured for its length and dropped; for Bash only a word that looks like a program name becomes the label – anything with `$`, quotes, `;`, `|`, `&` or a leading `-` gives just `Bash`. The line it shows under an answer is its own; the answer is not changed. Whether Claude reads that line is not documented.
+
+What Claude does read: the short replies of its commands (`/tokens`, `/keepwarm`, `/tokens report`) – Claude Code adds a command's text to the conversation (mods › api › Add a command). They hold confirmations, never your data.
 
 ## What it keeps
 
 Everything stays in memory, in Claude Code's session state and the mod's own variables. Nothing is written to disk. It is gone when the session ends and after `/clear`, `/resume` or `/branch`.
 
+Other mods you load can read that session state – Claude Code lets any loaded mod read any mod's values (type declarations, `$.state`) – and a mod that runs before Cache Meter can see what it puts on the clipboard or in a notification. Paths are stored with your home directory shortened to `~`; tool labels and subagent task descriptions are stored as shown.
+
 ## What you copy
 
-`/tokens report` puts a summary on your clipboard – the figures of the pane, the names of your memory files (home directory shortened to `~`), MCP servers and their call counts, the tool labels above, and each subagent's type and task description – only when you run it. What you paste it into is up to you.
+`/tokens report` puts a summary on your clipboard – the figures of the pane, the names of your memory files (home directory shortened to `~`), MCP servers and their call counts, the tool labels above, each subagent's type and task description, the last model's id and the last warm miss's cause – only when you run it. What you paste it into is up to you.
 
 ## What it sends
 

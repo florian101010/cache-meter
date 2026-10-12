@@ -15,6 +15,7 @@ import {
   breakCause,
   compactForecast,
   effortKeepsCache,
+  contextMapOf,
   hhmm,
   hitPct,
   isUnexpectedWrite,
@@ -1304,6 +1305,25 @@ test('tool labels: path or program name, never arguments', async () => {
   expect(toolLabel('Bash', { command: "TOKEN='abc def' API=x npm test" })).toBe('Bash npm')
   expect(toolLabel('Bash', { command: 'TOKEN="abc def ghi' })).toBe('Bash')
   expect(toolLabel('Bash', { command: '$SECRET_CMD --flag' })).toBe('Bash')
+  // From the privacy audit: substitutions, separators and options never reach the label.
+  for (const command of [
+    'X=$(cat notes.txt) make',
+    'A=$(echo ARGWORD | base64 -d) curl https://x',
+    'T=$(security find-generic-password -w -s gh) gh pr list',
+    'X=1;echo ARGWORD',
+    'A=1|mysql -pARGWORD',
+    'Y=s&&psql -U admin',
+    'X=a(b c) d',
+    'TOKEN="$(cat key)" curl x',
+    '-pARGWORD',
+    '`cat secret` run',
+    '$(cat key)/npm test',
+  ]) {
+    expect(toolLabel('Bash', { command })).toBe('Bash')
+  }
+  expect(toolLabel('Bash', { command: 'NODE_ENV=test PORT=8080 /usr/local/bin/npm run e2e' })).toBe('Bash npm')
+  expect(toolLabel('Read', { file_path: 'C:\\Users\\carol\\notes.md' })).toBe('Read ~\\notes.md')
+  expect(toolLabel('Read', { file_path: '/root/.bashrc' })).toBe('Read ~/.bashrc')
   expect(toolLabel('Grep', { pattern: 'password' })).toBe('Grep')
   expect(toolLabel('mcp__github__get_file', { path: 'x' })).toBe('mcp__github__get_file')
 })
@@ -1384,7 +1404,7 @@ test('/tokens report: Markdown on the clipboard, the pane untouched, nothing in 
   next.copy = { isCopied: false, reason: 'no-clipboard' }
   expect((await run($, 'tokens', 'report')).text).toBe('Could not copy the session report (no-clipboard).')
   next.copyDeny = 'a ui.copy hook said no'
-  expect((await run($, 'tokens', 'report')).text).toMatch(/^Could not copy the session report \(.*a ui\.copy hook said no.*\)\.$/)
+  expect((await run($, 'tokens', 'report')).text).toBe('Could not copy the session report (rejected by a hook or the terminal).')
 })
 
 test('line under the answer: when the core text is the answer itself, only the line', async ($, on) => {
@@ -1572,4 +1592,21 @@ test('session budget: band shows "of $X", a toast at 80 % and at 100 %, each onc
   expect(toasts.filter(t => /budget/.test(t)).length).toBe(2)
   expect(toasts.at(-1)).toBe('Session budget reached: $2.10 spent of $2.00')
   expect(await healthText($, /^120% of \$2\.00$/)).toBeDefined()
+})
+
+test('context map: memory-file paths are stored home-shortened (other mods can read the state)', async () => {
+  const map = contextMapOf(
+    {
+      categories: [],
+      memoryFiles: [
+        { path: '/Users/carol/.claude/CLAUDE.md', type: 'User', tokens: 9_000 },
+        { path: 'C:\\Users\\carol\\CLAUDE.md', type: 'Project', tokens: 4_000 },
+      ],
+      mcpTools: [],
+      agents: [],
+    } as never,
+    'summary',
+    0,
+  )
+  expect(map.memoryFiles.map(f => f.name)).toEqual(['~/.claude/CLAUDE.md', '~\\CLAUDE.md'])
 })
