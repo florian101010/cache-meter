@@ -29,7 +29,7 @@ A live countdown above the prompt: minutes until the cache expires, the last req
 
 ### ☕ Keep it
 
-Type **`/keepwarm`** before lunch or a meeting. Shortly before expiry one tiny ping keeps the cache alive – about **1/20 of a re-write**, with hard limits so it never runs away. Forgot? An optional **desktop notification** reminds you ten minutes before the cache expires.
+Type **`/keepwarm`** before lunch or a meeting. Shortly before expiry one tiny ping keeps the cache alive – about **1/20 of a re-write**, with hard limits so it never runs away. Forgot? An optional **notification** from your terminal reminds you ten minutes before the cache expires.
 
 </td>
 <td width="33%" valign="top">
