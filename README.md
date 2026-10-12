@@ -22,7 +22,7 @@ Claude Code re-sends your entire conversation with every message. The prompt cac
 
 ### ⏱️ See it
 
-A live countdown above the prompt: minutes until the cache expires, the last request's hit rate, how full the context is and what the session would cost on an API key. **Under every answer, what that answer cost** – and a heads-up when a switch is about to re-write it: before a `/model` switch, and the moment a request with another model or effort goes out. In the last minutes the countdown pulses and counts down to the second; set a **session budget** and the band warns at 80 %.
+A live countdown above the prompt: minutes until the cache expires, the hit rate, how full the context is. **Under every answer, what it cost.** A **heads-up before a switch re-writes the cache**, a pulse in the last minutes – and an optional **session budget** that warns at 80 %.
 
 </td>
 <td width="33%" valign="top">
@@ -42,7 +42,7 @@ Type **`/keepwarm`** before lunch or a meeting. Shortly before expiry one tiny p
 </tr>
 </table>
 
-**New in 0.6–0.9:** cost under every answer · a warning before a switch re-writes the cache · the cause of every warm miss · what tool results fill your context · auto-compact forecast · per-subagent use · expiry notification · session budget · a live last-minute countdown with keepwarm heartbeat · hover details for every request · `/tokens report` for sharing. See the [changelog](CHANGELOG.md).
+**New in 0.6–0.9:** cost under every answer · warnings before a switch re-writes the cache · the cause of every warm miss · what fills your conversation · auto-compact forecast · per-subagent use · expiry notification · session budget · live last minute and keepwarm heartbeat · hover details · `/tokens report`. → [changelog](CHANGELOG.md)
 
 **Install** – in your shell, then start a new Claude Code session:
 
@@ -81,6 +81,33 @@ The band above the prompt, always there:
 
 > **For AI coding agents:** start with **[AGENTS.md](AGENTS.md)** – what the mod does, how to install it for a user, how to verify and test it, and the rules for changing it, on one page. Machine-readable index: [llms.txt](llms.txt).
 
+<p align="center"><img src="https://raw.githubusercontent.com/florian101010/cache-meter/assets/brand/feature-cost.svg" width="100%" alt="See it – every answer, priced: under an answer the line ≈ $0.42 API value · 97% from cache types in, and a session budget bar fills and turns amber at 82 %."></p>
+
+## Every answer, priced
+
+Under each answer one line says what it cost and how it used the cache:
+
+```text
+◉ Cache Meter · ≈ $0.42 API value · 3 requests · 97% from cache · 6.0k written to cache
+```
+
+The band above the prompt keeps the session's total – *API value* on a subscription (what an API key would pay), *spent* on an API key. Set a [`sessionBudget`](#configuration) and it reads `spent $4.10 of $5.00`, turns yellow at 80 % and red at 100 %, with a toast at each.
+
+<p align="center"><img src="https://raw.githubusercontent.com/florian101010/cache-meter/assets/brand/feature-warn.svg" width="100%" alt="Before it breaks – warned in time: a model switch from opus to sonnet raises a card “Model switch re-writes 148.0k tokens (≈ $1.18), cache warm 42m more”, and a bell rings."></p>
+
+## Warned before the cache breaks
+
+A switch while the cache is warm re-writes the whole conversation. Cache Meter says so **before it costs you**:
+
+- **`/model`** – next to Claude Code's own confirmation: *Model switch re-writes 148.0k tokens (≈ $1.18) · cache warm 42m more.*
+- **A request with another model or effort** – a skill with its own model, `opusplan`, an effort change on a model where it splits the cache – the moment it goes out.
+- **Before the cache expires** – an optional notification from your terminal ten minutes ahead, so you can still type `/keepwarm` (option [`expiryNotice`](#configuration)).
+- **And afterwards** – if a warm cache was re-written anyway, the Health tab names the likely cause: model, effort, tool set, a shorter real TTL.
+
+It never blocks, approves or delays anything.
+
+<p align="center"><img src="https://raw.githubusercontent.com/florian101010/cache-meter/assets/brand/feature-keepwarm.svg" width="100%" alt="Keep it – /keepwarm: the countdown ring drains towards the ping mark, a ping flashes, “ping ok · 148k read” appears, and the ring fills again."></p>
+
 ## Keep the cache warm with `/keepwarm`
 
 Before you step away, type:
@@ -113,6 +140,8 @@ It runs only in interactive sessions, never drops a message, and after an expens
 
 **Check that it works on your setup:** 10–50 minutes after a ping, run `/usage` – the *Prompt cache (main)* line should say warm – or watch the hit rate of your next request in the band.
 
+<p align="center"><img src="https://raw.githubusercontent.com/florian101010/cache-meter/assets/brand/feature-tokens.svg" width="100%" alt="Understand it – /tokens: request columns grow, a tall red one is a warm miss, and its tooltip says “148.0k written · effort high → medium · splits the cache”."></p>
+
 ## See everything with `/tokens`
 
 `/tokens` opens the dashboard, `/tokens` again closes it. Three tabs, each answering its own question:
@@ -135,10 +164,18 @@ It runs only in interactive sessions, never drops a message, and after an expens
 
 **Where the numbers come from.** Everything is what Claude Code reports to mods – token counts per request, context breakdown, cost, plan limits, stop reasons, errors. Tool-result sizes are estimates (characters ÷ 4 of the text the model reads), shown beside Claude Code's own total for all messages. Nothing is sent anywhere; only **Count exactly** in the Context tab asks the API to count tokens, once, when you press it.
 
+### Share a session
+
+<p align="center"><img src="https://raw.githubusercontent.com/florian101010/cache-meter/assets/brand/feature-report.svg" width="100%" alt="Share it – /tokens report: a Markdown session report fills line by line and lands on a clipboard with a check mark."></p>
+
+`/tokens report` puts the whole session on your clipboard as Markdown – cost, hit rate, cold re-writes and warm misses with their cause, context fill and the auto-compact forecast, the heaviest files, servers and tool results, subagents and plan limits. Paste it into an issue, a pull request or your notes. Paths are shortened to `~` and Bash commands appear only by program name; review it before you post it publicly.
+
 ## Contents
 
+- [Every answer, priced](#every-answer-priced)
+- [Warned before the cache breaks](#warned-before-the-cache-breaks)
 - [Keep the cache warm with `/keepwarm`](#keep-the-cache-warm-with-keepwarm)
-- [See everything with `/tokens`](#see-everything-with-tokens)
+- [See everything with `/tokens`](#see-everything-with-tokens) · [Share a session](#share-a-session)
 - [Features](#features)
 - [Requirements](#requirements)
 - [Installation](#installation) · [Update](#update)
