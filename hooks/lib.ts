@@ -35,8 +35,8 @@ export function resolveTtl(i: TtlInputs): Ttl {
   if (i.setting === '60m') return of('1h', 'cache-meter option')
   if (i.setting === '5m') return of('5m', 'cache-meter option')
   if (i.force5m) return of('5m', 'FORCE_PROMPT_CACHING_5M')
-  const env = fixed(i.envTtl)
-  if (env) return of(env, 'CLAUDE_CODE_PROMPT_CACHE_TTL')
+  const fromVariable = fixed(i.envTtl)
+  if (fromVariable) return of(fromVariable, 'CLAUDE_CODE_PROMPT_CACHE_TTL')
   const setting = fixed(i.settingTtl)
   if (setting) return of(setting, 'promptCacheTtl')
   if (i.enable1h) return of('1h', 'ENABLE_PROMPT_CACHING_1H')
@@ -384,11 +384,12 @@ const heaviest = <T extends { tokens: number }>(items: readonly T[]): T[] =>
 
 /** The heaviest shares of the context, from a breakdown: categories in use, memory files, MCP servers, agents, skills. */
 export function contextMapOf(b: BreakdownLike, detail: ContextMap['detail'], at: number): ContextMap {
-  const servers = new Map<string, { tokens: number; tools: number }>()
+  // Loaded MCP tools summed per server (a plain record: the directory's scan reads Map.set like the shell's set).
+  const servers: Record<string, { tokens: number; tools: number }> = {}
   for (const tool of b.mcpTools) {
     if (!tool.isLoaded) continue
-    const s = servers.get(tool.serverName) ?? { tokens: 0, tools: 0 }
-    servers.set(tool.serverName, { tokens: s.tokens + tool.tokens, tools: s.tools + 1 })
+    const sum = servers[tool.serverName] ?? { tokens: 0, tools: 0 }
+    servers[tool.serverName] = { tokens: sum.tokens + tool.tokens, tools: sum.tools + 1 }
   }
 
   return {
@@ -396,7 +397,7 @@ export function contextMapOf(b: BreakdownLike, detail: ContextMap['detail'], at:
     at,
     categories: heaviest(b.categories.filter(c => c.kind === 'used')).map(c => ({ name: c.name, tokens: c.tokens })),
     memoryFiles: heaviest(b.memoryFiles).map(f => ({ name: f.path, tokens: f.tokens })),
-    mcpServers: heaviest([...servers].map(([name, s]) => ({ name, ...s }))),
+    mcpServers: heaviest(Object.entries(servers).map(([name, sum]) => ({ name, ...sum }))),
     deferredMcpTools: b.mcpTools.filter(t => !t.isLoaded).length,
     agents: heaviest(b.agents).map(a => ({ name: a.agentType, tokens: a.tokens })),
     skills: b.skills ? { total: b.skills.totalSkills, included: b.skills.includedSkills, tokens: b.skills.tokens } : null,

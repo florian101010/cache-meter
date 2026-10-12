@@ -1,7 +1,7 @@
 {
   "name": "cache-meter",
   "displayName": "Cache Meter",
-  "version": "0.5.3",
+  "version": "0.5.4",
   "description": "Claude Code mod: /keepwarm keeps your prompt cache alive through a break; a countdown, hit rate, context fill and API value above the prompt; and a /tokens dashboard with what caching saved, what fills your context, API errors and cost per hour.",
   "author": {
     "name": "Florian Grimmer",
