@@ -15,14 +15,14 @@ It never reads the text of your prompts, Claude's answers, tool inputs or tool r
 
 ## What it keeps
 
-Everything stays in Claude Code's session state in memory. Nothing is written to disk. It is gone when the session ends and after `/clear`, `/resume` or `/branch`.
+Everything stays in memory, in Claude Code's session state and the mod's own variables. Nothing is written to disk. It is gone when the session ends and after `/clear`, `/resume` or `/branch`.
 
 ## What it sends
 
 Nothing to the author or anyone else, and no telemetry. Two actions you start send requests through Claude Code, with your own credentials, to the provider your session already uses (the Anthropic API or your cloud provider):
 
 - **`/keepwarm`:** one small request over your conversation shortly before the cache expires (at most 12 per run), to keep the prompt cache alive.
-- **Count exactly** in the `/tokens` Context tab: token-count requests, one per tool and memory file, as `/context` makes them – once, when you press it.
+- **Count exactly** in the `/tokens` Context tab: token-count requests, one per tool and memory file, as `/context` makes them – once, when you press it. Token counting is [free on the API](https://platform.claude.com/docs/en/build-with-claude/token-counting#pricing-and-rate-limits).
 
 ## Children
 
