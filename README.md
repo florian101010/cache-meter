@@ -1,3 +1,5 @@
+<p align="center"><img src="https://raw.githubusercontent.com/florian101010/cache-meter/assets/brand/header.svg" width="100%" alt="Cache Meter – Never lose your prompt cache to a coffee break again. A coffee cup inside a countdown ring that drains, pings and refills."></p>
+
 # Cache Meter (Claude Code Mod)
 
 [![CI](https://github.com/florian101010/cache-meter/actions/workflows/ci.yml/badge.svg)](https://github.com/florian101010/cache-meter/actions/workflows/ci.yml)
@@ -6,7 +8,7 @@
 ![Claude Code mod](https://img.shields.io/badge/Claude%20Code-mod-d97757)
 ![Claude Code ≥ 2.1.287](https://img.shields.io/badge/Claude%20Code-%E2%89%A5%202.1.287-555)
 
-**Never lose your prompt cache to a coffee break.**
+**Never lose your prompt cache to a coffee break again.**
 
 Claude Code re-sends your entire conversation with every message. The prompt cache is what makes that fast and cheap – but it only lives for **one hour** on a Claude subscription (five minutes on an API key). Step away longer, and your next message re-writes the whole context from scratch: a [slower turn](https://code.claude.com/docs/en/prompt-caching#cache-lifetime), billed at the [cache-write rate](https://code.claude.com/docs/en/prompt-caching#check-cache-performance). Nothing on screen warns you.
 
@@ -66,11 +68,11 @@ Safe by design: it never changes your prompts or tool calls and writes nothing t
 
 The band above the prompt, always there:
 
-![The band above the prompt: cache 60m with a green countdown bar, 100% hit, context 15%, auto-compact at 97%, API value $1.06 and a Compact button](docs/images/band.png)
+![The band above the prompt: cache 60m with a green countdown bar, 100% hit, context 15%, auto-compact at 97%, API value $1.06 and a Compact button](https://raw.githubusercontent.com/florian101010/cache-meter/assets/screenshots/band.png)
 
 `/tokens` – the dashboard, here as a sidebar beside the chat (Claude Code's fullscreen renderer):
 
-<img src="docs/images/overview.png" width="640" alt="The /tokens overview: a big 60-minute countdown marked WARM with the expiry time and where keepwarm would ping, a keepwarm card with a 'Keep warm 2h' button, the context gauge with the auto-compact marker, session totals with 'cache saved 40% of input cost' and the plan limits, and a column chart of every request">
+<img src="https://raw.githubusercontent.com/florian101010/cache-meter/assets/screenshots/overview.png" width="640" alt="The /tokens overview: a big 60-minute countdown marked WARM with the expiry time and where keepwarm would ping, a keepwarm card with a 'Keep warm 2h' button, the context gauge with the auto-compact marker, session totals with 'cache saved 40% of input cost' and the plan limits, and a column chart of every request">
 
 > **What is a Claude Code mod?** A mod is a Claude Code plugin whose TypeScript hooks run *inside* Claude Code: it can draw above the prompt, open panes, add slash commands and react to events such as each model request. See the official [mods overview](https://code.claude.com/docs/en/plugins/mods/overview). Cache Meter is a mod only – no skills, no MCP server, no settings hooks.
 
@@ -119,13 +121,13 @@ It runs only in interactive sessions, never drops a message, and after an expens
 | **Health** | Did requests fail or get cut off? How long does the advisor take? What does the session cost per hour and per prompt? | `/tokens health` |
 
 <p>
-<img src="docs/images/context.png" width="49%" alt="The Context tab: where the context goes by category, the heaviest memory files, MCP servers, skills listed of total and agents">
-<img src="docs/images/health.png" width="49%" alt="The Health tab: session age, prompts, cost as API value per prompt, tokens per prompt, stop reasons, API errors, server-side tool calls and the cache check">
+<img src="https://raw.githubusercontent.com/florian101010/cache-meter/assets/screenshots/context.png" width="49%" alt="The Context tab: where the context goes by category, the heaviest memory files, MCP servers, skills listed of total and agents">
+<img src="https://raw.githubusercontent.com/florian101010/cache-meter/assets/screenshots/health.png" width="49%" alt="The Health tab: session age, prompts, cost as API value per prompt, tokens per prompt, stop reasons, API errors, server-side tool calls and the cache check">
 </p>
 
 **Where it shows.** In Claude Code's classic renderer the pane sits above the prompt, and your next prompt closes it so the conversation keeps its room. In the fullscreen renderer (`/tui fullscreen`) it docks beside the chat as a sidebar, opens there by itself at session start (option [`autoSidebar`](#configuration)) and stays open while you work.
 
-**Switching tabs.** `/tokens context` or `/tokens health` – a prefix is enough, and typing `/tok` lists all three in the typeahead. Or click a tab (fullscreen renderer), or press ctrl+x, Tab, then `1`–`3`.
+**Switching tabs.** `/tokens context` or `/tokens health` – a prefix is enough; after `/tokens ` Claude Code shows the three tab names as a hint. Or click a tab (fullscreen renderer), or press ctrl+x, Tab, then `1`–`3`.
 
 **Where the numbers come from.** Everything is what Claude Code reports to mods – token counts per request, context breakdown, cost, plan limits, stop reasons, errors. Nothing is sent anywhere; only **Count exactly** in the Context tab asks the API to count tokens, once, when you press it.
 
@@ -208,7 +210,6 @@ To load the clone in every session, add its **absolute** path to `CLAUDE_CODE_PL
 |---|---|
 | See cache and context | the band above the prompt, always on |
 | Open the full view | `/tokens` – again to close; Esc at an empty prompt closes it above the prompt |
-| See the options while typing | type `/tok` – the typeahead lists `/tokens overview`, `/tokens context`, `/tokens health` with one line each; after `/tokens ` the tab names |
 | Open a tab directly | `/tokens context`, `/tokens health`, `/tokens overview` (a prefix is enough: `/tokens h`) – switches an open pane instead of closing it |
 | Switch tabs | `/tokens health` etc.; or press ctrl+x, then Tab (the pane gets the keys), then `1`–`3` – Esc hands the keys back; clicking a tab works only in Claude Code's fullscreen renderer, which captures the mouse |
 | Count the context exactly | `x` or **Count exactly** in the Context tab – one API request per tool and memory file, as `/context` |

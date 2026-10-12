@@ -67,8 +67,11 @@ Fill in the template. CI must be green. Describe what a user sees differently, a
 
 ## Repository map
 
+Images (README screenshots, header, icon and social preview sources) live on the [`assets` branch](https://github.com/florian101010/cache-meter/tree/assets), not on `main`: the directory scans `main`, and image files there hold every version for review. Its README says how to regenerate them.
+
 ```text
-.claude-plugin/plugin.json        manifest: name, version, type contract, the cacheTtl option
+.claude-plugin/plugin.json        manifest: name, version, type contract, the cacheTtl and autoSidebar options
+.claude-plugin/icon.png           listing icon (static PNG; source on the assets branch)
 .claude-plugin/marketplace.json   makes this repository a one-plugin marketplace
 hooks/hooks.json                  points to the hooks module
 hooks/register.tsx                all hooks: data sources, band, pane, commands, keepwarm
