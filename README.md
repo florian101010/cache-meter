@@ -77,7 +77,7 @@ Keine Mod-Schnittstelle meldet die TTL je Anfrage. Der Mod leitet sie in dieser 
 
 Mit API-Key oder Cloud-Provider ist Claude Codes Standard 5m: dann `cacheTtl` auf `5m` stellen oder `promptCacheTtl` setzen. Umgebungsvariablen und Einstellung liest der Mod beim Start und nach `/clear`, `/resume`, `/branch`.
 
-Option setzen: `/config` → Zeile `cache-meter.cacheTtl`, oder in `~/.claude/settings.json` unter `pluginConfigs` → `"cache-meter@inline"` → `options` → `cacheTtl`. Der Schlüssel `@inline` gilt für `--plugin-dir`; ein Pfad aus `CLAUDE_CODE_PLUGIN_DIRS` wird „exactly as a `--plugin-dir`“ geladen (Skill `plugin-authoring`, reference › Developing one), und der Debug-Log von 2.1.296 nennt `pluginConfigs["cache-meter" or "cache-meter@inline"]`.
+Option setzen: `/config` → Zeile `cache-meter.cacheTtl`, oder in `~/.claude/settings.json` unter `pluginConfigs` → `"cache-meter@inline"` → `options` → `cacheTtl`. Der Schlüssel `@inline` gilt für einen mit `--plugin-dir` geladenen Mod, und `CLAUDE_CODE_PLUGIN_DIRS` lädt Verzeichnisse „as `--plugin-dir` does“ (*reference › Settings and environment variables*).
 
 **Gegenprobe**, ob die angenommene TTL stimmt: `/usage` → Zeile „Prompt cache (main)“ (warm/kalt), oder `claude -p "hello" --output-format json` → `usage.cache_creation.ephemeral_1h_input_tokens` vs. `ephemeral_5m_input_tokens` (*prompt-caching › Choose the TTL yourself*).
 
@@ -99,7 +99,7 @@ Der Mod schreibt nichts auf die Platte und sendet nichts außer den `/keepwarm`-
 
 ## Laden, Abschalten, Einstellen
 
-Kein Marketplace. Geladen über `CLAUDE_CODE_PLUGIN_DIRS` im `env`-Block von `~/.claude/settings.json` (Pfade mit `:` getrennt), wirkt ab der nächsten Session. **Geladen wird der Ordner so, wie er ausgecheckt ist** – ein ausgecheckter Branch läuft in allen neuen Sessions. Zum Ausprobieren einer Änderung einen Worktree anlegen und `claude --plugin-dir <worktree>` nutzen.
+Kein Marketplace. Geladen über `CLAUDE_CODE_PLUGIN_DIRS` im `env`-Block von `~/.claude/settings.json` – laut *reference › Settings and environment variables* **absolute Pfade**, getrennt mit `:` –, wirkt ab der nächsten Session. **Geladen wird der Ordner so, wie er ausgecheckt ist** – ein ausgecheckter Branch läuft in allen neuen Sessions. Zum Ausprobieren einer Änderung einen Worktree anlegen und `claude --plugin-dir <worktree>` nutzen.
 
 Abschalten: Pfad aus `CLAUDE_CODE_PLUGIN_DIRS` nehmen, oder für eine Session `claude --safe-mode`.
 
