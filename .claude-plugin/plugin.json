@@ -5,7 +5,7 @@
   "description": "Stop wasting tokens: keeps the prompt cache warm through every break, shows when it expires and what each answer costs.",
   "author": {
     "name": "Florian Grimmer",
-    "url": "https://github.com/florian101010"
+    "url": "https://www.floriangrimmer.de/"
   },
   "homepage": "https://github.com/florian101010/cache-meter#readme",
   "repository": "https://github.com/florian101010/cache-meter",
