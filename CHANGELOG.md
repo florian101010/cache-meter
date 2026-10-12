@@ -12,11 +12,11 @@ A café that acts out the cache.
 - `ui.fault`: if the café's file fails, the pane leaves it out.
 
 ### Changed
-- **Keyboard in the pane, in one step:** while the `/tokens` pane is open the band leaves out its Compact button (the pane has its own, `c`), so the first `Ctrl+X Tab` lands in the pane instead of on that button. The pane says when it has the keyboard: its bottom line turns orange and reads `keys here · 1–3 switch tabs · tab + enter · esc back to the prompt`. `Ctrl+X Tab` moves the focus through the band, then each open pane, then back to the prompt (keybindings › `abovePrompt:focus`), so the old hint `ctrl+x tab, then 1–3` sent digits into the chat when the band or another pane had the focus. Without the keyboard the hint reads `ctrl+x, then tab: keys here (again if another pane lights up)`. The header repeats the hint (`ctrl+x, tab: keys here`, orange `keys here · ↓ scroll · esc` with the keys), because a tab taller than the pane cuts the footer off; the footer names the scroll keys.
+- **Keyboard in the pane, in one step:** while the `/tokens` pane is open the band leaves out its Compact button (the pane has its own, `c`), so the first `Ctrl+X Tab` lands in the pane instead of on that button. The pane says when it has the keyboard: its bottom line turns orange and reads `keys here · 1–3 switch tabs · ↓ pgdn end scroll · tab + enter · esc back to the prompt` (with `· w keep warm` or `· s stop` before the last part when they apply). `Ctrl+X Tab` moves the focus through the band, then each open pane, then back to the prompt (keybindings › `abovePrompt:focus`), so the old hint `ctrl+x tab, then 1–3` sent digits into the chat when the band or another pane had the focus. Without the keyboard the hint reads `ctrl+x, then tab: keys here (again if another pane lights up)`. The header repeats the hint (`ctrl+x, tab: keys here`, orange `keys here · ↓ scroll · esc` with the keys), because a tab taller than the pane cuts the footer off; the footer names the scroll keys.
 - README: the usage table has rows for the keyboard (incl. scrolling a tall tab) and the mouse (fullscreen only: click, wheel, hover); *Where it shows* and the FAQ say both.
 
 ### Docs
-- README: new screenshots – the full terminal with the docked dashboard, crops of Overview, Context and Health, the band; a section on the café; FAQ on turning animations off. PRIVACY, SECURITY, AGENTS, CONTRIBUTING, llms.txt and how-it-works describe the animation file.
+- README: new screenshots of the 0.9 state (`assets/screenshots/v0.9/`; the café and the new hints are not in them yet) – the full terminal with the docked dashboard, crops of Overview, Context and Health, the band; a section on the café; FAQ on turning animations off. PRIVACY, SECURITY, AGENTS, CONTRIBUTING, llms.txt and how-it-works describe the animation file.
 
 ## [0.9.0] – 2026-10-12
 
@@ -32,6 +32,7 @@ Alive: the band moves when it matters, and a budget keeps a session in check.
 - **Keeping up with Claude Code:** a weekly workflow runs the tests on the newest Claude Code and compares the official pages the mod relies on with stored content hashes (`.github/scripts/upstream-docs.sh`, `docs/upstream-docs.txt`); a change opens an issue. CONTRIBUTING lists every official page and what it settles here.
 
 ### Changed
+- The line under an answer and the budget toasts appear only in interactive sessions – none under `-p` or the SDK, where nothing is drawn.
 - Health: after a resume or relaunch without Claude Code's verdict on the cache, Cache check says `Resumed <time> – Claude Code gave no verdict …` instead of `No model switch or resume yet`.
 - Health: with no request measured, Warm miss reads `no request measured yet` (dim) instead of a green `none`.
 
@@ -51,6 +52,7 @@ Context under control: what fills the conversation, when it compacts, and a repo
 
 ### Changed
 - Privacy: Cache Meter now reads the name, a short label and the result length of each tool call (not the result's text, not a command's arguments). README, PRIVACY.md and SECURITY.md say so.
+- Privacy hardening of the labels: a Bash command shows only an allow-listed program name, split at shell whitespace; file labels only for the file tools (Read, Write, Edit, MultiEdit, NotebookEdit), never a URL, with query and fragment cut; token-like path parts appear as `…`; labels are one line of at most 80 characters.
 - Plugin description names what each answer costs and what broke the cache.
 
 ## [0.7.0] – 2026-10-12
@@ -204,7 +206,7 @@ Changes for Anthropic's plugin directory, whose validation blocked 0.5.1.
 - Pane `/tokens`: per-request token history, totals, plan limits, cost.
 - `/keepwarm`.
 
-[0.10.0]: https://github.com/florian101010/cache-meter/compare/feat/v0.9-alive...HEAD
+[0.10.0]: https://github.com/florian101010/cache-meter/compare/feat/v0.9-alive...feat/v0.10-cafe
 [0.9.0]: https://github.com/florian101010/cache-meter/compare/feat/v0.8-context...feat/v0.9-alive
 [0.8.0]: https://github.com/florian101010/cache-meter/compare/feat/v0.7-why-and-when...feat/v0.8-context
 [0.7.0]: https://github.com/florian101010/cache-meter/compare/feat/v0.6-saves-money...feat/v0.7-why-and-when
@@ -216,7 +218,7 @@ Changes for Anthropic's plugin directory, whose validation blocked 0.5.1.
 [0.5.0]: https://github.com/florian101010/cache-meter/compare/a520960...cache-meter--v0.5.0
 [0.4.0]: https://github.com/florian101010/cache-meter/compare/18e9711...a520960
 [0.3.0]: https://github.com/florian101010/cache-meter/compare/e430ab2...18e9711
-[0.2.1]: https://github.com/florian101010/cache-meter/compare/e430ab2...HEAD
+[0.2.1]: https://github.com/florian101010/cache-meter/pull/3
 [0.2.0]: https://github.com/florian101010/cache-meter/pull/1
 [0.1.1]: https://github.com/florian101010/cache-meter/commit/3217bf4
 [0.1.0]: https://github.com/florian101010/cache-meter/commit/b436f27

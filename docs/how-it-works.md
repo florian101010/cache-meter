@@ -19,8 +19,12 @@ This page describes the design of the mod for people who want to change it or ch
 | `ui.render` `AbovePrompt` | the band; puts `await next(e)` below its own row so other mods' content stays | *interface › Pick where to draw › Band above the prompt* |
 | `ui.render` `Pane` (`requestId: 'cache-meter'`) | the `/tokens` pane; sized by `e.props.bodyColumns` and `e.props.scroll.bodyRows` | *reference › Render sites* |
 | `command.run` `tokens`, `keepwarm` | the two commands | *api › Add a command* |
+| `classic.StopFailure` | an API error ends a turn: counted for the Health tab (main conversation and subagents) | types: `StopFailureHookInput` |
+| `prompt.submit` | notes that you sent a prompt (not its text) – the pane above the prompt closes then | *events › Prompt* |
+| `ui.close` | notes that you closed the pane (it does not reopen by itself) and redraws the band, which takes its Compact button back | types: `UiCloseInput` |
+| `ui.fault` | the café's surface module failed to load, draw or run: it is left out from then on | *reference › Interface* (v2.1.289+); types: `UiFaultInput` |
 
-Calls: `$.clock.now/every`, `$.command.register`, `$.env.get` (three literal names), `$.settings.read`, `$.session.usage` and `$.session.compact`, `$.model.fork`, `$.state` through `atom`/`read`/`update`, `$.ui.invalidate/open/resolve/toast`. `claude plugin validate .` prints the authoritative list.
+Calls (as `claude plugin validate` lists them): `$.agent.list`, `$.clock.after`, `$.clock.every`, `$.clock.now`, `$.command.register`, `$.env.get` (three literal names), `$.model.fork`, `$.session.compact`, `$.session.turns`, `$.session.usage`, `$.settings.read`, `$.state` (through `atom`/`read`/`update`), `$.ui.close`, `$.ui.copy`, `$.ui.invalidate`, `$.ui.notify`, `$.ui.open`, `$.ui.panes`, `$.ui.resolve`, `$.ui.toast`. No `$.fs`, `$.store`, `$.http` or `$.process`.
 
 ## State
 
@@ -36,6 +40,7 @@ All drawn values live in `$.state`, declared in `types/index.d.ts` (*interface �
 | `coldWrites` | the last 20 cold rewrites (time, tokens, cause `pause`/`model`/`resume`, idle time) |
 | `measure` | context fill and tokens, window, auto-compact point (and whether it is off), the last 12 context sizes, plan limits, cost, start time, prompts, and per plan limit the first reading of its window (`limitStart`) |
 | `health` | unusual stops, API errors (main and subagents), server-side tool calls, MCP calls by tool (`toolCalls`), warm misses with pause and cause (`unexpected`), the expiry notice's count and last reason (`notice`), Claude Code's cache verdicts (`checks`) |
+| `contextMap` | the heaviest context items for the Context tab: memory files (paths `~`-shortened), MCP servers with their tools, skills, agents |
 | `reportedTtl` | `cache_ttl` from the last model switch |
 | `ttlConfig` | the TTL controls read at start (three environment variables, the `promptCacheTtl` setting) |
 | `keepWarm` | end of the window, pings, tokens read, last ping |
@@ -136,7 +141,7 @@ After each turn the `session.measure` hook reads `$.session.usage({ breakdown: '
 
 ## Band layout
 
-The band is one row sized to `e.props.bodyColumns`. The width of every segment is computed first; on a narrow terminal the re-write hint goes first, then the auto-compact note, then the bar (minimum six cells). The cost segment (`API value $X` on a subscription, `spent $X` otherwise, hidden at $0) is dropped first, before the auto-compact note. The `[ Compact ]` button is hidden while `e.props.isWorking`. The weather symbols are single-width characters, not emoji, so the row lines up in every terminal font.
+The band is one row sized to `e.props.bodyColumns`. The width of every segment is computed first; on a narrow terminal it drops, in order: the cost segment (`API value $X` on a subscription, `spent $X` otherwise, hidden at $0), the re-write hint (or `· /keepwarm?` in the last stretch), the auto-compact note, then the bar (minimum six cells). The `[ Compact ]` button is hidden while `e.props.isWorking` and while the `/tokens` pane is placed (`$.ui.panes()`), so the first Ctrl+X Tab reaches the pane; opening and closing the pane redraws the band. The weather symbols are single-width characters, not emoji, so the row lines up in every terminal font.
 
 ## Tests
 
@@ -207,7 +212,7 @@ Option `sessionBudget` (dollars, `0` = off) against `cost.usd`, checked after ev
 
 Option `animations` (default `on`). Both live in the Overview only.
 
-**The café** is a `Client` (interface › *Build a tree from elements*): `hooks/cafe.tsx`, a surface module the engine reads off the `module: "./cafe.tsx"` literal – it is not a hooks module and is not listed in `hooks.json`. It runs on the drawing side with its own frame clock (`surface.every`, 250 ms, started once while its state is still undefined) and gets no mods API; the pane hands it one word as props, from `cafeState` in `lib.ts`: `ping` while a keepwarm heartbeat shows, `brewing` for 12 s after a request wrote a fresh cache, `working` while a turn is open, then `cold`, `empty`, `last` or `warm` from the countdown. A new word reaches the running instance with its state kept (`ClientProps.props`). It is drawn only when the pane is docked (`placement: 'dock'`), where the outer Box takes the room's height (`minHeight` = `scroll.bodyRows`) and the café grows into what the cards leave (`flexGrow: 1`). It reads its own size (`surface.rows`, `surface.columns`): with fewer than 7 rows or 20 columns it draws a single line, so the region never shows half a figure; with no room left it is that one line. A tab switch, closing the pane or `animations: off` removes the Client, which ends its timer. Its redraws are its own region's (`setState`), not the pane hook's, so they do not count against the pane's redraw limit (reference › *Limits*). If the file fails to load, draw or run, `ui.fault` marks it broken and the pane leaves it out from then on; the engine draws the pane again by itself.
+**The café** is a `Client` (interface › *Build a tree from elements*): `hooks/cafe.tsx`, a surface module the engine reads off the `module: "./cafe.tsx"` literal – it is not a hooks module and is not listed in `hooks.json`. It runs on the drawing side with its own frame clock (`surface.every`, 250 ms, started once while its state is still undefined) and gets no mods API; the pane hands it one word as props, from `cafeState` in `lib.ts`: `ping` while a keepwarm heartbeat shows, `brewing` for 12 s after a request wrote a fresh cache, `working` while a turn is open, then `cold`, `empty`, `last` or `warm` from the countdown. A new word reaches the running instance with its state kept (`ClientProps.props`). It is drawn only when the pane is docked (`placement: 'dock'`), where the outer Box takes the room's height (`minHeight` = `scroll.bodyRows`) and the café grows into what the cards leave (`flexGrow: 1`). It reads its own size (`surface.rows`, `surface.columns`): with fewer than 7 rows or 20 columns it draws a single line, so the region never shows half a figure; with no room left it is that one line. A tab switch, closing the pane or `animations: off` removes the Client, which ends its timer. Its redraws are its own region's (`setState`), not the pane hook's; whether they count against the pane's redraw limit is undocumented (reference › *Limits* names only `$.ui.invalidate`). If the file fails to load, draw or run, `ui.fault` marks it broken and the pane leaves it out from then on; the engine draws the pane again by itself.
 
 **The minute flash:** when the Overview draws a different minute than it last drew, the digits take the theme's `text` colour for 450 ms, then one `$.clock.after` redraws them in the state colour. Not on the first draw, after a reload (the module's memory starts empty), on another tab, or while the last minute counts seconds. The change is noticed where the digits are drawn, so it flashes whatever redraw shows the new minute.
 
