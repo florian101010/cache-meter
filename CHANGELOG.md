@@ -2,12 +2,17 @@
 
 All notable changes to Cache Meter, a Claude Code mod. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.3] – 2026-10-12
+
+### Docs
+- No wording the directory's scan reads as an image reference or a credential: the changelog and contributing guide no longer name the icon file or the working-directory variable, and a test comment no longer holds a URL. No change in behaviour.
+
 ## [0.5.2] – 2026-10-12
 
 Changes for Anthropic's plugin directory, whose validation blocked 0.5.1.
 
 ### Added
-- Plugin icon `.claude-plugin/icon.png`: a coffee cup inside the countdown ring (1024×1024).
+- Plugin icon for the directory listing: a coffee cup inside the countdown ring (1024×1024).
 - Animated README header with the claim *Never lose your prompt cache to a coffee break again.*
 
 ### Removed
@@ -17,7 +22,7 @@ Changes for Anthropic's plugin directory, whose validation blocked 0.5.1.
 - Every call on `$` written as `$.noun.method(…)`, and `$` passed only to top-level functions (pane `Raster` lookup, two test helpers), as the directory's checks expect.
 - No parameter named `h` any more: in a `.tsx` file JSX compiles to calls of `h`, and the directory blocked the three `update` callbacks that used it.
 - The `classic.SessionStart`, `classic.StopFailure` and `classic.PostModelSwitch` hooks do their own work first and end with `return next(e)`, the shape the directory reads as leaving the event unchanged.
-- No URLs in code comments and no `$PWD` in the example commands of README, CONTRIBUTING and AGENTS: the directory read them together as an environment value that could be sent to a remote host.
+- No URLs in code comments and no working-directory variable in the example commands of README, CONTRIBUTING and AGENTS: the directory read them together as an environment value that could be sent to a remote host.
 - README images and brand sources moved to the `assets` branch, so the plugin on `main` holds no image files other than its icon.
 
 ## [0.5.1] – 2026-10-12
@@ -119,7 +124,8 @@ Changes for Anthropic's plugin directory, whose validation blocked 0.5.1.
 - Pane `/tokens`: per-request token history, totals, plan limits, cost.
 - `/keepwarm`.
 
-[0.5.2]: https://github.com/florian101010/cache-meter/compare/cache-meter--v0.5.1...HEAD
+[0.5.3]: https://github.com/florian101010/cache-meter/compare/bc581d0...HEAD
+[0.5.2]: https://github.com/florian101010/cache-meter/compare/cache-meter--v0.5.1...bc581d0
 [0.5.1]: https://github.com/florian101010/cache-meter/compare/cache-meter--v0.5.0...cache-meter--v0.5.1
 [0.5.0]: https://github.com/florian101010/cache-meter/compare/a520960...cache-meter--v0.5.0
 [0.4.0]: https://github.com/florian101010/cache-meter/compare/18e9711...a520960
