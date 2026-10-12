@@ -65,7 +65,7 @@ A main request counts as a cold rewrite when all of these hold:
 2. it wrote at least 10,000 tokens to the cache, and
 3. it wrote more than it read – so a wrong TTL assumption cannot turn a warm request into a "cold" one.
 
-The first request of a new session and the first after `/compact` or `/clear` find no cache at all and are not counted. The pane shows the last five with their cause; the totals cover the whole session. After a cold rewrite caused by a pause in this session, a toast suggests `/keepwarm` (10 s), unless keepwarm is already running or the session is not interactive.
+The first request of a new session and the first after `/compact` or `/clear` find no cache at all and are not counted. The pane shows the last three with their cause; the totals cover the whole session. After a cold rewrite caused by a pause in this session, a toast suggests `/keepwarm` (10 s), unless keepwarm is already running or the session is not interactive.
 
 ## `/keepwarm`
 
@@ -122,7 +122,7 @@ The surface seats the pane, not the mod (*interface › Pick where to draw*): do
 
 ## Context tab
 
-After each turn the `session.measure` hook reads `$.session.usage({ breakdown: 'summary' })` – Claude Code's local estimate, which sends no request (types: `SessionUsageArgs`) – and keeps the heaviest items of `context.breakdown` (types: `SessionContextBreakdown`): categories of kind `used`, memory files, loaded MCP tools summed per `serverName` (tools with `isLoaded: false` sit behind tool search and are only counted), agents, and `skills.includedSkills` of `totalSkills`. **Count exactly** calls `breakdown: 'full'`, which sends one token-count request per tool and memory file as `/context` does – only on a press, never on a timer. The card says which one it shows (`estimate` or `exact`) and when. `ContextCategory.color` is not used: its format is undocumented, and an unknown color would make the whole tree invalid.
+After each turn the `session.measure` hook reads `$.session.usage({ breakdown: 'summary' })` – Claude Code's local estimate, which sends no request (types: `SessionUsageArgs`) – and keeps the heaviest items of `context.breakdown` (types: `SessionContextBreakdown`): categories of kind `used`, memory files, loaded MCP tools summed per `serverName` (tools with `isLoaded: false` sit behind tool search and are only counted), agents, and `skills.includedSkills` of `totalSkills`. **Count exactly** calls `breakdown: 'full'`, which sends one token-count request per tool and memory file as `/context` does – only on a press, never on a timer. The card says which one it shows (`estimate` or `exact`) and when. `ContextCategory.color` (a theme key, types: `ContextCategory`) is not used: the pane colours by its own scale, the same in every tab.
 
 ## Health tab
 
@@ -130,7 +130,7 @@ After each turn the `session.measure` hook reads `$.session.usage({ breakdown: '
 |---|---|
 | Age, prompts | `$.session.usage().startedAt` (`/clear` starts it over), `$.session.turns()`, read in `session.measure` |
 | Cost, $/h, $/prompt | `cost.usd` (as `/cost`) over age and prompts; labelled *API value* when plan limits are reported (a subscription: `rateLimits` is empty off one, types `SessionMeasureInput`), *spent* otherwise |
-| Stops | `turn.step` result `stopReason` of main requests; `end_turn`, `tool_use` and none are normal, the rest is counted (*events › Follow a turn*) |
+| Stops | `turn.step` result `stopReason` of main requests; `end_turn`, `tool_use` and none are normal, the rest is counted (types: `TurnStopReason`) |
 | Errors | settings hook event `StopFailure` (`classic.StopFailure`, observed with `next(e)`), its `error`; `agent_id` set = subagent, counted apart |
 | Server | `turn.step` result `serverToolUses` (v2.1.290+): tool calls the API ran itself, such as the advisor; no `tool.call` fires for them. Duration = `endedAt − startedAt`, `–` without `endedAt` |
 | Warm miss | a main request warm by the countdown (cache seen, not expired) that wrote ≥ 10k tokens and read less than it wrote: model, effort, fast mode or the tool definitions changed (prompt-caching › *Actions that invalidate the cache*; editing CLAUDE.md mid-session keeps the cache, › *Actions that keep the cache*), or the real TTL is shorter than the one assumed. The pause before the last one is shown to tell the two apart; the prompt sections are not compared |
@@ -141,7 +141,7 @@ After each turn the `session.measure` hook reads `$.session.usage({ breakdown: '
 
 ## Band layout
 
-The band is one row sized to `e.props.bodyColumns`. The width of every segment is computed first; on a narrow terminal it drops, in order: the cost segment (`API value $X` on a subscription, `spent $X` otherwise, hidden at $0), the re-write hint (or `· /keepwarm?` in the last stretch), the auto-compact note, then the bar (minimum six cells). The `[ Compact ]` button is hidden while `e.props.isWorking` and while the `/tokens` pane is placed (`$.ui.panes()`), so the first Ctrl+X Tab reaches the pane; opening and closing the pane redraws the band. The weather symbols are single-width characters, not emoji, so the row lines up in every terminal font.
+The band is one row sized to `e.props.bodyColumns`. The width of every segment is computed first; on a narrow terminal it drops, in order: the ping heartbeat (`· ping ok · … read`) and the `cold: good time to` note – each shown only when cost and the auto-compact point fit beside it – then the cost segment (`API value $X` on a subscription, `spent $X` otherwise, hidden at $0), the re-write hint (or `· /keepwarm?` in the last stretch), the auto-compact note, then the bar (minimum six cells). The `[ Compact ]` button is hidden while `e.props.isWorking` and while the `/tokens` pane is placed (`$.ui.panes()`), so the first Ctrl+X Tab reaches the pane; opening and closing the pane redraws the band. The weather symbols are single-width characters, not emoji, so the row lines up in every terminal font.
 
 ## Tests
 
@@ -156,7 +156,7 @@ With the option `cacheTtl` set to `auto`, the TTL is derived in this order, foll
 3. `CLAUDE_CODE_PROMPT_CACHE_TTL` (`5m` / `1h`)
 4. the `promptCacheTtl` setting (`5m` / `1h`)
 5. `ENABLE_PROMPT_CACHING_1H=1` → 1h
-6. a plan limit at 100 % or more – Claude Code then draws usage credits and drops to 5m → 5m
+6. a plan limit at 100 % or more → 5m – an assumption: Claude Code drops to 5m once it draws usage credits beyond the limit (*prompt caching › Which TTL each request gets*), which a mod cannot see; the limit stands in for it
 7. the value Claude Code reported on the last model switch
 8. otherwise 60m (subscription within plan usage)
 
@@ -170,7 +170,7 @@ With the option `cacheTtl` set to `auto`, the TTL is derived in this order, foll
 | Countdown after `--resume` | `seconds_since_last_response` counts from the end of the last response, so the countdown is optimistic by that response's duration. If Claude Code reports `prompt_cache_likely_expired`, the cache is shown cold |
 | Dollar amounts | only Claude Code's own estimates and the `/cost` total – no price table of its own |
 | Other invalidations | a model switch, an MCP or plugin change can invalidate the cache before the TTL ends ([actions that invalidate the cache](https://code.claude.com/docs/en/prompt-caching#actions-that-invalidate-the-cache)) – visible as a low hit rate |
-| Subagents | have their own caches with a five-minute TTL; counted in the totals, not in the countdown |
+| Subagents | have their own caches, with a five-minute TTL by default (one hour with `ENABLE_PROMPT_CACHING_1H`); counted in the totals, not in the countdown |
 
 ## Limit forecast
 

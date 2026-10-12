@@ -1,8 +1,8 @@
 // cache-meter: what the prompt cache and the token budget are doing, at a glance.
 //
-// Band above the prompt:  ● cache 42m ■■■■■■■□□□ 93% hit · ☀ context 9% (auto-compact 97%) [Compact]
-// Pane /tokens:           every main-thread request as a stacked bar (read / written / new), session
-//                         sums, subagents, rate limits, cost, keepwarm.
+// Band above the prompt:  ● cache 42m ■■■■■■■■■■ 93% hit · ☀ context 9% (auto-compact 97%) [Compact]
+// Pane /tokens:           every main-thread request as a column (its share not read from the cache),
+//                         session sums, subagents, rate limits, cost, keepwarm; Context and Health tabs.
 // /keepwarm [2h|off]:     pings the cache through $.model.fork shortly before it lapses.
 //
 // Single source of truth for every API fact below: the official Claude Code mods documentation and
@@ -70,7 +70,6 @@ import {
   right,
   short,
   sparkline,
-  stack,
   tall,
   contextMapOf,
   isNormalStop,
@@ -1277,7 +1276,8 @@ export const register: Register = (on, options) => {
     const minBar = 6
     const showRewrite = rewriteText !== '' && base + rewriteText.length + autoText.length + minBar < cols
     const showAuto = autoText !== '' && base + autoText.length + (showRewrite ? rewriteText.length : 0) + minBar < cols
-    // Dropped first when the row gets narrow: after it the auto-compact point, then the bar.
+    // Dropped early when the row gets narrow – only the heartbeat and the compact note go before it; after it
+    // the re-write hint, the auto-compact point, then the bar.
     const showCost =
       costText !== '' && base + costText.length + (showAuto ? autoText.length : 0) + (showRewrite ? rewriteText.length : 0) + minBar < cols
     const showBeat =

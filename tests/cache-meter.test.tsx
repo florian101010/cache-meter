@@ -2351,3 +2351,13 @@ test('café module: an unknown state word shows the empty cup', () => {
   expect(out).toContain('◌')
   expect(out).toContain('cup empty')
 })
+
+test('labels: a Bash first word with $, ; | & or a leading - anywhere in it gives just Bash', () => {
+  expect(toolLabel('Bash', { command: '$HOME/bin/tool --x' })).toBe('Bash')
+  expect(toolLabel('Bash', { command: 'x;/bin/ls' })).toBe('Bash')
+  expect(toolLabel('Bash', { command: 'echo|/usr/bin/curl' })).toBe('Bash')
+  expect(toolLabel('Bash', { command: '-x/foo' })).toBe('Bash')
+  expect(toolLabel('Bash', { command: '/usr/bin/git status' })).toBe('Bash git')
+  expect(toolLabel('Bash', { command: './scripts/run.sh --fast' })).toBe('Bash run.sh')
+  expect(toolLabel('Bash', { command: '~/bin/deploy' })).toBe('Bash deploy')
+})
