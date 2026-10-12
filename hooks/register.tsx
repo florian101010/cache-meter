@@ -64,6 +64,8 @@ import {
   FILL,
   HEALTH,
   parseKeepWarm,
+  parseKeepCommand,
+  durationLabel,
   rasterCells,
   remainingLabel,
   resolveTtl,
@@ -115,6 +117,8 @@ const keepA = atom({ plugin: 'cache-meter', key: 'keepWarm' } as const, {
   pings: 0,
   readTokens: 0,
   lastPingAt: null,
+  auto: null,
+  pausePings: 0,
 })
 const coldA = atom({ plugin: 'cache-meter', key: 'coldWrites' } as const, [])
 const agentsA = atom({ plugin: 'cache-meter', key: 'agents' } as const, {} as Record<string, AgentUse>)
@@ -144,6 +148,9 @@ const ttlConfigA = atom({ plugin: 'cache-meter', key: 'ttlConfig' } as const, {
 let setting = 'auto'
 let isInteractive = false
 let isPinging = false
+// /keepwarm auto, beside $.state: /clear, /resume and /branch reset the state, but the person switched
+// it on for the session – restored there, waiting for the next answer. Null = off.
+let autoMs: number | null = null
 let mainRequests = 0
 // The line under each answer (option turnLine), and per open turn the session cost at its start and
 // its main requests. Keyed by turnId; a reload loses at most the line of the turn that was running.
@@ -361,16 +368,21 @@ async function tick($: EngineInterface) {
   // No ping while a main request runs: that request touches the cache anyway.
   if (keep.until === null || isPinging || mainRequests > 0) return
   const now = await $.clock.now()
-  if (now > keep.until || keep.pings >= MAX_PINGS) {
+  const isAuto = keep.auto !== null
+  // A soft end: a fixed run is over; for auto only this break – it stays on and covers the next one.
+  if (now > keep.until || (isAuto ? keep.pausePings : keep.pings) >= MAX_PINGS) {
     await update($, keepA, k => ({ ...k, until: null }))
-    $.ui.toast(`Keepwarm finished (${keep.pings} pings)`)
+    $.ui.toast(
+      isAuto
+        ? `Keepwarm auto: break longer than ${durationLabel(keep.auto ?? 0)}${keep.pausePings >= MAX_PINGS ? ` (${MAX_PINGS} pings)` : ''} – the cache may expire; on again with your next answer`
+        : `Keepwarm finished (${keep.pings} pings)`,
+    )
 
     return
   }
   const ttl = await ttlNow($)
   if (ttl.ms < HOUR) {
-    await update($, keepA, k => ({ ...k, until: null }))
-    $.ui.toast(`Keepwarm off: the TTL is now ${ttl.label} (${ttl.source})`)
+    await hardStop($, `the TTL is now ${ttl.label} (${ttl.source})`)
 
     return
   }
@@ -378,7 +390,8 @@ async function tick($: EngineInterface) {
   const status = cacheStatus(cache, now, ttl.ms)
   if (status.kind !== 'warm' || cache === null) {
     await update($, keepA, k => ({ ...k, until: null }))
-    $.ui.toast(status.kind === 'empty' ? 'Keepwarm off: no cache to keep warm' : 'Keepwarm off: the cache has already expired')
+    // Auto waits quietly for the next answer; a fixed run says why it ended.
+    if (!isAuto) $.ui.toast(status.kind === 'empty' ? 'Keepwarm off: no cache to keep warm' : 'Keepwarm off: the cache has already expired')
 
     return
   }
@@ -389,8 +402,7 @@ async function tick($: EngineInterface) {
     const startedAt = await $.clock.now()
     const reply = await $.model.fork({ prompt: 'Reply with the single word: warm' })
     if (!reply.isAnswered) {
-      await update($, keepA, k => ({ ...k, until: null }))
-      $.ui.toast(`Keepwarm off: the ping got no answer (${reply.reason})`)
+      await hardStop($, `the ping got no answer (${reply.reason})`)
 
       return
     }
@@ -398,12 +410,11 @@ async function tick($: EngineInterface) {
     const expected = measure?.tokens ?? cache.contextTokens
     const got = reply.usage.cache_read_input_tokens
     const wrote = reply.usage.cache_creation_input_tokens
-    await update($, keepA, k => ({ ...k, pings: k.pings + 1, readTokens: k.readTokens + got, lastPingAt: startedAt }))
+    await update($, keepA, k => ({ ...k, pings: k.pings + 1, pausePings: k.pausePings + 1, readTokens: k.readTokens + got, lastPingAt: startedAt }))
     // A miss (little read) or a partial miss (much written next to what was read): the cache was
     // not what the TTL assumption said. Stop paying for pings.
     if (got === 0 || (expected > 0 && got < expected * PING_HIT_SHARE) || wrote >= got * PING_WRITE_SHARE) {
-      await update($, keepA, k => ({ ...k, until: null }))
-      $.ui.toast(`Keepwarm off: the ping missed the cache (${short(got)} read, ${short(wrote)} written)`)
+      await hardStop($, `the ping missed the cache (${short(got)} read, ${short(wrote)} written)`)
 
       return
     }
@@ -557,7 +568,7 @@ async function copyReport($: EngineInterface): Promise<string> {
       .sort((a, b) => b.input + b.read + b.write + b.output - (a.input + a.read + a.write + a.output))
       .slice(0, 5)
       .map(a => ({ label: a.label, steps: a.steps, tokens: a.input + a.read + a.write + a.output, hit: hitPct(a) })),
-    keepwarm: { pings: keep.pings, readTokens: keep.readTokens },
+    keepwarm: { pings: keep.pings, readTokens: keep.readTokens, auto: keep.auto },
   })
   let copied: { isCopied: boolean; reason?: string }
   try {
@@ -767,6 +778,48 @@ async function compactNow($: EngineInterface) {
   }
 }
 
+// A hard stop – the TTL fell under an hour, a ping got no answer or missed the cache: keepwarm is off,
+// /keepwarm auto too (pinging on would spend for nothing).
+async function hardStop($: EngineInterface, why: string) {
+  const wasAuto = (await read($, keepA)).auto !== null
+  autoMs = null
+  await update($, keepA, k => ({ ...k, until: null, auto: null }))
+  $.ui.toast(`Keepwarm${wasAuto ? ' auto' : ''} off: ${why}`)
+}
+
+// /keepwarm auto: every own prompt and every finished main request – never a ping of its own – moves the
+// window to "now + the break" and starts a new break's ping count. While you work no ping is due anyway
+// (each request refreshes the cache); they come only once you have been away long enough.
+async function rearmAuto($: EngineInterface) {
+  if (isPinging) return
+  const keep = await read($, keepA)
+  if (keep.auto === null) return
+  const now = await $.clock.now()
+  await update($, keepA, k => (k.auto === null ? k : { ...k, until: now + k.auto, pausePings: 0 }))
+}
+
+// Switches /keepwarm auto on for this session; the answer says what it does and costs.
+async function startAuto($: EngineInterface, ms: number): Promise<string> {
+  if (!isInteractive) return 'Keepwarm only works in an interactive session (no timer runs here). Not started.'
+  const ttl = await ttlNow($)
+  if (ttl.ms < HOUR) {
+    return `With a ${ttl.label} TTL (${ttl.source}) keepwarm is not worth it: a ping every few minutes. Not started.`
+  }
+  const now = await $.clock.now()
+  const isWarm = cacheStatus(await read($, cacheA), now, ttl.ms).kind === 'warm'
+  autoMs = ms
+  await update($, keepA, () => ({ until: isWarm ? now + ms : null, pings: 0, readTokens: 0, lastPingAt: null, auto: ms, pausePings: 0 }))
+  const lead = Math.round((ttl.ms * PING_SHARE) / 60_000)
+
+  return (
+    `Keepwarm auto on for this session: whenever you are away – a break, a call, a long read – one ping ` +
+    `when at most ${lead} min of the TTL is left (TTL ${ttl.label}, ${ttl.source}), for breaks up to ${durationLabel(ms)} ` +
+    `and at most ${MAX_PINGS} pings each; your next prompt ends the break. It pings on its own from now on – ` +
+    `each ping reads the whole context from the cache. ${isWarm ? '' : 'It starts with the next answer. '}` +
+    `/keepwarm off stops it; a ping that misses the cache stops it too.`
+  )
+}
+
 // Starts keepwarm for `ms`; the answer text explains what happens or why it did not start.
 async function startKeepWarm($: EngineInterface, ms: number): Promise<string> {
   if (!isInteractive) return 'Keepwarm only works in an interactive session (no timer runs here). Not started.'
@@ -778,7 +831,8 @@ async function startKeepWarm($: EngineInterface, ms: number): Promise<string> {
   if (cacheStatus(await read($, cacheA), now, ttl.ms).kind !== 'warm') {
     return 'No warm cache – start keepwarm after the next answer.'
   }
-  await update($, keepA, () => ({ until: now + ms, pings: 0, readTokens: 0, lastPingAt: null }))
+  autoMs = null
+  await update($, keepA, () => ({ until: now + ms, pings: 0, readTokens: 0, lastPingAt: null, auto: null, pausePings: 0 }))
 
   return (
     `Keepwarm until ${hhmm(now + ms)}, at most ${MAX_PINGS} pings: one whenever at most ` +
@@ -789,9 +843,10 @@ async function startKeepWarm($: EngineInterface, ms: number): Promise<string> {
 
 async function stopKeepWarm($: EngineInterface): Promise<string> {
   const keep = await read($, keepA)
-  await update($, keepA, k => ({ ...k, until: null }))
+  autoMs = null
+  await update($, keepA, k => ({ ...k, until: null, auto: null }))
 
-  return `Keepwarm off (${keep.pings} pings, ${short(keep.readTokens)} tokens read from the cache).`
+  return `Keepwarm${keep.auto !== null ? ' auto' : ''} off (${keep.pings} pings, ${short(keep.readTokens)} tokens read from the cache).`
 }
 
 // The toast box is narrow and takes only text (types: $.ui.toast), so a press gets the short form;
@@ -814,6 +869,7 @@ export const register: Register = (on, options) => {
   hasAutoOpened = false
   isDismissed = false
   isPinging = false
+  autoMs = null
   mainRequests = 0
   showTurnLine = options.turnLine !== 'off'
   expiryNotice = options.expiryNotice === 'on'
@@ -871,6 +927,8 @@ export const register: Register = (on, options) => {
       const t: Totals = await read($, totalsA)
       convo = { steps: t.mainSteps, main: t.main, coldCount: t.coldCount, coldWritten: t.coldWritten }
       convoUsdBase = null
+      // A reload keeps the state, not the module's variables: /keepwarm auto carries on.
+      autoMs = (await read($, keepA)).auto
     } else {
       startConversation((await read($, measureA))?.usd ?? null, false)
     }
@@ -889,8 +947,13 @@ export const register: Register = (on, options) => {
       })
       await $.command.register({
         name: 'keepwarm',
-        description: 'Keep the prompt cache warm (each ping costs one cache read of the context)',
-        argumentHint: '[2h | 30m | off]  (10m … 8h)',
+        description: 'Keep the cache warm through a break – auto: every break (a ping costs one cache read)',
+        argumentHint: '[2h | 30m | auto | off]  (10m … 8h)',
+      })
+      await $.command.register({
+        name: 'keepwarm-auto',
+        description: 'Keep the cache warm through every break this session – /keepwarm off stops it',
+        argumentHint: '[2h]  longest break covered (10m … 8h)',
       })
     } catch {
       // Without the commands the band still works.
@@ -929,6 +992,11 @@ export const register: Register = (on, options) => {
     // A new transcript: no last main request to compare the next one with.
     lastMain = null
     await settleBudget($)
+    // /keepwarm auto was switched on for the session: on again, waiting for the next answer.
+    if (autoMs !== null && isInteractive) {
+      const ms = autoMs
+      await update($, keepA, k => ({ ...k, until: null, auto: ms, pausePings: 0 }))
+    }
     startConversation((await read($, measureA))?.usd ?? null, e.source !== 'clear')
     if (e.source === 'resume' || e.source === 'fork') lastResumeAt = await $.clock.now()
     if ((e.source === 'resume' || e.source === 'fork') && e.seconds_since_last_response !== undefined) {
@@ -1012,6 +1080,7 @@ export const register: Register = (on, options) => {
         await update($, stepsA, list => [...list, { ...u, at: startedAt, model: usage.model, ...(kind ? { kind } : {}) }].slice(-STEPS_KEPT))
         await update($, totalsA, t => ({ ...t, main: add(t.main, u), mainSteps: t.mainSteps + 1 }))
         convo = { ...convo, steps: convo.steps + 1, main: add(convo.main, u) }
+        await rearmAuto($)
         // A warm cache re-written anyway: counted with the pause before it and its most likely cause, in
         // one write – the cause first, so the pane never pairs a new miss with the previous cause.
         if (isUnexpectedWrite(wasCold, before !== null && before.lastAt > 0, u)) {
@@ -1041,8 +1110,9 @@ export const register: Register = (on, options) => {
           const keep = await read($, keepA)
           // A hint, not an action: switching keepwarm on by itself would spend quota unasked.
           // Only after a pause in this session: after a model switch or a resume, keepwarm could not have helped.
+          // With /keepwarm auto on, this request has just moved its window (rearmAuto above), so no tip.
           if (cause === 'pause' && isInteractive && !(keep.until !== null && keep.until > startedAt)) {
-            $.ui.toast(`Cache was cold: ${short(u.write)} tokens re-written – try /keepwarm before your next break`, {
+            $.ui.toast(`Cache was cold: ${short(u.write)} tokens re-written – try /keepwarm before your next break, or /keepwarm auto`, {
               timeoutMs: 10_000,
             })
           }
@@ -1332,6 +1402,8 @@ export const register: Register = (on, options) => {
   // Above the prompt the pane is a glance: it takes rows from the transcript, so the person's next prompt
   // closes it (the band keeps the summary). Docked beside a fullscreen transcript it is a sidebar and stays.
   on('prompt.submit', async ($, e, next) => {
+    // Back from a break: /keepwarm auto's window starts over (not for a mod's or a command's prompt).
+    if (e.origin.kind === 'composer') await rearmAuto($)
     if (e.origin.kind === 'composer' && seat === 'inline' && (await $.ui.panes()).some(p => p.id === PANE)) {
       await $.ui.close({ id: PANE })
       $.ui.invalidate('ui.render')
@@ -1341,10 +1413,18 @@ export const register: Register = (on, options) => {
   })
 
   on('command.run', { command: 'keepwarm' }, async ($, e) => {
-    const ms = parseKeepWarm(e.args)
-    if (ms === undefined) return { text: 'Usage: /keepwarm [10m … 8h | off] – 2h when left out.' }
+    const c = parseKeepCommand(e.args)
+    if (c === undefined) return { text: 'Usage: /keepwarm [10m … 8h | auto [10m … 8h] | off] – 2h when left out.' }
 
-    return { text: ms === null ? await stopKeepWarm($) : await startKeepWarm($, ms) }
+    return { text: c.mode === 'off' ? await stopKeepWarm($) : c.mode === 'auto' ? await startAuto($, c.ms) : await startKeepWarm($, c.ms) }
+  })
+
+  // The same as /keepwarm auto, as a command of its own so the typeahead lists it beside /keepwarm.
+  on('command.run', { command: 'keepwarm-auto' }, async ($, e) => {
+    const c = parseKeepCommand(`auto ${e.args}`)
+    if (c === undefined || c.mode !== 'auto') return { text: 'Usage: /keepwarm-auto [10m … 8h] – breaks up to 2h when left out. /keepwarm off stops it.' }
+
+    return { text: await startAuto($, c.ms) }
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
@@ -1381,7 +1461,7 @@ export const register: Register = (on, options) => {
     const rewriteText =
       status.kind === 'expired' && cache !== null && rewriteTokens > 0
         ? ` · rewrite ${cache.rewriteUsd !== null ? `≈ $${cache.rewriteUsd.toFixed(2)}` : `≈ ${short(rewriteTokens)} tok`}`
-        : isLow && !isKeeping && isInteractive
+        : isLow && !isKeeping && keep.auto === null && isInteractive
           ? ' · /keepwarm?'
           : ''
     const base =
@@ -1633,23 +1713,28 @@ export const register: Register = (on, options) => {
 
     // --- keepwarm -----------------------------------------------------------------------------
     const pingIn = isWarm ? Math.max(0, remaining - ttl.ms * PING_SHARE) : 0
+    const isAutoOn = keep.auto !== null
     const isSpinning = isKeeping && animations && Client !== null && !isSpinBroken
     const keepCard = (
-      <Box borderStyle="round" borderColor="claude" borderDimColor={!isKeeping} paddingX={1} flexDirection="column">
+      <Box borderStyle="round" borderColor="claude" borderDimColor={!isKeeping && !isAutoOn} paddingX={1} flexDirection="column">
         <Box flexDirection="row" justifyContent="space-between">
           {/* While keepwarm runs the arrow turns (option animations), in a Client of its own. */}
           <Box flexDirection="row" flexShrink={1}>
             {isSpinning && Client !== null && <Client key="keep-spin" module="./spin.tsx" width={1} />}
             <Text wrap="truncate-end">
               <Text color="claude" bold>
-                {isSpinning ? ' Keepwarm on' : isKeeping ? '↻ Keepwarm on' : '↻ Keepwarm'}
+                {`${isSpinning ? ' ' : '↻ '}Keepwarm${isAutoOn ? ' auto' : isKeeping ? ' on' : ''}`}
               </Text>
               <Text dimColor>
-                {isKeeping && keep.until !== null ? ` until ${hhmm(keep.until)}` : ` off${keep.pings > 0 && tier !== 'narrow' ? ` · last run ${keep.pings} pings` : ''}`}
+                {isAutoOn
+                  ? ` · breaks up to ${durationLabel(keep.auto ?? 0)}`
+                  : isKeeping && keep.until !== null
+                    ? ` until ${hhmm(keep.until)}`
+                    : ` off${keep.pings > 0 && tier !== 'narrow' ? ` · last run ${keep.pings} pings` : ''}`}
               </Text>
             </Text>
           </Box>
-          {isKeeping ? (
+          {isKeeping || isAutoOn ? (
             <Button key="keepwarm-stop" plain hotkey="s" onPress={() => pressKeepWarm($, null)}>
               <Text color="claude" bold>
                 Stop
@@ -1666,7 +1751,11 @@ export const register: Register = (on, options) => {
           )}
         </Box>
         <Text dimColor wrap="truncate-end">
-          {isKeeping
+          {isAutoOn
+            ? isKeeping
+              ? `${keep.pausePings}/${MAX_PINGS} pings this break · ${keep.pings} in all · next if away ~${remainingLabel(pingIn)}`
+              : 'Waiting for the next answer.'
+            : isKeeping
             ? `${keep.pings}/${MAX_PINGS} pings · ${short(keep.readTokens)} read · next ~${remainingLabel(pingIn)}`
             : canKeep
               ? 'Break ahead? A ping ≈ 1/20 of a re-write.'
@@ -2363,7 +2452,7 @@ export const register: Register = (on, options) => {
             <Text color="claude" bold wrap="truncate-end">
               {tier === 'narrow'
                 ? 'keys here · 1–3 · ↓ · esc'
-                : `keys here · 1–3 switch tabs · ↓ pgdn end scroll · tab + enter${isKeeping ? ' · s stop' : canKeep ? ' · w keep warm' : ''} · esc back to the prompt`}
+                : `keys here · 1–3 switch tabs · ↓ pgdn end scroll · tab + enter${isKeeping || keep.auto !== null ? ' · s stop' : canKeep ? ' · w keep warm' : ''} · esc back to the prompt`}
             </Text>
           ) : (
             <Text dimColor wrap="truncate-end">

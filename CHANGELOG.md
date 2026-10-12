@@ -2,6 +2,17 @@
 
 All notable changes to Cache Meter, a Claude Code mod. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] – 2026-10-12
+
+Every break, by itself.
+
+### Added
+- **`/keepwarm auto`** (also `/keepwarm-auto`, listed beside `/keepwarm` in the typeahead): once typed, every break of the session is covered. Each prompt and answer moves the window to *now + 2h* (`/keepwarm auto 4h`, 10m to 8h), so the ping goes out only once you have been away long enough – lunch, a call, a long read; your next prompt ends the break. Opt-in per session, nothing stored; stays on through `/clear`, `/resume` and `/branch`. At most 12 pings per break; a longer break lets the cache go and the next answer covers the next one; a miss, an unanswered ping or a 5-minute TTL switches it off for good. The keepwarm card reads *Keepwarm auto · breaks up to 2h*.
+
+### Changed
+- `/keepwarm` shows `auto` in its argument hint; the cold-rewrite tip mentions `/keepwarm auto`; `/tokens report` names an auto run.
+- Docs: *sends nothing you have not switched on* – with `/keepwarm auto` on, its pings go out by themselves (README, PRIVACY, SECURITY, AGENTS). The README's `/keepwarm` range is 10m–8h, as the command takes it (it said 30m).
+
 ## [0.11.0] – 2026-10-12
 
 Words when they matter – only measured figures, no guessed savings.
@@ -228,6 +239,7 @@ Changes for Anthropic's plugin directory, whose validation blocked 0.5.1.
 - Pane `/tokens`: per-request token history, totals, plan limits, cost.
 - `/keepwarm`.
 
+[0.12.0]: https://github.com/florian101010/cache-meter/compare/c369531...feat/v0.12-keepwarm-auto
 [0.11.0]: https://github.com/florian101010/cache-meter/compare/5c80825...feat/v0.11-insights
 [0.10.0]: https://github.com/florian101010/cache-meter/compare/edf5849...c88d13f
 [0.9.0]: https://github.com/florian101010/cache-meter/compare/e830ded...edf5849

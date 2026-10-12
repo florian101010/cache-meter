@@ -6,7 +6,7 @@ This page describes the design of the mod for people who want to change it or ch
 
 | Hook | Used for | Source |
 |---|---|---|
-| `session.start` | reads the TTL controls and a first measurement, starts the 15 s timer (interactive sessions only), registers `/tokens` and `/keepwarm` | *reference › Session*, *overview › Where mods run* |
+| `session.start` | reads the TTL controls and a first measurement, starts the 15 s timer (interactive sessions only), registers `/tokens`, `/keepwarm` and `/keepwarm-auto` (each with an `argumentHint`, so the typeahead shows `auto`) | *reference › Session*, *overview › Where mods run* |
 | `classic.SessionStart` with `source` `clear`, `resume`, `fork` | `/clear`, `/resume` and `/branch` reset all `$.state` and do not fire `session.start` again, so the same set-up runs here; on resume/fork the countdown continues from `seconds_since_last_response` | *interface › Load a saved value again after /clear*; types: `SessionStartHookInput` |
 | `turn.step` (async generator) | the four token counts of each model request; main conversation vs. subagent via `e.agentId`. Before a main request: `e.model` and `e.effort` against the last main request – a change that splits a warm cache (≥ 10k tokens) gets a toast. `/effort` and `/fast` fire no `config.set` and have no `/config` row (measured with 2.1.296: the rows are `model`, `thinking`, `switchModelsOnFlag`), so this is the earliest point; `/model` is caught at `PreModelSwitch`. Per subagent: summed under its id, named once from `$.agent.list()` (type and description) | *events › Follow a turn*; types: `TurnStepInput.model`/`effort`, `TurnStepResult.usage`, `AgentInfo`; prompt-caching › *Changing effort level* (5.5 models and Fable 5.1 keep the cache) |
 | `turn.start` | the session cost (`$.session.usage().cost.usd`) when a turn starts, keyed by `turnId` | *events › Follow a turn*; types: `SessionCost` (sums every priced response, subagents included) |
@@ -73,13 +73,15 @@ The first request of a new session and the first after `/compact` or `/clear` fi
 Every 15 seconds (interactive sessions only) the timer checks, in this order:
 
 1. no window, a ping in flight, or a main request running → nothing to do;
-2. window over or 12 pings reached → stop with a toast;
-3. TTL below one hour → stop (a ping every few minutes is not worth it);
-4. cache empty or expired → stop;
+2. window over or 12 pings reached (with auto: in this break) → stop with a toast; auto stays on and waits for the next answer;
+3. TTL below one hour → stop (a ping every few minutes is not worth it) – auto too;
+4. cache empty or expired → stop (auto: quietly, it waits for the next answer);
 5. more than 17 % of the TTL left → wait;
 6. otherwise ping: `$.model.fork({ prompt: 'Reply with the single word: warm' })`.
 
-A fork is "the main thread's last request again … with `prompt` after it: every tool denied, its own tail never cached" (types: `$.model.fork`). After the ping, the mod stops warming when the fork read nothing, read less than half of the known context, or wrote 10 % or more of what it read (a partial miss) – in each case the TTL assumption was wrong and further pings would be full re-writes. Otherwise `lastAt` moves to the ping's start.
+A fork is "the main thread's last request again … with `prompt` after it: every tool denied, its own tail never cached" (types: `$.model.fork`). After the ping, the mod stops warming when the fork read nothing, read less than half of the known context, or wrote 10 % or more of what it read (a partial miss) – in each case the TTL assumption was wrong and further pings would be full re-writes. Otherwise `lastAt` moves to the ping's start. A miss or an unanswered ping is a hard stop (`hardStop`): auto goes off too.
+
+**`/keepwarm auto`** (`/keepwarm auto [10m … 8h]`, or `/keepwarm-auto`, a command of its own so the typeahead lists it beside `/keepwarm`) keeps `auto` (the break length) in the keepwarm state and in a module variable. `rearmAuto` sets the window to *now + break* and the break's ping count to 0 on every own prompt (`prompt.submit`, `origin.kind` `composer`) and every finished main request – never while a ping is in flight (`isPinging`): whether the engine reports a fork as a main-thread `turn.step` is not documented, and a ping that moved the window would never let it close (a test makes the fork run a main request and checks that). While you work no ping is due – each request refreshes `lastAt` – so pings only happen after a while away. `/clear`, `/resume` and `/branch` reset `$.state`; the `classic.SessionStart` hook restores auto from the module variable, with no window until the next answer. A reload takes it from `$.state`. `pings` and `readTokens` count the whole auto run, `pausePings` the cap per break.
 
 Why a ping keeps the one-hour entry alive: a cache read lasts the "same duration as the preceding write" ([pricing › prompt caching](https://platform.claude.com/docs/en/about-claude/pricing)), and the main conversation's prefix was written with the one-hour TTL. Forks get the five-minute TTL only for what they write (*prompt caching › Which TTL each request gets*), and a keepwarm fork writes nothing of its own ("its own tail never cached"). Costs per model: README, *Keep the cache warm with /keepwarm*.
 

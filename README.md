@@ -42,7 +42,7 @@ Type **`/keepwarm`** before lunch or a meeting. Shortly before expiry one tiny p
 </tr>
 </table>
 
-**New in 0.6–0.11:** a word when one tool result floods the context · plan-limit warnings · what the conversation came to after `/clear` · a barista who acts out your cache · cost under every answer · warnings before a switch re-writes the cache · the cause of every warm miss · what fills your conversation · auto-compact forecast · per-subagent use · expiry notification · session budget · live last minute and keepwarm heartbeat · a flash at each new minute · hover details · `/tokens report`. → [changelog](CHANGELOG.md)
+**New in 0.6–0.12:** `/keepwarm auto` – every break covered by itself · a word when one tool result floods the context · plan-limit warnings · what the conversation came to after `/clear` · a barista who acts out your cache · cost under every answer · warnings before a switch re-writes the cache · the cause of every warm miss · what fills your conversation · auto-compact forecast · per-subagent use · expiry notification · session budget · live last minute and keepwarm heartbeat · a flash at each new minute · hover details · `/tokens report`. → [changelog](CHANGELOG.md)
 
 ## Quickstart
 
@@ -65,16 +65,17 @@ Install the Claude Code mod from https://github.com/florian101010/cache-meter �
 > [!TIP]
 > **Want the dashboard as a sidebar beside the chat?** Run **`/tui fullscreen`** – Claude Code's fullscreen renderer docks the pane next to the transcript from 110 columns, and it stays open while you chat (mouse clicks work there too). In the classic renderer the pane opens above the prompt instead, and says so in a tip line. The switch relaunches Claude Code with your conversation intact; Cache Meter's figures start over. `/tui default` switches back.
 
-**4 · Before your next break: `/keepwarm`.** After the break, check that the next answer reads from the cache (hit rate in the band). `/tokens report` copies the whole session as Markdown.
+**4 · Before your next break: `/keepwarm`** – or **`/keepwarm auto`** once, and every break this session is covered by itself. After the break, check that the next answer reads from the cache (hit rate in the band). `/tokens report` copies the whole session as Markdown.
 
 | Command | Does |
 |---|---|
 | `/tokens` · `/tokens context` · `/tokens health` | the dashboard, or one tab of it (again: close) |
 | `/tui fullscreen` | the dashboard as a sidebar beside the chat (from 110 columns) |
-| `/keepwarm` · `/keepwarm 30m`…`8h` · `/keepwarm off` | keep the cache warm through a break, with hard limits |
+| `/keepwarm` · `/keepwarm 10m`…`8h` · `/keepwarm off` | keep the cache warm through a break, with hard limits |
+| `/keepwarm auto` (or `/keepwarm-auto`) | keep it warm through every break this session, by itself – it pings on its own once on |
 | `/tokens report` | the session as Markdown on your clipboard |
 
-Safe by design: it never changes your prompts, answers or tool calls, never keeps their text and writes nothing to disk. It sends nothing on its own – only the `/keepwarm` pings and, if you press **Count exactly**, the token counts `/context` would make; with the option `expiryNotice` on, a notification through your own terminal. Free and MIT-licensed.
+Safe by design: it never changes your prompts, answers or tool calls, never keeps their text and writes nothing to disk. It sends nothing you have not switched on – the `/keepwarm` pings (with `/keepwarm auto`, on their own during every break) and, if you press **Count exactly**, the token counts `/context` would make; with the options `expiryNotice` or `limitNotice` on, a notification through your own terminal. Free and MIT-licensed.
 
 ## What you see
 
@@ -136,7 +137,8 @@ Before you step away, type:
 ```text
 /keepwarm          # 2 hours
 /keepwarm 4h       # any window from 10m to 8h
-/keepwarm off      # stop early
+/keepwarm auto     # every break this session, by itself (breaks up to 2h; auto 4h for longer)
+/keepwarm off      # stop early – also stops auto
 ```
 
 The band shows `↻` while it runs. Whenever 10 minutes or less of the one-hour TTL are left and no request is running, Cache Meter sends one tiny request over your conversation (`$.model.fork`, answer: `warm`). It reads the cached context, and a cache read keeps the entry alive for the duration of the original write – one hour for the main conversation ([pricing › prompt caching](https://platform.claude.com/docs/en/about-claude/pricing): cache read, *"same duration as the preceding write"*). That is roughly one ping every 50 minutes.
@@ -158,6 +160,15 @@ Each ping also pays for its few uncached tokens and its one-word answer. On a su
 - the TTL is five minutes (API key, cloud provider, or a plan limit reached) – it refuses to start there.
 
 It runs only in interactive sessions, never drops a message, and after an expensive cold re-write it only *suggests* `/keepwarm` – it never switches itself on.
+
+### Every break, by itself: `/keepwarm auto`
+
+Type it once; from then on Cache Meter covers every break of this session without you thinking of it. Each prompt you send and each answer moves the window to *now + 2 hours* (`/keepwarm auto 4h` for longer breaks, 10m to 8h). While you work no ping is needed – every request refreshes the cache. Once you have been away long enough for the cache to near expiry – lunch, a call, a long read – the same ping as above goes out; your next prompt ends the break.
+
+- **What it costs:** the same ping, only when you are away. A two-hour break at the one-hour TTL is two pings – about **$0.06** for a 150k-token conversation on Opus 5.5 at API prices, against **$1.20** for the re-write ([costs above](#keep-the-cache-warm-with-keepwarm)).
+- **It pings on its own once on** – that is the point of it, and the one thing Cache Meter does unasked. Nothing is stored: it is on for this session only, stays on through `/clear`, `/resume` and `/branch`, and is off again in the next session.
+- **Limits:** at most 12 pings per break (an 8-hour break at the one-hour TTL is about nine). A break longer than the window lets the cache go with a toast, and the next answer covers the next break. A miss, an unanswered ping or a 5-minute TTL switches auto off for good.
+- **See it:** the keepwarm card reads *Keepwarm auto · breaks up to 2h*, with the pings of this break and in all; `/keepwarm off` (or **Stop** in the card) ends it and reports the pings.
 
 **Check that it works on your setup:** 10–50 minutes after a ping, run `/usage` – the *Prompt cache (main)* line should say warm – or watch the hit rate of your next request in the band.
 
@@ -264,9 +275,9 @@ Four more places, only when there is something to say:
 
 **Pane `/tokens`** – the dashboard with its Overview, Context and Health tabs, and `/tokens report` for a Markdown copy; see [above](#see-everything-with-tokens). The Context tab's *What the conversation holds* lists the tool results of the main conversation since the start or the last compact – by tool and the five largest, labelled with the file path or, for Bash, only the program name. The Overview's request chart draws one column per request: its height is the share not read from the cache, so a cold re-write stands out as a tall red column, a first write of the cache in blue. In the fullscreen renderer, point at a column to see its time, tokens, hit rate, writes and output.
 
-**`/keepwarm [10m … 8h | off]`** – shortly before the cache would expire, sends one tiny request over your conversation (`$.model.fork`) so the cache stays warm while you are away. Stops by itself on a miss, at the end of the window, after 12 pings, or when the TTL is 5 minutes.
+**`/keepwarm [10m … 8h | auto | off]`** – shortly before the cache would expire, sends one tiny request over your conversation (`$.model.fork`) so the cache stays warm while you are away. Stops by itself on a miss, at the end of the window, after 12 pings, or when the TTL is 5 minutes. **`/keepwarm auto`** (also `/keepwarm-auto`) does it for every break of the session: the window moves with each prompt and answer, so it pings only once you have been away long enough – opt-in, and once on it pings on its own.
 
-**Cold-rewrite hint** – after a break that let the cache expire, a toast suggests `/keepwarm` before the next break. Nothing is ever switched on automatically and no prompt is ever dropped.
+**Cold-rewrite hint** – after a break that let the cache expire, a toast suggests `/keepwarm` (or `/keepwarm auto`) before the next break. Nothing is ever switched on automatically and no prompt is ever dropped.
 
 ## Requirements
 
@@ -327,8 +338,9 @@ or `/plugin` → **Installed** → Cache Meter → **Update now**. To update aut
 | Mouse | only in Claude Code's fullscreen renderer (`/tui fullscreen`), which captures the mouse: click a tab or a button, scroll a pane with the wheel (types: `ui.scroll`), point at a column of the request chart for its details. In the classic renderer the terminal keeps the mouse – use the keys |
 | Copy a session report | `/tokens report` – Markdown on the clipboard; the pane stays as it is. Paste it to check: some terminals drop clipboard writes without saying so |
 | Pane beside the chat | `/tui fullscreen` (Claude Code's fullscreen renderer): from 110 columns the pane docks as a sidebar and stays open while you chat; `/tui default` switches back |
-| Keep the cache warm | `/keepwarm` (2 h), `/keepwarm 30m` … `/keepwarm 8h`, also `/keepwarm 120m` – interactive sessions only |
-| Stop keeping it warm | `/keepwarm off` (or `0`) – reports pings and tokens read |
+| Keep the cache warm | `/keepwarm` (2 h), `/keepwarm 10m` … `/keepwarm 8h`, also `/keepwarm 120m` – interactive sessions only |
+| Keep it warm through every break | `/keepwarm auto` (breaks up to 2 h) or `/keepwarm auto 4h` – also `/keepwarm-auto`; on for this session, pings on its own while you are away |
+| Stop keeping it warm | `/keepwarm off` (or `0`) – stops auto too; reports pings and tokens read |
 | Compact | the `[ Compact ]` button in the band, or `c` in the pane – the band hides its button while the pane is open (between turns only) |
 
 ## Configuration
@@ -350,13 +362,13 @@ With `auto`, Cache Meter follows Claude Code's own TTL controls and your plan st
 ## Privacy, cost and permissions
 
 > [!NOTE]
-> **Local and read-only.** Cache Meter never changes your prompts, answers or tool calls, never reads your prompts and never keeps the text of Claude's answers. Of a tool call it reads the tool's name, a short label (a file tool's path, or a Bash command's program name – never its arguments, a URL or a token) and the length of the result, to show what fills your context; the result's text is not kept. It writes nothing to disk and sends nothing on its own. Full details: [PRIVACY.md](PRIVACY.md) · [SECURITY.md](SECURITY.md).
+> **Local and read-only.** Cache Meter never changes your prompts, answers or tool calls, never reads your prompts and never keeps the text of Claude's answers. Of a tool call it reads the tool's name, a short label (a file tool's path, or a Bash command's program name – never its arguments, a URL or a token) and the length of the result, to show what fills your context; the result's text is not kept. It writes nothing to disk and sends nothing you have not switched on (with `/keepwarm auto` on, its pings go out by themselves during breaks). Full details: [PRIVACY.md](PRIVACY.md) · [SECURITY.md](SECURITY.md).
 
 | | | Source |
 |---|---|---|
 | **Reads** | What Claude Code reports to mods: token counts, model, stop reason and server-side tool calls of each request; context fill and its breakdown (Claude Code's free local estimate, including the paths of your CLAUDE.md files and the names of MCP servers, skills and agents); cost as `/cost` shows it; plan-limit percentages; number of prompts and the session's start time; API errors; of each tool call: the tool's name, a short label (file path, or a Bash command's program name) and the length of the result as the model reads it – for MCP tools also counted per server; the type and task description of each subagent, as `$.agent.list()` gives them; Claude Code's own verdict on the cache and its re-write estimate at model switches and resumes; whether the session is fullscreen. Plus the TTL controls `FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL`, `ENABLE_PROMPT_CACHING_1H` and the `promptCacheTtl` setting | The code ([`hooks/register.tsx`](hooks/register.tsx)); `claude plugin validate .` lists every event it hooks and every call it makes. Data sources: [events › Follow a turn](https://code.claude.com/docs/en/plugins/mods/events#follow-a-turn), [reference › Mods API methods](https://code.claude.com/docs/en/plugins/mods/reference#mods-api-methods) (`$.session.usage`, `$.session.turns`), [events › Handle the settings hook events](https://code.claude.com/docs/en/plugins/mods/events#hook-the-settings-hook-events) |
 | **Keeps** | Everything in memory for the session only – gone when it ends, after `/clear`, `/resume` or `/branch`, and when Claude Code relaunches (`/tui` switches renderer that way). Nothing on disk | [interface › Keep state](https://code.claude.com/docs/en/plugins/mods/interface#keep-state) (`$.state` lasts until the session ends or `/clear`, `/resume`, `/branch`); no `$.fs` or `$.store` call in the code – check with `claude plugin validate .` |
-| **Sends** | Nothing on its own. When you ask: `/keepwarm` pings and **Count exactly** in the Context tab – through Claude Code, with your credentials, to the provider your session already uses. Once you switch them on, `expiryNotice` and `limitNotice` raise a notification by themselves – through your own notification channel and your `Notification` hooks, never to a server of the mod's | [api › Call a model](https://code.claude.com/docs/en/plugins/mods/api#call-a-model) (`$.model.fork` uses the session's credentials); `$.session.usage({ breakdown: 'full' })` sends token-count requests (type declaration `SessionUsageArgs`); no `$.http` or `$.process` call in the code; `$.ui.notify` goes through “the person's own notification channel, the one their `preferredNotifChannel` names” (type declaration) |
+| **Sends** | Nothing on its own until you switch it on. When you ask: `/keepwarm` pings and **Count exactly** in the Context tab – through Claude Code, with your credentials, to the provider your session already uses. Once you type `/keepwarm auto`, its pings go out by themselves whenever you have been away long enough, until `/keepwarm off` or the session ends. Once you switch them on, `expiryNotice` and `limitNotice` raise a notification by themselves – through your own notification channel and your `Notification` hooks, never to a server of the mod's | [api › Call a model](https://code.claude.com/docs/en/plugins/mods/api#call-a-model) (`$.model.fork` uses the session's credentials); `$.session.usage({ breakdown: 'full' })` sends token-count requests (type declaration `SessionUsageArgs`); no `$.http` or `$.process` call in the code; `$.ui.notify` goes through “the person's own notification channel, the one their `preferredNotifChannel` names” (type declaration) |
 | **Costs** | Nothing, except what you start: the **Compact** button runs `/compact` (a summarisation request, as typing it would), and `/keepwarm`: each ping reads your whole context at the model's cache-read price – billed like any request on an API key, counted against your limits on a plan. How cache reads count towards the 5-hour and weekly limits is **not documented**; watch them in the pane. **Count exactly** uses token counting, which is free on the API; whether Claude Code counts it against plan limits is **not documented** | [pricing › Prompt caching](https://platform.claude.com/docs/en/about-claude/pricing#prompt-caching) (cache read 0.1×, 0.05× or 0.025× of the input price); [api › Call a model](https://code.claude.com/docs/en/plugins/mods/api#call-a-model) (“bill to the user's plan, API key, or cloud provider”); [token counting › Pricing and rate limits](https://platform.claude.com/docs/en/build-with-claude/token-counting#pricing-and-rate-limits) (“free to use”) |
 
 <details>
@@ -364,7 +376,7 @@ With `auto`, Cache Meter follows Claude Code's own TTL controls and your plan st
 
 | Event | What Cache Meter does there | What it changes |
 |---|---|---|
-| `session.start` | Registers `/tokens` and `/keepwarm`, starts its 15-second timer, takes a first reading | Nothing |
+| `session.start` | Registers `/tokens`, `/keepwarm` and `/keepwarm-auto`, starts its 15-second timer, takes a first reading | Nothing |
 | `classic.SessionStart` (after `/clear`, `/resume`, `/branch`) | Reloads the TTL controls and the reading; on a resume continues the countdown and records Claude Code's verdict on the cache | Nothing – passes the event on with `next(e)`; it adds no context and no instructions |
 | `turn.step` | Reads each request's token counts, model, effort, stop reason and server-side tool calls; before a main request that splits a warm cache it shows a note; after a warm miss it names the cause (a fresh, free context estimate shows a changed tool set); sums each subagent's requests and looks up its type and task once (`$.agent.list`); after each main request refreshes context, cost and plan limits from the plain `$.session.usage()`, which costs nothing | Nothing – the request and its result go through as they are |
 | `classic.StopFailure` | Counts the kind of API error a turn ended on | Nothing |
@@ -375,7 +387,7 @@ With `auto`, Cache Meter follows Claude Code's own TTL controls and your plan st
 | `session.compact` | After a real compaction, resets the countdown, since the next request writes a fresh cache, and the tool-result tally, since the summary replaced those results. The same name is the call `$.session.compact` that the **Compact** button makes; the hook sees every compaction, whoever starts it | Nothing – it never skips or alters a compaction |
 | `classic.PreModelSwitch` | While the cache is warm, shows a note with Claude Code's re-write estimate and the time the cache has left | Nothing – it returns no decision, so Claude Code's own confirmation and your settings hooks decide as without it |
 | `classic.PostModelSwitch` | Records the cache TTL, the re-write estimate and Claude Code's verdict on the cache | Nothing |
-| `command.run` (`/tokens`, `/keepwarm` only) | Answers its own two commands; `/tokens report` puts a Markdown report on the clipboard (`$.ui.copy`) and prints only a confirmation | Other commands are not matched |
+| `command.run` (`/tokens`, `/keepwarm`, `/keepwarm-auto` only) | Answers its own commands; `/tokens report` puts a Markdown report on the clipboard (`$.ui.copy`) and prints only a confirmation | Other commands are not matched |
 | `prompt.submit` | Closes its own pane above the prompt when you send a prompt | Nothing – the prompt is not read, changed or dropped |
 | `ui.close` | Notes that you closed its pane, so it doesn't reopen | Nothing – it never keeps a pane open |
 | `ui.fault` | Notes that one of the animation files (the café, the turning keepwarm arrow) failed to load, draw or run, and leaves that one out from then on; the reason goes to the debug log | Nothing – the rest of the pane draws as before |
@@ -392,7 +404,7 @@ With `auto`, Cache Meter follows Claude Code's own TTL controls and your plan st
 <details>
 <summary><b>Does it cost anything?</b></summary>
 
-Only what you start yourself. A `/keepwarm` ping reads your context at the cache-read price – about 1/20 of re-writing it after expiry (1/40 on Opus 5.5 and Sonnet 5.5, 1/80 on Fable 5.1 and Mythos 5.1), at most 12 pings per run. On an API key that is billed like any request, on a plan it counts against your limits. **Count exactly** uses free token counting. Everything else costs nothing.
+Only what you start yourself. A `/keepwarm` ping reads your context at the cache-read price – about 1/20 of re-writing it after expiry (1/40 on Opus 5.5 and Sonnet 5.5, 1/80 on Fable 5.1 and Mythos 5.1), at most 12 pings per run – with `/keepwarm auto`, per break (two for a two-hour break). On an API key that is billed like any request, on a plan it counts against your limits. **Count exactly** uses free token counting. Everything else costs nothing.
 </details>
 
 <details>

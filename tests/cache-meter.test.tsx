@@ -44,6 +44,9 @@ import {
   toolLabel,
   isSecretLikePart,
   dockTip,
+  parseKeepCommand,
+  durationLabel,
+  MAX_PINGS,
   turnLine,
   writeMultiplier,
 } from '../hooks/lib'
@@ -144,6 +147,8 @@ function world(on: On, opts: { env?: Record<string, string>; forkRead?: number; 
     rateLimits: [] as unknown[],
     // What $.session.surfaces() answers.
     surfaces: ['terminal'] as string[],
+    // Run while a ping is in flight (a hook's $ has no $.turn.step: the test hands in its own).
+    duringFork: null as (() => Promise<unknown>) | null,
     // Whether the next tool call is refused (a deny from a hook beneath).
     deny: false,
     server: [] as { id: string; name: string; input: unknown; startedAt: number; endedAt?: number }[],
@@ -173,7 +178,11 @@ function world(on: On, opts: { env?: Record<string, string>; forkRead?: number; 
       : [],
   }))
   on('prompt.submit', ($, e) => ({ text: e.text }))
-  on('command.register', () => ({ value: undefined }) as never)
+  const commands: { name: string; description: string; argumentHint?: string }[] = []
+  on('command.register', ($, e) => {
+    commands.push(e as never)
+    return { value: undefined } as never
+  })
   on('settings.read', () => ({ value: {} }))
   on('session.usage', ($, e) => {
     usageDetails.push((e as { breakdown?: string }).breakdown)
@@ -210,8 +219,10 @@ function world(on: On, opts: { env?: Record<string, string>; forkRead?: number; 
   on('session.measure', ($, e) => ({ changed: e.changed }))
   on('session.compact', () => ({ messages: SUMMARY }))
   on('turn.complete', () => ({ text: opts.turnText ?? '' }))
-  on('model.fork', ($, e) => {
+  on('model.fork', async ($, e) => {
     forks.push(e.prompt)
+    // The worst case for /keepwarm auto: the engine reporting the ping as a main-thread request.
+    if (next.duringFork !== null) await next.duringFork()
     return opts.forkAnswer === false
       ? ({ value: { isAnswered: false, reason: 'nothing-to-fork' } } as never)
       : ({
@@ -237,7 +248,7 @@ function world(on: On, opts: { env?: Record<string, string>; forkRead?: number; 
     } as never
   })
 
-  return { clock, toasts, forks, next, pane, usageDetails, notifies }
+  return { clock, toasts, forks, next, pane, usageDetails, notifies, commands }
 }
 
 /** Runs a slash command; the kit fills origin and presentation (test § Write a test). */
@@ -2622,4 +2633,197 @@ test('dock tip: in the /tokens reply and on the Overview above the prompt – no
   next.surfaces = ['desktop']
   const run2 = await $.command.run({ command: 'tokens', args: '', presentation: { isFullscreen: false, columns: 120 } } as never)
   expect((run2 as { text: string }).text).not.toMatch(/Tip/)
+})
+
+test('/keepwarm arguments: auto with a break length; durations as typed', () => {
+  expect(parseKeepCommand('auto')).toEqual({ mode: 'auto', ms: 2 * HOUR })
+  expect(parseKeepCommand(' AUTO 3h ')).toEqual({ mode: 'auto', ms: 3 * HOUR })
+  expect(parseKeepCommand('auto 90m')).toEqual({ mode: 'auto', ms: 90 * 60_000 })
+  expect(parseKeepCommand('auto 9h')).toBeUndefined()
+  expect(parseKeepCommand('auto off')).toBeUndefined()
+  expect(parseKeepCommand('autox')).toBeUndefined()
+  expect(parseKeepCommand('')).toEqual({ mode: 'run', ms: 2 * HOUR })
+  expect(parseKeepCommand('off')).toEqual({ mode: 'off' })
+  expect(durationLabel(2 * HOUR)).toBe('2h')
+  expect(durationLabel(90 * 60_000)).toBe('1h 30m')
+  expect(durationLabel(30 * 60_000)).toBe('30m')
+})
+
+test('/keepwarm auto: listed in the typeahead beside /keepwarm, with its own row', async ($, on) => {
+  const { commands } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  expect(commands.find(c => c.name === 'keepwarm')?.argumentHint).toMatch(/auto/)
+  const auto = commands.find(c => c.name === 'keepwarm-auto')
+  expect(auto?.description).toMatch(/every break/)
+  expect(auto?.argumentHint).toMatch(/^\[2h\]/)
+})
+
+test('/keepwarm auto: pings only after a while away; your prompt ends the break', async ($, on) => {
+  const { clock, forks, toasts } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  const answer = await run($, 'keepwarm', 'auto')
+  expect(answer.text).toMatch(/^Keepwarm auto on for this session: whenever you are away/)
+  expect(answer.text).toMatch(/It pings on its own from now on/)
+  // Working: a request every 20 minutes keeps the cache fresh – no ping.
+  for (let i = 0; i < 3; i++) {
+    await clock.advance(20 * 60_000)
+    await step($)
+  }
+  expect(forks).toHaveLength(0)
+  // Away: one ping at ≤ 10 min left.
+  await clock.advance(51 * 60_000)
+  await clock.settle()
+  expect(forks).toHaveLength(1)
+  const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  expect(await ui.find({ type: 'Text', text: /^ Keepwarm auto$|^↻ Keepwarm auto$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ' · breaks up to 2h' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^1\/12 pings this break · 1 in all/ })).toBeDefined()
+  await ui.unmount()
+  // Back: the prompt starts the next break's count.
+  await $.prompt.submit({ text: 'hi', origin: { kind: 'composer' } } as never)
+  const back = await $.ui.mount({ surface: 'terminal', ...PANE })
+  expect(await back.find({ type: 'Text', text: /^0\/12 pings this break · 1 in all/ })).toBeDefined()
+  await back.unmount()
+  expect(toasts.some(t => /Keepwarm auto off/.test(t))).toBe(false)
+})
+
+test('/keepwarm auto: a break longer than the window lets the cache go, and the next answer re-arms', async ($, on) => {
+  const { clock, forks, toasts } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  await run($, 'keepwarm', 'auto 1h')
+  await clock.advance(51 * 60_000)
+  await clock.settle()
+  expect(forks).toHaveLength(1)
+  await clock.advance(3 * HOUR)
+  await clock.settle()
+  expect(forks).toHaveLength(1)
+  expect(toasts.some(t => /^Keepwarm auto: break longer than 1h – the cache may expire; on again with your next answer$/.test(t))).toBe(true)
+  // Still on, waiting: the card says so, the band asks nothing.
+  const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  expect(await ui.find({ type: 'Text', text: 'Waiting for the next answer.' })).toBeDefined()
+  await ui.unmount()
+  await step($)
+  await clock.advance(51 * 60_000)
+  await clock.settle()
+  expect(forks).toHaveLength(2)
+})
+
+test('/keepwarm auto: the longest break, 8h, is about nine pings – under the cap of 12', async ($, on) => {
+  const { clock, forks, toasts } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  await run($, 'keepwarm', 'auto 8h')
+  for (let i = 0; i < 16; i++) {
+    await clock.advance(51 * 60_000)
+    await clock.settle()
+  }
+  expect(forks.length).toBeGreaterThanOrEqual(8)
+  expect(forks.length).toBeLessThan(MAX_PINGS)
+  expect(toasts.some(t => /^Keepwarm auto: break longer than 8h – /.test(t))).toBe(true)
+})
+
+test('/keepwarm auto: its own pings never move the window', async ($, on) => {
+  const { clock, forks, next } = world(on)
+  next.duringFork = () => step($)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  await run($, 'keepwarm', 'auto 1h')
+  // Pings at ~50 and ~100 min would each re-arm "now + 1h" if they counted as activity: endless.
+  for (let i = 0; i < 6; i++) {
+    await clock.advance(51 * 60_000)
+    await clock.settle()
+  }
+  expect(forks.length).toBeLessThanOrEqual(2)
+})
+
+test('/keepwarm auto: a miss switches it off for good; off reports the run', async ($, on) => {
+  const { clock, forks, toasts } = world(on, { forkRead: 0 })
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  await run($, 'keepwarm', 'auto')
+  await clock.advance(51 * 60_000)
+  await clock.settle()
+  expect(toasts.some(t => /^Keepwarm auto off: the ping missed the cache/.test(t))).toBe(true)
+  // A new answer does not switch it back on.
+  await step($)
+  await clock.advance(51 * 60_000)
+  await clock.settle()
+  expect(forks).toHaveLength(1)
+})
+
+test('/keepwarm auto: off stops it; a fixed /keepwarm replaces it', async ($, on) => {
+  const { clock, forks } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  await run($, 'keepwarm-auto', '')
+  expect((await run($, 'keepwarm', 'off')).text).toMatch(/^Keepwarm auto off \(0 pings/)
+  await clock.advance(51 * 60_000)
+  await clock.settle()
+  expect(forks).toHaveLength(0)
+  await run($, 'keepwarm', 'auto')
+  expect((await run($, 'keepwarm', '30m')).text).toMatch(/^Keepwarm until/)
+  // The fixed run ends after 30 minutes; no break is covered after it.
+  await step($)
+  await clock.advance(51 * 60_000)
+  await clock.settle()
+  expect(forks).toHaveLength(0)
+})
+
+test('/keepwarm auto: stays on through /clear, waiting for the next answer', async ($, on) => {
+  const { clock, forks } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  // No answer yet: switched on anyway, starts with the next answer.
+  expect((await run($, 'keepwarm', 'auto')).text).toMatch(/It starts with the next answer/)
+  await step($)
+  // /clear: a new conversation without a cache – auto is on again, waiting for its first answer. (The kit
+  // keeps $.state over the event; the old run's window is still in it, so "waiting" shows the restore.)
+  await $.classic.SessionStart({ source: 'clear' } as never)
+  const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  expect(await ui.find({ type: 'Text', text: 'Waiting for the next answer.' })).toBeDefined()
+  await ui.unmount()
+  await step($)
+  await clock.advance(51 * 60_000)
+  await clock.settle()
+  expect(forks).toHaveLength(1)
+})
+
+test('/keepwarm auto: refused at a 5m TTL', async ($, on) => {
+  world(on, { env: { FORCE_PROMPT_CACHING_5M: '1' } })
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  expect((await run($, 'keepwarm', 'auto')).text).toMatch(/not worth it/)
+})
+
+test('/keepwarm auto: refused without a screen', async ($, on) => {
+  world(on)
+  await $.session.start({ surface: null, isInteractive: false, cwd: '/work' })
+  await step($)
+  expect((await run($, 'keepwarm-auto', '')).text).toMatch(/only works in an interactive session/)
+})
+
+test('/keepwarm auto: no cold-cache tip while it is on', async ($, on) => {
+  const { clock, next, toasts } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  await run($, 'keepwarm', 'auto 1h')
+  await clock.advance(4 * HOUR)
+  next.write = 150_000
+  await step($)
+  // The same break without auto gets the tip (the cold-rewrite test): here auto is on, so none.
+  expect(toasts.some(t => /^Cache was cold/.test(t))).toBe(false)
+})
+
+test('/keepwarm auto: the band asks no /keepwarm? while auto waits between breaks', async ($, on) => {
+  const { clock } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  await run($, 'keepwarm', 'auto 1h')
+  // Pinged at ~50 min, window over at 60 min; at 101 min the cache is low and no run covers it.
+  await clock.advance(101 * 60_000)
+  await clock.settle()
+  const ui = await $.ui.mount({ surface: 'terminal', ...band(160) })
+  expect(await ui.find({ type: 'Text', text: / · \/keepwarm\?/ })).toBeUndefined()
+  await ui.unmount()
 })

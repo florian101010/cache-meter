@@ -33,9 +33,10 @@ Other mods you load can read that session state – Claude Code lets any loaded 
 
 ## What it sends
 
-Nothing to the author or anyone else, and no telemetry. Two actions you start – `/keepwarm` and **Count exactly** – send requests through Claude Code, with your own credentials, to the provider your session already uses (the Anthropic API or your cloud provider); with `expiryNotice` or `limitNotice` on, a notification also goes through your own channel:
+Nothing to the author or anyone else, and no telemetry. Two actions you start – `/keepwarm` (with `/keepwarm auto`: on its own during breaks, once you switch it on) and **Count exactly** – send requests through Claude Code, with your own credentials, to the provider your session already uses (the Anthropic API or your cloud provider); with `expiryNotice` or `limitNotice` on, a notification also goes through your own channel:
 
 - **`/keepwarm`:** one small request over your conversation shortly before the cache expires (at most 12 per run), to keep the prompt cache alive.
+- **`/keepwarm auto`** (only after you type it, for this session): the same request, sent by itself whenever you have been away long enough for the cache to near expiry – at most 12 per break, until `/keepwarm off`, a miss or the end of the session. It is not stored; the next session starts without it.
 - **Expiry notification** (only with the option `expiryNotice` on): one notification per cache window through your own notification channel – the one Claude Code's `preferredNotifChannel` setting names – and your `Notification` settings hooks. Its text holds the time left and the context size, nothing else.
 - **Plan-limit notification** (only with the option `limitNotice` on): one notification per limit window through the same channel, when a plan limit is at least half used and would be full before it resets; its text names the limit, its percentage and the times. Without the option the same words appear only as a toast in Claude Code.
 - **Count exactly** in the `/tokens` Context tab: token-count requests, one per tool and memory file, as `/context` makes them – once, when you press it. Token counting is [free on the API](https://platform.claude.com/docs/en/build-with-claude/token-counting#pricing-and-rate-limits).
