@@ -28,6 +28,12 @@ import {
   PING_WRITE_SHARE,
   ZERO,
   add,
+  isUnexpectedWrite,
+  limitForecast,
+  nextLimitStarts,
+  serverCalls,
+  switchNote,
+  turnLine,
   cacheStatus,
   duration,
   forecast,
@@ -63,6 +69,8 @@ import type { BreakdownLike, Mark } from './lib'
 
 const PANE = 'cache-meter'
 const TICK_MS = 15_000
+// From this context fill a cold cache is worth a hint to compact before the next prompt re-writes it all.
+const COMPACT_HINT_PCT = 50
 const STEPS_KEPT = 80
 
 const cacheA = atom({ plugin: 'cache-meter', key: 'cache' } as const, null)
@@ -92,6 +100,8 @@ const healthA = atom({ plugin: 'cache-meter', key: 'health' } as const, {
   serverTools: {},
   lastServerTools: null,
   checks: { agreed: 0, differed: 0, last: null },
+  toolCalls: {},
+  unexpected: { count: 0, written: 0, lastAt: null },
 })
 const ttlConfigA = atom({ plugin: 'cache-meter', key: 'ttlConfig' } as const, {
   force5m: false,
@@ -107,6 +117,10 @@ let setting = 'auto'
 let isInteractive = false
 let isPinging = false
 let mainRequests = 0
+// The line under each answer (option turnLine), and per open turn the session cost at its start and
+// its main requests. Keyed by turnId; a reload loses at most the line of the turn that was running.
+let showTurnLine = true
+let openTurns: Record<string, { usd: number | null; requests: number }> = {}
 // Where the surface last seated the pane: beside a fullscreen transcript (dock) or above the prompt (inline).
 let seat: 'dock' | 'inline' | null = null
 // Opening the dashboard as a sidebar by itself (option autoSidebar): only once the band has been drawn
@@ -149,6 +163,7 @@ async function loadTtlConfig($: EngineInterface) {
 async function measureNow($: EngineInterface) {
   try {
     const usage = await $.session.usage({ breakdown: 'summary' })
+    const now = await $.clock.now()
     const auto = autoCompactOf(usage.context.breakdown, usage.context.window)
     await update($, measureA, m => ({
       percent: usage.context.percent ?? null,
@@ -162,6 +177,7 @@ async function measureNow($: EngineInterface) {
       usd: usage.cost?.usd ?? null,
       startedAt: usage.startedAt,
       prompts: m?.prompts ?? null,
+      limitStart: nextLimitStarts(m?.limitStart ?? {}, usage.rateLimits, now),
     }))
     await mapContext($, usage.context.breakdown, 'summary')
   } catch {
@@ -354,6 +370,8 @@ export const register: Register = (on, options) => {
   isDismissed = false
   isPinging = false
   mainRequests = 0
+  showTurnLine = options.turnLine !== 'off'
+  openTurns = {}
 
   on('session.start', async ($, e, next) => {
     const result = await next(e)
@@ -418,6 +436,8 @@ export const register: Register = (on, options) => {
     const isMain = e.agentId === undefined
     // Counted before the first await, so a turn.complete that follows cannot be overtaken.
     if (isMain) mainRequests += 1
+    const open = openTurns[e.turnId]
+    if (isMain && open !== undefined) openTurns = { ...openTurns, [e.turnId]: { ...open, requests: open.requests + 1 } }
     let result
     let startedAt = 0
     let before: CacheInfo | null = null
@@ -449,6 +469,15 @@ export const register: Register = (on, options) => {
         const kind = isCold ? ('cold' as const) : before === null ? ('first' as const) : undefined
         await update($, stepsA, list => [...list, { ...u, at: startedAt, model: usage.model, ...(kind ? { kind } : {}) }].slice(-STEPS_KEPT))
         await update($, totalsA, t => ({ ...t, main: add(t.main, u), mainSteps: t.mainSteps + 1 }))
+        // Measured, not explained: how often a warm cache was re-written anyway. Why is left open,
+        // because the prompt sections are not compared (a prompt.compose hook would run on every render).
+        if (isUnexpectedWrite(wasCold, before !== null && before.lastAt > 0, u)) {
+          await update($, healthA, h => {
+            const prev = h.unexpected ?? { count: 0, written: 0, lastAt: null }
+
+            return { ...h, unexpected: { count: prev.count + 1, written: prev.written + u.write, lastAt: startedAt } }
+          })
+        }
         await update($, cacheA, () => ({
           lastAt: startedAt,
           hitPct: hitPct(u),
@@ -516,8 +545,68 @@ export const register: Register = (on, options) => {
   // A main turn has ended, also when aborted (events § Follow a turn; TurnCompleteInput.isAborted):
   // no main request runs any more. Resets the counter even if an aborted stream never reached its
   // finally above, so /keepwarm cannot stall silently.
+  // The session cost when a turn starts, for the line under its answer. SessionCost.usd sums every
+  // priced response, subagents' included: the line shows what the whole answer cost (types: SessionCost).
+  on('turn.start', async ($, e, next) => {
+    let usd: number | null = null
+    try {
+      usd = (await $.session.usage()).cost?.usd ?? null
+    } catch {
+      usd = null
+    }
+    openTurns = { ...openTurns, [e.turnId]: { usd, requests: 0 } }
+
+    return next(e)
+  })
+
+  // A main turn has ended, also when aborted (events § Follow a turn; TurnCompleteInput.isAborted):
+  // no main request runs any more. Resets the counter even if an aborted stream never reached its
+  // finally above, so /keepwarm cannot stall silently. A returned text other than the answer is shown
+  // beneath it (reference › Turns): one line with what the answer cost and how it hit the cache.
   on('turn.complete', async ($, e, next) => {
-    if (e.agentId === undefined) mainRequests = 0
+    const isMain = e.agentId === undefined
+    if (isMain) mainRequests = 0
+    const open = openTurns[e.turnId]
+    const { [e.turnId]: _done, ...rest } = openTurns
+    openTurns = rest
+    const result = await next(e)
+    if (!isMain || !showTurnLine || e.isAborted || !e.usage || open === undefined || open.requests === 0) return result
+    let usd: number | null = null
+    try {
+      const now = (await $.session.usage()).cost?.usd ?? null
+      usd = now === null || open.usd === null ? null : Math.max(0, now - open.usd)
+    } catch {
+      usd = null
+    }
+    const u: Usage4 = {
+      input: e.usage.input_tokens,
+      read: e.usage.cache_read_input_tokens,
+      write: e.usage.cache_creation_input_tokens,
+      output: e.usage.output_tokens,
+    }
+
+    return { ...result, text: turnLine(u, open.requests, usd, isPlan(await read($, measureA))) }
+  })
+
+  // Calls to MCP tools by wire name, so the context tab can tell servers in use from idle ones.
+  // Counted after the call ran; the call and its result pass through unchanged.
+  on('tool.call', { tool: /^mcp__/ }, async ($, e, next) => {
+    const result = await next(e)
+    if (!('deny' in result && result.deny)) await update($, healthA, h => ({ ...h, toolCalls: bump(h.toolCalls ?? {}, e.tool) }))
+
+    return result
+  })
+
+  // Before a model switch Claude Code asks for confirmation while the cache is warm (prompt-caching ›
+  // Switching models). A note with its own estimate and the time the cache has left; never a decision:
+  // "ask" counts as a refusal on /config and SDK switches (hooks › PreModelSwitch decision control),
+  // and a slow hook here blocks the switch, so only two state reads.
+  on('classic.PreModelSwitch', async ($, e, next) => {
+    if (isInteractive && e.prompt_cache_warm && e.from_model !== e.to_model && e.context_tokens >= COLD_MIN) {
+      const status = cacheStatus(await read($, cacheA), await $.clock.now(), (await ttlNow($)).ms)
+      const note = switchNote(e.context_tokens, e.estimated_cache_write_usd, e.pricing !== 'default', status.kind === 'warm' ? status.remaining : null)
+      $.ui.toast(note, { timeoutMs: 12_000 })
+    }
 
     return next(e)
   })
@@ -544,6 +633,7 @@ export const register: Register = (on, options) => {
     } catch {
       prompts = null
     }
+    const now = await $.clock.now()
     await update($, measureA, m => {
       const tokens = e.context.tokens ?? null
       const history =
@@ -560,6 +650,7 @@ export const register: Register = (on, options) => {
         usd: e.cost?.usd ?? m?.usd ?? null,
         startedAt: startedAt ?? m?.startedAt ?? null,
         prompts: prompts ?? m?.prompts ?? null,
+        limitStart: nextLimitStarts(m?.limitStart ?? {}, e.rateLimits, now),
       }
 
       return measured
@@ -705,14 +796,25 @@ export const register: Register = (on, options) => {
     // API key would pay), on an API key or a cloud provider real spend. Hidden at $0.00.
     const usd = measure?.usd ?? null
     const costText = usd === null || usd < 0.005 ? '' : isPlan(measure) ? ` · API value $${usd.toFixed(2)}` : ` · spent $${usd.toFixed(2)}`
+    // The cache is cold anyway: compacting now loses no warm cache (it still reads the context once).
+    const compactText = status.kind === 'expired' && showButton && percent !== null && percent >= COMPACT_HINT_PCT ? ' · cold: good time to' : ''
     const minBar = 6
     const showRewrite = rewriteText !== '' && base + rewriteText.length + autoText.length + minBar < cols
     const showAuto = autoText !== '' && base + autoText.length + (showRewrite ? rewriteText.length : 0) + minBar < cols
     // Dropped first when the row gets narrow: after it the auto-compact point, then the bar.
     const showCost =
       costText !== '' && base + costText.length + (showAuto ? autoText.length : 0) + (showRewrite ? rewriteText.length : 0) + minBar < cols
+    const showCompact =
+      compactText !== '' &&
+      base + compactText.length + (showAuto ? autoText.length : 0) + (showRewrite ? rewriteText.length : 0) + (showCost ? costText.length : 0) + minBar < cols
     const free =
-      cols - base - (showAuto ? autoText.length : 0) - (showRewrite ? rewriteText.length : 0) - (showCost ? costText.length : 0) - 1
+      cols -
+      base -
+      (showAuto ? autoText.length : 0) -
+      (showRewrite ? rewriteText.length : 0) -
+      (showCost ? costText.length : 0) -
+      (showCompact ? compactText.length : 0) -
+      1
     const cells = free >= minBar ? Math.min(20, free) : 0
     const lit = status.kind === 'warm' ? litCells(status.remaining, ttl.ms, cells) : 0
 
@@ -742,6 +844,7 @@ export const register: Register = (on, options) => {
             {rewriteText}
           </Text>
         )}
+        {showCompact && <Text color="claude">{compactText}</Text>}
         {showButton && <Text> </Text>}
         {showButton && <Button key="compact" label="Compact" onPress={() => compactNow($)} />}
       </Box>
@@ -1033,6 +1136,7 @@ export const register: Register = (on, options) => {
         )}
         {limits.map(l => {
           const used = Math.max(0, Math.min(limitBar, Math.round((l.percentUsed / 100) * limitBar)))
+          const full = limitForecast(measure?.limitStart?.[l.kind], l.percentUsed, now, l.resetsAt)
 
           return (
             <Text wrap="truncate-end">
@@ -1041,6 +1145,7 @@ export const register: Register = (on, options) => {
               <Text color="inactive">{'░'.repeat(limitBar - used)}</Text>
               <Text bold> {right(`${l.percentUsed}%`, 4)}</Text>
               <Text dimColor>{l.resetsAt ? ` · resets ${resetLabel(l.resetsAt)}` : ''}</Text>
+              {full !== null && <Text color="warning">{` · full ≈ ${hhmm(full)} at this pace`}</Text>}
             </Text>
           )
         })}
@@ -1182,7 +1287,7 @@ export const register: Register = (on, options) => {
               MCP servers{map.deferredMcpTools > 0 ? ` · ${map.deferredMcpTools} more tools behind tool search, not loaded` : ''}
             </Text>
             {map.mcpServers.length === 0 && <Text dimColor> none loaded</Text>}
-            {map.mcpServers.slice(0, 5).map(m => itemRow(m.name, m.tokens, topServer, nameW, ` · ${m.tools} tools`))}
+            {map.mcpServers.slice(0, 5).map(m => itemRow(m.name, m.tokens, topServer, nameW, mcpNote(m.tools, m.toolNames, health.toolCalls ?? {}, measure?.prompts ?? null)))}
             <Text wrap="truncate-end">
               <Text dimColor>Skills </Text>
               {map.skills === null ? (
@@ -1217,6 +1322,7 @@ export const register: Register = (on, options) => {
     const subErrors = tally(health.subErrors, errorLabel)
     const serverNames = Object.entries(health.serverTools).sort((a, b) => b[1].ms - a[1].ms)
     const lastCheck = health.checks.last
+    const unexpected = health.unexpected ?? { count: 0, written: 0, lastAt: null }
     const healthView = (
       <Box flexDirection="column">
         <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="column">
@@ -1301,6 +1407,22 @@ export const register: Register = (on, options) => {
                 Cache Meter {lastCheck.ourWarm ? 'warm' : 'cold'}
               </Text>
             </Box>
+          )}
+          <Text wrap="truncate-end">
+            {label('Warm miss')}
+            {unexpected.count === 0 ? (
+              <Text color="success">none – every warm request read the cache</Text>
+            ) : (
+              <Text color="warning">
+                {unexpected.count}× re-written while warm · {short(unexpected.written)} tokens
+                {unexpected.lastAt === null ? '' : ` · last ${hhmm(unexpected.lastAt)}`}
+              </Text>
+            )}
+          </Text>
+          {unexpected.count > 0 && (
+            <Text dimColor wrap="truncate-end">
+              {''.padEnd(10)}something early in the prompt changed: CLAUDE.md, MCP tools or settings
+            </Text>
           )}
         </Box>
       </Box>
@@ -1440,4 +1562,16 @@ function costLabel(measure: Measure | null, isLong: boolean): string {
   if (isPlan(measure)) return isLong ? ' API value (API-key price)' : ' API value'
 
   return isLong ? ' spent (as /cost)' : ' spent'
+}
+
+/**
+ * An MCP server's note in the context tab: its tools and how often this session called them. "unused
+ * so far" only after a few prompts, so a fresh session does not call every server idle.
+ */
+function mcpNote(tools: number, toolNames: readonly string[] | undefined, calls: Readonly<Record<string, number>>, prompts: number | null): string {
+  if (toolNames === undefined) return ` · ${tools} tools`
+  const n = serverCalls(toolNames, calls)
+  const idle = n === 0 && prompts !== null && prompts >= 3 ? ' – unused so far' : ''
+
+  return ` · ${tools} tools · ${n} call${n === 1 ? '' : 's'}${idle}`
 }

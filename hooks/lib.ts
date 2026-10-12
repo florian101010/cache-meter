@@ -374,7 +374,7 @@ export function right(text: string, width: number): string {
 export type BreakdownLike = {
   categories: readonly { name: string; tokens: number; kind: string }[]
   memoryFiles: readonly { path: string; tokens: number }[]
-  mcpTools: readonly { serverName: string; tokens: number; isLoaded: boolean }[]
+  mcpTools: readonly { name: string; serverName: string; tokens: number; isLoaded: boolean }[]
   agents: readonly { agentType: string; tokens: number }[]
   skills?: { totalSkills: number; includedSkills: number; tokens: number }
 }
@@ -385,11 +385,11 @@ const heaviest = <T extends { tokens: number }>(items: readonly T[]): T[] =>
 /** The heaviest shares of the context, from a breakdown: categories in use, memory files, MCP servers, agents, skills. */
 export function contextMapOf(b: BreakdownLike, detail: ContextMap['detail'], at: number): ContextMap {
   // Loaded MCP tools summed per server (a plain record: the directory's scan reads Map.set like the shell's set).
-  const servers: Record<string, { tokens: number; tools: number }> = {}
+  const servers: Record<string, { tokens: number; tools: number; toolNames: string[] }> = {}
   for (const tool of b.mcpTools) {
     if (!tool.isLoaded) continue
-    const sum = servers[tool.serverName] ?? { tokens: 0, tools: 0 }
-    servers[tool.serverName] = { tokens: sum.tokens + tool.tokens, tools: sum.tools + 1 }
+    const sum = servers[tool.serverName] ?? { tokens: 0, tools: 0, toolNames: [] }
+    servers[tool.serverName] = { tokens: sum.tokens + tool.tokens, tools: sum.tools + 1, toolNames: [...sum.toolNames, tool.name] }
   }
 
   return {
@@ -451,4 +451,75 @@ export function tally(counts: Readonly<Record<string, number>>, label: (key: str
 /** Adds one to `key`. */
 export function bump(counts: Readonly<Record<string, number>>, key: string): Record<string, number> {
   return { ...counts, [key]: (counts[key] ?? 0) + 1 }
+}
+
+/** Calls of this session to any of a server's tools (wire names, as the context breakdown lists them). */
+export function serverCalls(toolNames: readonly string[], calls: Readonly<Record<string, number>>): number {
+  return toolNames.reduce((sum, name) => sum + (calls[name] ?? 0), 0)
+}
+
+/** At least this long between the first reading of a limit window and a forecast from it. */
+export const FORECAST_MIN_MS = 10 * 60_000
+
+/**
+ * When a plan limit reaches 100 % at the pace since its first reading in this session, or null:
+ * too early, no rise, or not before the window resets.
+ */
+export function limitForecast(
+  start: { at: number; pct: number } | undefined,
+  pct: number,
+  now: number,
+  resetsAt?: string,
+): number | null {
+  if (start === undefined || now - start.at < FORECAST_MIN_MS || pct <= start.pct || pct >= 100) return null
+  const perMs = (pct - start.pct) / (now - start.at)
+  const at = now + (100 - pct) / perMs
+  const reset = resetsAt === undefined ? Number.NaN : Date.parse(resetsAt)
+
+  return Number.isNaN(reset) || at < reset ? at : null
+}
+
+/** The line under an answer: what the turn cost and how well it hit the cache. Cost only when known. */
+export function turnLine(u: Usage4, requests: number, usd: number | null, isPlan: boolean): string {
+  const hit = hitPct(u)
+  const cost = usd === null || usd < 0.005 ? '' : `${isPlan ? '≈ ' : ''}$${usd.toFixed(2)} ${isPlan ? 'API value' : 'spent'} · `
+  const parts = [`${requests} request${requests === 1 ? '' : 's'}`, hit === null ? '' : `${hit}% from cache`, u.write >= 1000 ? `${short(u.write)} written to cache` : '']
+
+  return `◉ Cache Meter · ${cost}${parts.filter(Boolean).join(' · ')}`
+}
+
+/**
+ * Where each plan limit's pace starts: its first reading, renewed when the window reset (the
+ * percentage fell, or the reset time moved), so the forecast does not die after the first reset.
+ */
+export function nextLimitStarts(
+  prev: Readonly<Record<string, { at: number; pct: number; resetsAt: string | null }>>,
+  limits: readonly { kind: string; percentUsed: number; resetsAt?: string }[],
+  now: number,
+): Record<string, { at: number; pct: number; resetsAt: string | null }> {
+  const next: Record<string, { at: number; pct: number; resetsAt: string | null }> = {}
+  for (const l of limits) {
+    const old = prev[l.kind]
+    const resetsAt = l.resetsAt ?? null
+    const isNewWindow = old === undefined || l.percentUsed < old.pct || (old.resetsAt !== null && resetsAt !== null && resetsAt !== old.resetsAt)
+    next[l.kind] = isNewWindow ? { at: now, pct: l.percentUsed, resetsAt } : old
+  }
+
+  return next
+}
+
+/**
+ * A main request that re-wrote the cache although it was warm by the clock: something early in the
+ * prompt changed (CLAUDE.md, tools, settings). Not after a known cold point (start, /compact, a switch).
+ */
+export function isUnexpectedWrite(wasCold: boolean, hadCache: boolean, u: Usage4): boolean {
+  return !wasCold && hadCache && u.write >= COLD_MIN && u.read < u.write
+}
+
+/** The note at a model switch while the cache is warm: what Claude Code estimates the switch re-writes. */
+export function switchNote(tokens: number, usd: number, isListPrice: boolean, remainingMs: number | null): string {
+  const price = `≈ $${usd.toFixed(2)}${isListPrice ? '' : ' (estimate)'}`
+  const warm = remainingMs === null ? '' : ` · cache warm ${remainingLabel(remainingMs)} more`
+
+  return `Model switch re-writes ${short(tokens)} tokens to the cache (${price})${warm} – after it expires, switching adds nothing`
 }

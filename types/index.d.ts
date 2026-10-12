@@ -20,6 +20,9 @@ export type CacheInfo = {
 
 export type Limit = { kind: string; percentUsed: number; resetsAt?: string }
 
+/** A plan limit's first reading in its current window: where the pace for the forecast starts. */
+export type LimitStart = { at: number; pct: number; resetsAt: string | null }
+
 export type Measure = {
   percent: number | null
   tokens: number | null
@@ -38,6 +41,8 @@ export type Measure = {
   startedAt: number | null
   /** Prompts the user has sent this session ($.session.turns()). */
   prompts: number | null
+  /** Per plan limit, the first reading of this window: the start of the pace for the forecast. */
+  limitStart: Record<string, LimitStart>
 }
 
 /** Session sums; the cold-rewrite count and tokens are kept apart from the (capped) list of cold rewrites. */
@@ -60,7 +65,7 @@ export type ContextMap = {
   categories: ContextItem[]
   memoryFiles: ContextItem[]
   /** Loaded MCP tools summed per server; `tools` counts them. */
-  mcpServers: (ContextItem & { tools: number })[]
+  mcpServers: (ContextItem & { tools: number; toolNames: string[] })[]
   /** MCP tools behind tool search, not in the context until loaded. */
   deferredMcpTools: number
   agents: ContextItem[]
@@ -81,6 +86,10 @@ export type Health = {
   serverTools: Record<string, { count: number; ms: number }>
   /** The server-side tool calls of the last main request that had any. */
   lastServerTools: { at: number; calls: ServerToolCall[] } | null
+  /** MCP tool calls of this session by wire name (mcp__server__tool), to tell used servers from unused ones. */
+  toolCalls: Record<string, number>
+  /** Main requests that re-wrote the cache although it was warm by the clock: something early in the prompt changed. */
+  unexpected: { count: number; written: number; lastAt: number | null }
   /** Claude Code's own verdict on the cache against Cache Meter's, at model switches and resumes. */
   checks: { agreed: number; differed: number; last: { at: number; engineWarm: boolean; ourWarm: boolean; source: 'model' | 'resume' } | null }
 }

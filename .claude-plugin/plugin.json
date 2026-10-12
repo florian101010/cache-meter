@@ -1,7 +1,7 @@
 {
   "name": "cache-meter",
   "displayName": "Cache Meter",
-  "version": "0.5.4",
+  "version": "0.6.0",
   "description": "Claude Code mod: /keepwarm keeps your prompt cache alive through a break; a countdown, hit rate, context fill and API value above the prompt; and a /tokens dashboard with what caching saved, what fills your context, API errors and cost per hour.",
   "author": {
     "name": "Florian Grimmer",
@@ -48,6 +48,16 @@
         "off"
       ],
       "default": "auto"
+    },
+    "turnLine": {
+      "type": "string",
+      "title": "Line under each answer",
+      "description": "on: under each answer of the main conversation, one line with what it cost (API value on a subscription, spend otherwise; subagents it started included), its requests, how much came from the cache and how much was written to it. off: no line.",
+      "options": [
+        "on",
+        "off"
+      ],
+      "default": "on"
     }
   }
 }

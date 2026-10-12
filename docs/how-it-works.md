@@ -9,7 +9,10 @@ This page describes the design of the mod for people who want to change it or ch
 | `session.start` | reads the TTL controls and a first measurement, starts the 15 s timer (interactive sessions only), registers `/tokens` and `/keepwarm` | *reference › Session*, *overview › Where mods run* |
 | `classic.SessionStart` with `source` `clear`, `resume`, `fork` | `/clear`, `/resume` and `/branch` reset all `$.state` and do not fire `session.start` again, so the same set-up runs here; on resume/fork the countdown continues from `seconds_since_last_response` | *interface › Load a saved value again after /clear*; types: `SessionStartHookInput` |
 | `turn.step` (async generator) | the four token counts of each model request; main conversation vs. subagent via `e.agentId` | *events › Follow a turn*; types: `TurnStepResult.usage` |
-| `turn.complete` | resets the count of running main requests, also after an abort (`isAborted`) | types: `TurnCompleteInput` |
+| `turn.start` | the session cost (`$.session.usage().cost.usd`) when a turn starts, keyed by `turnId` | *events › Follow a turn*; types: `SessionCost` (sums every priced response, subagents included) |
+| `turn.complete` | resets the count of running main requests, also after an abort (`isAborted`); for a main turn that sent a request and was not aborted, returns `{ text }` – the line under the answer: cost since `turn.start`, requests counted in `turn.step` by `turnId`, `e.usage` totals. Option `turnLine` | *reference › Turns* (“`{ text }` to show a line under the answer”); types: `TurnCompleteResult` |
+| `tool.call` matching `/^mcp__/` | after `await next(e)`, counts the call by wire name unless it was denied; returns the result unchanged | *events › Filter which events a hook handles* (regular-expression matcher for one MCP server's tools) |
+| `classic.PreModelSwitch` | while `prompt_cache_warm` and switching to another model with ≥ 10k context: a toast with `context_tokens`, `estimated_cache_write_usd` and the countdown; returns `next(e)`, never a decision – `ask` is a refusal on `/config` and `set_model`, and the event's `command` source includes the `/config` Model row | hooks › *PreModelSwitch decision control*; prompt-caching › *Switching models* (Claude Code confirms by itself while the cache is warm) |
 | `session.measure` | context fill, plan limits, cost after each turn | *reference › Session*; types: `SessionMeasureInput` |
 | `session.compact` | a real compaction (not `precompute`, not a subagent) empties the cache | types: `SessionCompactInput` |
 | `classic.PostModelSwitch` | a real switch (not `source: 'resume'`, not to the same model) leaves the cache cold; carries `cache_ttl` and `estimated_cache_write_usd` | types: `PostModelSwitchHookInput` |
@@ -122,6 +125,7 @@ After each turn the `session.measure` hook reads `$.session.usage({ breakdown: '
 | Stops | `turn.step` result `stopReason` of main requests; `end_turn`, `tool_use` and none are normal, the rest is counted (*events › Follow a turn*) |
 | Errors | settings hook event `StopFailure` (`classic.StopFailure`, observed with `next(e)`), its `error`; `agent_id` set = subagent, counted apart |
 | Server | `turn.step` result `serverToolUses` (v2.1.290+): tool calls the API ran itself, such as the advisor; no `tool.call` fires for them. Duration = `endedAt − startedAt`, `–` without `endedAt` |
+| Warm miss | a main request warm by the countdown (cache seen, not expired) that wrote ≥ 10k tokens and read less than it wrote: something early in the prompt changed. Counted, not explained – the prompt sections are not compared |
 | Cache check | `PostModelSwitch.prompt_cache_warm` and, on resume/fork, `SessionStart.prompt_cache_likely_expired` – Claude Code's verdict – against Cache Meter's countdown at that moment, taken before either is acted on; skipped while Cache Meter has seen no request (its state is empty after `/resume`) |
 
 ## Band layout
@@ -156,3 +160,11 @@ With the option `cacheTtl` set to `auto`, the TTL is derived in this order, foll
 | Dollar amounts | only Claude Code's own estimates and the `/cost` total – no price table of its own |
 | Other invalidations | a model switch, an MCP or plugin change can invalidate the cache before the TTL ends ([actions that invalidate the cache](https://code.claude.com/docs/en/prompt-caching#actions-that-invalidate-the-cache)) – visible as a low hit rate |
 | Subagents | have their own caches with a five-minute TTL; counted in the totals, not in the countdown |
+
+## Limit forecast
+
+`session.measure` keeps, per plan limit, its first reading in the current window (`limitStart`: time, percentage, `resetsAt`). A lower percentage or a changed `resetsAt` starts a new window. From ten minutes after that reading, the overview shows when the limit reaches 100 % at the average pace since then – only if that is before the reset. A straight line through two readings: a burst of work makes it early, a pause late.
+
+## MCP calls and idle servers
+
+The Context tab lists each loaded MCP server's tools with the calls this session made to any of them (`tool.call` above, matched by the wire names in the context breakdown, `ContextMcpTool.name`). After three prompts a server with no call reads *unused so far*. Servers behind tool search are not listed: their tools are not in the cached prefix (prompt-caching › *Connecting or removing an MCP server*).
