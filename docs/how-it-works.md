@@ -185,4 +185,4 @@ From `measure.history` (the context size after each turn, last 12): the run sinc
 
 ## `/tokens report`
 
-Handled before the tab names, so it never opens, closes or switches the pane. It gathers what the pane shows into Markdown (`reportMarkdown` in `hooks/lib.ts`) and passes it to `$.ui.copy`. The command's own output is only a confirmation: `CommandRunResult.text` is a transcript line, and whether the model reads it is not documented. `isCopied: true` is not proof – an OSC 52 write does not report back (types: `UiCopyResult`) – so the confirmation asks to paste and check.
+Handled before the tab names, so it never opens, closes or switches the pane. It gathers what the pane shows into Markdown (`reportMarkdown` in `hooks/lib.ts`) and passes it to `$.ui.copy`. The command's own output is only a confirmation, in fixed words even when the copy fails: Claude reads a command's text (mods › api › Add a command). `isCopied: true` is not proof – an OSC 52 write does not report back (types: `UiCopyResult`) – so the confirmation asks to paste and check.

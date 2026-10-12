@@ -32,6 +32,7 @@ import {
   addToolResult,
   compactForecast,
   estimateTokens,
+  homePath,
   reportMarkdown,
   toolLabel,
   agentLabel,
@@ -472,9 +473,10 @@ async function copyReport($: EngineInterface): Promise<string> {
   let copied: { isCopied: boolean; reason?: string }
   try {
     copied = await $.ui.copy({ text })
-  } catch (error) {
-    // A ui.copy hook's deny or a failed write: its own words, not the result reason 'refused'.
-    copied = { isCopied: false, reason: error instanceof Error ? error.message : String(error) }
+  } catch {
+    // A ui.copy hook's deny or a failed write. Fixed words, not the error's own: Claude reads a command's
+    // text (api › Add a command), and an error from another hook could carry anything.
+    copied = { isCopied: false, reason: 'rejected by a hook or the terminal' }
   }
   const lines = text.split('\n').length
 
@@ -1859,7 +1861,7 @@ function hitColor(pct: number | null): string | undefined {
 
 /** A home directory as `~`, so paths stay short and screenshots show no user name. */
 function homeShort(path: string): string {
-  return path.replace(/^\/(Users|home)\/[^/]+(?=\/|$)/, '~')
+  return homePath(path)
 }
 
 /**
