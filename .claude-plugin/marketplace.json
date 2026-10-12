@@ -1,6 +1,6 @@
 {
   "name": "cache-meter",
-  "description": "Cache Meter for Claude Code – keep your prompt cache warm and see when it is about to expire.",
+  "description": "Cache Meter (Claude Code Mod) – keep your prompt cache warm and see when it is about to expire.",
   "owner": {
     "name": "Florian Grimmer",
     "url": "https://github.com/florian101010"

@@ -1,4 +1,4 @@
-# Cache Meter for Claude Code
+# Cache Meter (Claude Code Mod)
 
 **Keep your prompt cache warm – and see when it is about to expire.** Cache Meter is a [Claude Code mod](https://code.claude.com/docs/en/plugins/mods/overview) that puts the prompt cache on screen – a countdown until it expires, the hit rate of every request, how full the context is – and with **`/keepwarm`** keeps it alive through a break, so you don't pay to re-write your whole conversation when you come back.
 
