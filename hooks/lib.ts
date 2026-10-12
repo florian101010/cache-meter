@@ -811,3 +811,45 @@ export function shineCells(cells: readonly Cell[], at: number): Cell[] {
     return [cell[0], lighten(cell[1], d === 0 ? 0.6 : 0.3), cell[2]]
   })
 }
+
+/** A single tool result this large, or larger, in the main conversation is worth a word. */
+export const HOG_MIN = 10_000
+export const HOG_SHARE = 0.02
+
+/** Whether one tool result fills enough of the context to mention: max(10k, 2 % of the window) tokens. */
+export function isContextHog(tokens: number, window: number): boolean {
+  return tokens >= Math.max(HOG_MIN, window > 0 ? window * HOG_SHARE : 0)
+}
+
+/** The toast for a large tool result: what put how much into the context (an estimate), and why it matters. */
+export function hogNote(label: string, tool: string, tokens: number): string {
+  return `${label === '' ? tool : label} put ≈ ${short(tokens)} tokens into the context – sent again with every request until /compact`
+}
+
+/** A part of the context as a share of every request's context: "6%", "<1%", or '' when unknown. */
+export function shareOfRequest(tokens: number, contextTokens: number | null): string {
+  if (contextTokens === null || contextTokens <= 0 || tokens <= 0) return ''
+  const pct = (tokens / contextTokens) * 100
+
+  return pct < 1 ? '<1%' : `${Math.round(pct)}%`
+}
+
+/** The conversation's messages are worth a /compact note from this size and share of the context on. */
+export const COMPACT_NOTE_MIN = 20_000
+export const COMPACT_NOTE_SHARE = 0.25
+
+/**
+ * The Context tab's note on /compact, or null: only measured figures – the messages' size as Claude Code
+ * counts it – and what /compact does by the docs (commands: "Free up context by summarizing the
+ * conversation so far"; costs: compacting a large context "is itself a large request"). No saving is
+ * promised: what the summary keeps is not known before.
+ */
+export function compactNote(messages: number | null, context: number | null): string | null {
+  if (messages === null || context === null || context <= 0) return null
+  if (messages < COMPACT_NOTE_MIN || messages < context * COMPACT_NOTE_SHARE) return null
+
+  return `Messages ${short(messages)} (${Math.round((messages / context) * 100)}% of the context) are sent again with every request – /compact summarizes them to free space, itself one large request`
+}
+
+/** A plan limit worth a warning: half used or more, and full before it resets at this pace. */
+export const LIMIT_NOTE_PCT = 50

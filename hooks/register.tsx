@@ -79,6 +79,11 @@ import {
   stopLabel,
   errorLabel,
   cafeState,
+  compactNote,
+  LIMIT_NOTE_PCT,
+  hogNote,
+  isContextHog,
+  shareOfRequest,
   progress,
   shineCells,
   tween,
@@ -193,6 +198,12 @@ let shownUsd: number | null = null
 let usdFrom = 0
 let usdStart = 0
 let shownSaving: number | null = null
+// Option limitNotice, and the plan-limit windows already warned about (kind@resetsAt).
+let limitNotice = false
+let warnedLimits = new Set<string>()
+// What ended at a /clear, read at session.end while the session's state may still hold it; shown once
+// the new conversation starts.
+let pendingSummary: string | null = null
 let savingFrom = 0
 let savingStart = 0
 const FLASH_MS = 450
@@ -580,6 +591,7 @@ async function refreshMeasure($: EngineInterface) {
         },
   )
   await checkBudget($)
+  await checkLimits($)
 }
 
 // Option sessionBudget: a toast when the session's cost (Claude Code's figure, as in the band) passes
@@ -589,6 +601,50 @@ async function refreshMeasure($: EngineInterface) {
 async function settleBudget($: EngineInterface) {
   const usd = (await read($, measureA))?.usd ?? null
   budgetWarned = budget <= 0 || usd === null ? 0 : usd >= budget ? 100 : usd >= budget * 0.8 ? 80 : 0
+}
+
+// A plan limit that fills up before it resets: one toast per limit window (and, with limitNotice, a
+// notification), from the same pace forecast the Overview shows. Only where a person reads it. `quiet`
+// takes the windows that already qualify without a word – after a reload in a running session.
+async function checkLimits($: EngineInterface, quiet = false) {
+  if (!isInteractive) return
+  const measure = await read($, measureA)
+  const now = await $.clock.now()
+  for (const l of measure?.limits ?? []) {
+    if (l.percentUsed < LIMIT_NOTE_PCT || l.resetsAt === undefined) continue
+    const full = limitForecast(measure?.limitStart?.[l.kind], l.percentUsed, now, l.resetsAt)
+    const key = `${l.kind}@${l.resetsAt}`
+    if (full === null || warnedLimits.has(key)) continue
+    warnedLimits.add(key)
+    if (quiet) continue
+    const text = `${limitName(l.kind)} limit at ${l.percentUsed}% – full ≈ ${hhmm(full)} at this pace (resets ${resetLabel(l.resetsAt)})`
+    $.ui.toast(text, { timeoutMs: 10_000 })
+    if (limitNotice) {
+      try {
+        await $.ui.notify(text, { title: 'Cache Meter' })
+      } catch {
+        // A refused notification (a Notification hook's deny) leaves the toast as the word.
+      }
+    }
+  }
+}
+
+// What the conversation that just ended came to – only figures it measured: cost as /cost shows it,
+// main requests, the share read from the cache, cold re-writes. Null when it holds no request.
+async function conversationSummary($: EngineInterface): Promise<string | null> {
+  const totals: Totals = await read($, totalsA)
+  if (totals.mainSteps === 0) return null
+  const measure = await read($, measureA)
+  const hit = hitPct(totals.main)
+  const usd = measure?.usd ?? null
+  const parts = [
+    usd === null ? null : `${isPlan(measure) ? '≈ ' : ''}$${usd.toFixed(2)}${costLabel(measure, false)}`,
+    `${totals.mainSteps} request${totals.mainSteps === 1 ? '' : 's'}`,
+    hit === null ? null : `${hit}% from cache`,
+    totals.coldCount > 0 ? `${totals.coldCount} cold re-write${totals.coldCount === 1 ? '' : 's'} (${short(totals.coldWritten)} tokens)` : null,
+  ].filter((p): p is string => p !== null)
+
+  return `Conversation cleared – it came to ${parts.join(' · ')}`
 }
 
 async function checkBudget($: EngineInterface) {
@@ -749,6 +805,9 @@ export const register: Register = (on, options) => {
   usdFrom = 0
   usdStart = 0
   shownSaving = null
+  limitNotice = options.limitNotice === 'on'
+  warnedLimits = new Set()
+  pendingSummary = null
   savingFrom = 0
   savingStart = 0
 
@@ -761,7 +820,10 @@ export const register: Register = (on, options) => {
     // session.start is the first event of every load: a fresh session warns from 0; a reload in a running
     // one (requests already counted, state kept) takes the level reached without a toast.
     budgetWarned = 0
-    if ((await read($, stepsA)).length > 0) await settleBudget($)
+    if ((await read($, stepsA)).length > 0) {
+      await settleBudget($)
+      await checkLimits($, true)
+    }
     // Hooks also run under -p and the SDK, where nothing draws (overview § Where mods run).
     isInteractive = e.isInteractive
     if (e.isInteractive) {
@@ -791,7 +853,26 @@ export const register: Register = (on, options) => {
   // /clear, /resume and /branch reset every $.state value and do not fire session.start again
   // (interface § Load a saved value again after /clear). Resume and fork also say how long ago the
   // last response was, so the countdown carries on.
+  // A /clear ends the conversation; what it came to is read here, while the session's state may still
+  // hold it (whether it does is not documented – an empty reading shows nothing), and shown once the new
+  // conversation starts. A real exit has no place to show anything: the session is gone.
+  on('session.end', async ($, e, next) => {
+    if (e.reason === 'clear' && isInteractive) {
+      try {
+        pendingSummary = await conversationSummary($)
+      } catch {
+        pendingSummary = null
+      }
+    }
+
+    return next(e)
+  })
+
   on('classic.SessionStart', { source: ['clear', 'resume', 'fork'] }, async ($, e, next) => {
+    if (e.source === 'clear' && pendingSummary !== null) {
+      $.ui.toast(pendingSummary, { timeoutMs: 12_000 })
+    }
+    pendingSummary = null
     await loadTtlConfig($)
     await measureNow($)
     promptBase = await turnsNow($)
@@ -1020,6 +1101,10 @@ export const register: Register = (on, options) => {
       const label = toolLabel(e.tool, e as unknown as Record<string, unknown>)
       const at = await $.clock.now()
       await update($, toolResultsA, prev => addToolResult(prev ?? NO_RESULTS, e.tool, label, tokens, at))
+      // One large result is worth a word while it can still be acted on (compact, or read less next time).
+      if (isInteractive && isContextHog(tokens, (await read($, measureA))?.window ?? 0)) {
+        $.ui.toast(hogNote(label, e.tool, tokens), { timeoutMs: 10_000 })
+      }
     }
 
     return result
@@ -1084,6 +1169,7 @@ export const register: Register = (on, options) => {
       return measured
     })
     await checkBudget($)
+    await checkLimits($)
 
     return result
   })
@@ -1825,6 +1911,7 @@ export const register: Register = (on, options) => {
     const topLargest = results.largest[0]?.tokens ?? 0
     // Claude Code's own estimate of the conversation, as /context names the category.
     const messagesTokens = map?.categories.find(c => c.name === 'Messages')?.tokens ?? null
+    const compactLine = compactNote(messagesTokens, measure?.tokens ?? null)
     const contextView = (
       <Box flexDirection="column">
         {contextCard}
@@ -1841,6 +1928,11 @@ export const register: Register = (on, options) => {
           </Box>
           {map === null && <Text dimColor>Claude Code reports it after the first answer.</Text>}
           {map !== null && map.categories.slice(0, 8).map(c => itemRow(c.name, c.tokens, topCat, nameW, pctOf(c.tokens)))}
+          {compactLine !== null && (
+            <Text color="warning" wrap="wrap">
+              {compactLine}
+            </Text>
+          )}
           <Box flexDirection="row" justifyContent="space-between">
             <Text dimColor wrap="truncate-end">
               {tier === 'wide' ? 'Exact count: one API request per tool and memory file, as /context' : 'exact: 1 request per tool and file'}
@@ -1892,7 +1984,7 @@ export const register: Register = (on, options) => {
               MCP servers{map.deferredMcpTools > 0 ? ` · ${map.deferredMcpTools} more tools behind tool search, not loaded` : ''}
             </Text>
             {map.mcpServers.length === 0 && <Text dimColor> none loaded</Text>}
-            {map.mcpServers.slice(0, 5).map(m => itemRow(m.name, m.tokens, topServer, nameW, mcpNote(m.tools, m.toolNames, health.toolCalls ?? {}, measure?.prompts == null ? null : measure.prompts - promptBase)))}
+            {map.mcpServers.slice(0, 5).map(m => itemRow(m.name, m.tokens, topServer, nameW, mcpNote(m.tools, m.toolNames, health.toolCalls ?? {}, measure?.prompts == null ? null : measure.prompts - promptBase, shareOfRequest(m.tokens, measure?.tokens ?? null))))}
             <Text wrap="truncate-end">
               <Text dimColor>Skills </Text>
               {map.skills === null ? (
@@ -2281,12 +2373,14 @@ function costLabel(measure: Measure | null, isLong: boolean): string {
  * /clear, /resume or /branch. "unused so far" only after a few prompts in that span, so a fresh or
  * resumed session does not call every server idle.
  */
-function mcpNote(tools: number, toolNames: readonly string[] | undefined, calls: Readonly<Record<string, number>>, prompts: number | null): string {
-  if (toolNames === undefined) return ` · ${tools} tools`
+function mcpNote(tools: number, toolNames: readonly string[] | undefined, calls: Readonly<Record<string, number>>, prompts: number | null, share = ''): string {
+  // The server's share of every request's context: its tool definitions go out with each one.
+  const each = share === '' ? '' : ` · ${share} of each request`
+  if (toolNames === undefined) return ` · ${tools} tools${each}`
   const n = serverCalls(toolNames, calls)
   const idle = n === 0 && prompts !== null && prompts >= 3 ? ' – unused so far' : ''
 
-  return ` · ${tools} tools · ${n} call${n === 1 ? '' : 's'}${idle}`
+  return ` · ${tools} tools${each} · ${n} call${n === 1 ? '' : 's'}${idle}`
 }
 
 /** One request column's details for its hover row, padded so it covers the time row beneath the chart. */

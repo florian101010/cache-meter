@@ -12,6 +12,10 @@ import {
   FIVE_MIN,
   HOUR,
   cafeState,
+  compactNote,
+  hogNote,
+  isContextHog,
+  shareOfRequest,
   cacheSaving,
   columnCells,
   forecast,
@@ -1049,7 +1053,7 @@ test('MCP servers: calls counted per server, idle ones marked after a few prompt
   await $.session.measure({ context: { tokens: 100_000, window: 1_000_000, percent: 10 }, rateLimits: [], changed: ['context'] })
   const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
   await ui.press({ key: 'tab-context' })
-  expect(await ui.find({ type: 'Text', text: / · 2 tools · 3 calls$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: / · 2 tools · (\d+%|<1%) of each request · 3 calls$/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /unused so far/ })).toBeUndefined()
   await ui.unmount()
 })
@@ -1126,13 +1130,13 @@ test('MCP servers: unused only after three prompts since the start or a /resume'
   await $.session.measure({ context: { tokens: 100_000, window: 1_000_000, percent: 10 }, rateLimits: [], changed: ['context'] })
   let ui = await $.ui.mount({ surface: 'terminal', ...PANE })
   await ui.press({ key: 'tab-context' })
-  expect(await ui.find({ type: 'Text', text: / · 2 tools · 0 calls$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: / · 2 tools · (\d+%|<1%) of each request · 0 calls$/ })).toBeDefined()
   await ui.unmount()
   next.turns = 7
   await $.session.measure({ context: { tokens: 100_000, window: 1_000_000, percent: 10 }, rateLimits: [], changed: ['context'] })
   ui = await $.ui.mount({ surface: 'terminal', ...PANE })
   await ui.press({ key: 'tab-context' })
-  expect(await ui.find({ type: 'Text', text: / · 2 tools · 0 calls – unused so far$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: / · 2 tools · (\d+%|<1%) of each request · 0 calls – unused so far$/ })).toBeDefined()
   await ui.unmount()
   // /resume or /branch: counted from there again.
   await $.classic.SessionStart({ source: 'resume', seconds_since_last_response: 60, context_tokens: 100_000 })
@@ -2193,4 +2197,130 @@ test('animation: off with animations = off – the new figure at once, no shine'
   await clock.advance(200)
   expect(await ui.find({ type: 'Text', text: /^≈? ?\$2\.00$/ })).toBeDefined()
   await ui.unmount()
+})
+
+test('context hog: max(10k, 2 % of the window) tokens; share of each request', () => {
+  expect(isContextHog(9_999, 0)).toBe(false)
+  expect(isContextHog(10_000, 0)).toBe(true)
+  expect(isContextHog(10_000, 200_000)).toBe(true)
+  expect(isContextHog(19_999, 1_000_000)).toBe(false)
+  expect(isContextHog(20_000, 1_000_000)).toBe(true)
+  expect(hogNote('src/big.ts', 'Read', 42_000)).toBe('src/big.ts put ≈ 42.0k tokens into the context – sent again with every request until /compact')
+  expect(hogNote('', 'WebFetch', 12_000)).toMatch(/^WebFetch put ≈ 12\.0k tokens/)
+  expect(shareOfRequest(6_000, 100_000)).toBe('6%')
+  expect(shareOfRequest(500, 100_000)).toBe('<1%')
+  expect(shareOfRequest(6_000, null)).toBe('')
+  expect(shareOfRequest(0, 100_000)).toBe('')
+})
+
+test('context hog: a toast for one large result in the main conversation – not for small ones, subagents or -p', async ($, on) => {
+  const { next, toasts } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  // 4,000 characters ≈ 1k tokens: no word.
+  next.toolText = 'x'.repeat(4_000)
+  await $.tool.call({ tool: 'Read', file_path: '/Users/u/project/a.ts' } as never)
+  expect(toasts.some(t => /into the context/.test(t))).toBe(false)
+  // 200,000 characters ≈ 50k tokens: one toast, with the short label.
+  next.toolText = 'y'.repeat(200_000)
+  await $.tool.call({ tool: 'Read', file_path: '/Users/u/project/big.ts' } as never)
+  expect(toasts.filter(t => /into the context/.test(t))).toEqual(['Read ~/project/big.ts put ≈ 50.0k tokens into the context – sent again with every request until /compact'])
+  // A subagent's result stays in its own context.
+  await $.tool.call({ tool: 'Read', file_path: '/Users/u/other.ts', agentId: 'agent-1' } as never)
+  expect(toasts.filter(t => /into the context/.test(t))).toHaveLength(1)
+})
+
+test('context hog: no toast without a screen', async ($, on) => {
+  const { next, toasts } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
+  next.toolText = 'y'.repeat(200_000)
+  await $.tool.call({ tool: 'Read', file_path: '/Users/u/project/big.ts' } as never)
+  expect(toasts.some(t => /into the context/.test(t))).toBe(false)
+})
+
+test('compact note: only measured figures, from 20k messages and a quarter of the context', () => {
+  expect(compactNote(null, 100_000)).toBeNull()
+  expect(compactNote(19_999, 40_000)).toBeNull()
+  expect(compactNote(30_000, 200_000)).toBeNull()
+  expect(compactNote(60_000, 200_000)).toBe(
+    'Messages 60.0k (30% of the context) are sent again with every request – /compact summarizes them to free space, itself one large request',
+  )
+})
+
+test('compact note: shown in the Context tab when the messages fill the context', async ($, on) => {
+  world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  await run($, 'tokens', 'context')
+  const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  expect(await ui.find({ type: 'Text', text: /^Messages \d+\.\dk \(\d+% of the context\) are sent again with every request/ })).toBeDefined()
+  await ui.unmount()
+})
+
+const limitAt = (pct: number) => ({ context: { tokens: 100_000, window: 1_000_000, percent: 10 }, rateLimits: [{ kind: 'five_hour', percentUsed: pct, resetsAt: '2026-10-12T20:00:00Z' }], changed: ['rateLimits'] })
+
+test('limit warning: once per window, from half used, only when full before the reset', async ($, on) => {
+  const { clock, toasts, notifies } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await $.session.measure(limitAt(20) as never)
+  await clock.advance(HOUR)
+  // 40 %: full before the reset at this pace, but not half used yet – no word.
+  await $.session.measure(limitAt(40) as never)
+  expect(toasts.some(t => /limit at/.test(t))).toBe(false)
+  await clock.advance(HOUR / 2)
+  await $.session.measure(limitAt(60) as never)
+  const warned = toasts.filter(t => /limit at/.test(t))
+  expect(warned).toHaveLength(1)
+  expect(warned[0]).toMatch(/^5 hours limit at 60% – full ≈ \d\d:\d\d at this pace \(resets \w{3} \d\d:\d\d\)$/)
+  // Off by default: no notification.
+  expect(notifies).toHaveLength(0)
+  await clock.advance(HOUR / 4)
+  await $.session.measure(limitAt(70) as never)
+  expect(toasts.filter(t => /limit at/.test(t))).toHaveLength(1)
+})
+
+test('limit warning: a notification too with limitNotice = on', { options: { limitNotice: 'on' } }, async ($, on) => {
+  const { clock, notifies } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await $.session.measure(limitAt(20) as never)
+  await clock.advance(HOUR)
+  await $.session.measure(limitAt(60) as never)
+  expect(notifies.filter(n => /^5 hours limit at 60%/.test(n))).toHaveLength(1)
+})
+
+test('limit warning: none without a screen', async ($, on) => {
+  const { clock, toasts } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
+  await $.session.measure(limitAt(20) as never)
+  await clock.advance(HOUR)
+  await $.session.measure(limitAt(60) as never)
+  expect(toasts.some(t => /limit at/.test(t))).toBe(false)
+})
+
+test('after /clear: what the conversation came to, from figures it measured', async ($, on) => {
+  const { toasts, next } = world(on)
+  // Core's own answer beneath the mod (types: SessionEndResult).
+  on('session.end', ($, e) => ({ sessionId: e.sessionId }))
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  next.usd = 1.5
+  await step($)
+  await step($)
+  await $.session.end({ reason: 'clear', sessionId: 's1', resume: {} } as never)
+  await $.classic.SessionStart({ source: 'clear' } as never)
+  const summary = toasts.filter(t => t.startsWith('Conversation cleared'))
+  expect(summary).toHaveLength(1)
+  expect(summary[0]).toMatch(/^Conversation cleared – it came to \$1\.50 spent · 2 requests · \d+% from cache$/)
+})
+
+test('after /clear: nothing when the conversation held no request, and nothing at a real exit', async ($, on) => {
+  const { toasts } = world(on)
+  // Core's own answer beneath the mod (types: SessionEndResult).
+  on('session.end', ($, e) => ({ sessionId: e.sessionId }))
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await $.session.end({ reason: 'clear', sessionId: 's1', resume: {} } as never)
+  await $.classic.SessionStart({ source: 'clear' } as never)
+  await step($)
+  await $.session.end({ reason: 'prompt_input_exit', sessionId: 's2', resume: {} } as never)
+  // Only a /clear's end is kept for the next start: an exit's is not, even if a clear-start followed.
+  await $.classic.SessionStart({ source: 'clear' } as never)
+  expect(toasts.some(t => t.startsWith('Conversation cleared'))).toBe(false)
 })

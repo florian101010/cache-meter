@@ -42,7 +42,7 @@ Type **`/keepwarm`** before lunch or a meeting. Shortly before expiry one tiny p
 </tr>
 </table>
 
-**New in 0.6–0.10:** a barista who acts out your cache · cost under every answer · warnings before a switch re-writes the cache · the cause of every warm miss · what fills your conversation · auto-compact forecast · per-subagent use · expiry notification · session budget · live last minute and keepwarm heartbeat · a flash at each new minute · hover details · `/tokens report`. → [changelog](CHANGELOG.md)
+**New in 0.6–0.11:** a word when one tool result floods the context · plan-limit warnings · what the conversation came to after `/clear` · a barista who acts out your cache · cost under every answer · warnings before a switch re-writes the cache · the cause of every warm miss · what fills your conversation · auto-compact forecast · per-subagent use · expiry notification · session budget · live last minute and keepwarm heartbeat · a flash at each new minute · hover details · `/tokens report`. → [changelog](CHANGELOG.md)
 
 **Install** – in your shell, then start a new Claude Code session:
 
@@ -107,6 +107,18 @@ A switch while the cache is warm re-writes the whole conversation. Cache Meter s
 It never blocks, approves or delays anything.
 
 <p align="center"><img src="https://raw.githubusercontent.com/florian101010/cache-meter/assets/brand/feature-keepwarm.svg" width="100%" alt="Keep it – /keepwarm: the countdown ring drains towards the ping mark, a ping flashes, “ping ok · 148k read” appears, and the ring fills again."></p>
+
+## A word when it matters
+
+Cache Meter speaks up only with figures it measured – no guessed savings:
+
+| When | What you see |
+|---|---|
+| One tool result floods the context (≥ 10k tokens and ≥ 2 % of the window) | `Read ~/src/big.ts put ≈ 50.0k tokens into the context – sent again with every request until /compact` – the size is an estimate (characters ÷ 4) |
+| A plan limit is half used and, at this pace, full before it resets | `5 hours limit at 60% – full ≈ 18:40 at this pace (resets Mon 20:00)` – once per window; a notification too with `limitNotice` |
+| The conversation's messages are a quarter of the context or more (≥ 20k) | in the Context tab: `Messages 60.0k (30% of the context) are sent again with every request – /compact summarizes them to free space, itself one large request` |
+| An MCP server's tools ride along with every request | in the Context tab, beside each server: its share of each request, and `unused so far` when the session never called it |
+| You `/clear` | `Conversation cleared – it came to $1.50 spent · 12 requests · 94% from cache` (if the ended conversation's figures could still be read) |
 
 ## Keep the cache warm with `/keepwarm`
 
@@ -311,7 +323,7 @@ or `/plugin` → **Installed** → Cache Meter → **Update now**. To update aut
 
 ## Configuration
 
-Six options. Set them with `/config` → `cache-meter.<option>`, or in `~/.claude/settings.json` under `pluginConfigs` → `"cache-meter@cache-meter"` (marketplace install) or `"cache-meter@inline"` (loaded with `--plugin-dir` or `CLAUDE_CODE_PLUGIN_DIRS`) → `options`.
+Seven options. Set them with `/config` → `cache-meter.<option>`, or in `~/.claude/settings.json` under `pluginConfigs` → `"cache-meter@cache-meter"` (marketplace install) or `"cache-meter@inline"` (loaded with `--plugin-dir` or `CLAUDE_CODE_PLUGIN_DIRS`) → `options`.
 
 | Option | Values | What it does |
 |---|---|---|
@@ -320,6 +332,7 @@ Six options. Set them with `/config` → `cache-meter.<option>`, or in `~/.claud
 | `turnLine` | `on` (default), `off` | The line under each answer with what it cost and how it used the cache. `off`: no line |
 | `sessionBudget` | `0` (default, off) or dollars, e.g. `5` | A budget for one session, compared with the figure the band shows (spend on an API key, API value on a subscription): the band shows `of $5.00`, turns yellow at 80 % and red at 100 %, and a toast appears once at each. The Health tab shows the share |
 | `expiryNotice` | `off` (default), `on` | `on`: a terminal notification once per cache window when about 10 minutes are left and keepwarm is off – only with a one-hour TTL and at least 10k tokens of context. The Health tab shows how many were sent (a terminal does not confirm delivery), or why one was not (`disabled`, `no-channel`, …) |
+| `limitNotice` | `off` (default), `on` | `on`: a terminal notification through your own channel when a plan limit (5 hours, 7 days) is at least half used and would be full before it resets at the pace since its window started – once per window. The toast in Claude Code comes either way |
 | `animations` | `on` (default), `off` | `on`: in the docked dashboard a small café under the request chart acts out the cache; on the Overview the countdown flashes and its bar shines at each new minute, new request columns grow in, cost and saving count up, and the keepwarm arrow turns while it runs. `off`: none of it – for a calm screen, or a terminal app that leaves traces when parts of the screen redraw |
 
 With `auto`, Cache Meter follows Claude Code's own TTL controls and your plan state ([full order](docs/how-it-works.md#how-the-ttl-is-derived)). On an API key or a cloud provider Claude Code's default is five minutes: set `cacheTtl` to `5m`, or set `promptCacheTtl`.
@@ -333,7 +346,7 @@ With `auto`, Cache Meter follows Claude Code's own TTL controls and your plan st
 |---|---|---|
 | **Reads** | What Claude Code reports to mods: token counts, model, stop reason and server-side tool calls of each request; context fill and its breakdown (Claude Code's free local estimate, including the paths of your CLAUDE.md files and the names of MCP servers, skills and agents); cost as `/cost` shows it; plan-limit percentages; number of prompts and the session's start time; API errors; of each tool call: the tool's name, a short label (file path, or a Bash command's program name) and the length of the result as the model reads it – for MCP tools also counted per server; the type and task description of each subagent, as `$.agent.list()` gives them; Claude Code's own verdict on the cache and its re-write estimate at model switches and resumes; whether the session is fullscreen. Plus the TTL controls `FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL`, `ENABLE_PROMPT_CACHING_1H` and the `promptCacheTtl` setting | The code ([`hooks/register.tsx`](hooks/register.tsx)); `claude plugin validate .` lists every event it hooks and every call it makes. Data sources: [events › Follow a turn](https://code.claude.com/docs/en/plugins/mods/events#follow-a-turn), [reference › Mods API methods](https://code.claude.com/docs/en/plugins/mods/reference#mods-api-methods) (`$.session.usage`, `$.session.turns`), [events › Handle the settings hook events](https://code.claude.com/docs/en/plugins/mods/events#hook-the-settings-hook-events) |
 | **Keeps** | Everything in memory for the session only – gone when it ends, after `/clear`, `/resume` or `/branch`, and when Claude Code relaunches (`/tui` switches renderer that way). Nothing on disk | [interface › Keep state](https://code.claude.com/docs/en/plugins/mods/interface#keep-state) (`$.state` lasts until the session ends or `/clear`, `/resume`, `/branch`); no `$.fs` or `$.store` call in the code – check with `claude plugin validate .` |
-| **Sends** | Nothing on its own. Only when you ask: `/keepwarm` pings and **Count exactly** in the Context tab – through Claude Code, with your credentials, to the provider your session already uses. With `expiryNotice` on, a notification through your own notification channel – no server of the mod's | [api › Call a model](https://code.claude.com/docs/en/plugins/mods/api#call-a-model) (`$.model.fork` uses the session's credentials); `$.session.usage({ breakdown: 'full' })` sends token-count requests (type declaration `SessionUsageArgs`); no `$.http` or `$.process` call in the code; `$.ui.notify` goes through “the person's own notification channel, the one their `preferredNotifChannel` names” (type declaration) |
+| **Sends** | Nothing on its own. Only when you ask: `/keepwarm` pings and **Count exactly** in the Context tab (and, with `expiryNotice` or `limitNotice` on, a notification through your own channel) – through Claude Code, with your credentials, to the provider your session already uses. With `expiryNotice` on, a notification through your own notification channel – no server of the mod's | [api › Call a model](https://code.claude.com/docs/en/plugins/mods/api#call-a-model) (`$.model.fork` uses the session's credentials); `$.session.usage({ breakdown: 'full' })` sends token-count requests (type declaration `SessionUsageArgs`); no `$.http` or `$.process` call in the code; `$.ui.notify` goes through “the person's own notification channel, the one their `preferredNotifChannel` names” (type declaration) |
 | **Costs** | Nothing, except what you start: the **Compact** button runs `/compact` (a summarisation request, as typing it would), and `/keepwarm`: each ping reads your whole context at the model's cache-read price – billed like any request on an API key, counted against your limits on a plan. How cache reads count towards the 5-hour and weekly limits is **not documented**; watch them in the pane. **Count exactly** uses token counting, which is free on the API; whether Claude Code counts it against plan limits is **not documented** | [pricing › Prompt caching](https://platform.claude.com/docs/en/about-claude/pricing#prompt-caching) (cache read 0.1×, 0.05× or 0.025× of the input price); [api › Call a model](https://code.claude.com/docs/en/plugins/mods/api#call-a-model) (“bill to the user's plan, API key, or cloud provider”); [token counting › Pricing and rate limits](https://platform.claude.com/docs/en/build-with-claude/token-counting#pricing-and-rate-limits) (“free to use”) |
 
 <details>
@@ -356,6 +369,7 @@ With `auto`, Cache Meter follows Claude Code's own TTL controls and your plan st
 | `prompt.submit` | Closes its own pane above the prompt when you send a prompt | Nothing – the prompt is not read, changed or dropped |
 | `ui.close` | Notes that you closed its pane, so it doesn't reopen | Nothing – it never keeps a pane open |
 | `ui.fault` | Notes that the café's animation file failed to load or run, and leaves the café out from then on | Nothing – the rest of the pane draws as before |
+| `session.end` | At a `/clear`: reads what the conversation came to (cost, requests, share from the cache, cold re-writes), shown once the new one starts | Nothing – passes the event on; at a real exit nothing is shown |
 | `ui.render` (band, its own pane) | Draws the band – keeping what other mods draw below it – and the `/tokens` pane | Only its own drawing |
 
 `claude plugin validate .` prints this list for the version you have.

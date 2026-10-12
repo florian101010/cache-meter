@@ -12,7 +12,7 @@ Only what Claude Code reports to mods within your session:
 - **Per subagent:** its type and task description, as Claude Code lists it, and its token counts.
 - **At a model switch:** Claude Code's own estimate of what re-writing the context costs, and whether it thinks the cache is warm.
 - **Per session:** context fill and its breakdown – including the paths of your memory files (CLAUDE.md, rules) and the names of MCP servers, skills and agents with their token counts – cost as `/cost` shows it, plan-limit percentages and reset times, the number of prompts, the session's start time, the kinds of API errors a turn ended on, and Claude Code's own verdict on whether the prompt cache is warm.
-- **Settings:** the prompt-cache TTL controls (`FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL`, `ENABLE_PROMPT_CACHING_1H`, `promptCacheTtl`) and its own six options. Claude Code hands a mod the whole merged settings object at once (`$.settings.read`, no per-key read); Cache Meter takes only `promptCacheTtl` from it and keeps nothing else.
+- **Settings:** the prompt-cache TTL controls (`FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL`, `ENABLE_PROMPT_CACHING_1H`, `promptCacheTtl`) and its own seven options. Claude Code hands a mod the whole merged settings object at once (`$.settings.read`, no per-key read); Cache Meter takes only `promptCacheTtl` from it and keeps nothing else.
 - **Your prompts:** when you send one it notes only that you did (to close its pane above the prompt), not the text.
 
 It never reads the text of your prompts, and no files. Claude's answer is only compared with what the turn returned, to keep another mod's line, never kept. Of tool calls it reads only what the list above names: the result's text is measured for its length and dropped; for Bash only a word that looks like a program name becomes the label – anything with `$`, quotes, `;`, `|`, `&` or a leading `-` gives just `Bash`. The line it shows under an answer is its own; the answer is not changed. Whether Claude reads that line is not documented.
@@ -37,6 +37,7 @@ Nothing to the author or anyone else, and no telemetry. Two actions you start �
 
 - **`/keepwarm`:** one small request over your conversation shortly before the cache expires (at most 12 per run), to keep the prompt cache alive.
 - **Expiry notification** (only with the option `expiryNotice` on): one notification per cache window through your own notification channel – the one Claude Code's `preferredNotifChannel` setting names – and your `Notification` settings hooks. Its text holds the time left and the context size, nothing else.
+- **Plan-limit notification** (only with the option `limitNotice` on): one notification per limit window through the same channel, when a plan limit is at least half used and would be full before it resets; its text names the limit, its percentage and the times. Without the option the same words appear only as a toast in Claude Code.
 - **Count exactly** in the `/tokens` Context tab: token-count requests, one per tool and memory file, as `/context` makes them – once, when you press it. Token counting is [free on the API](https://platform.claude.com/docs/en/build-with-claude/token-counting#pricing-and-rate-limits).
 
 ## Children

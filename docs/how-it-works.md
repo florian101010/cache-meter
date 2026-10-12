@@ -228,3 +228,13 @@ The test kit drives a `Client`'s frame clock and size but does not report what t
 | Turning keepwarm arrow | while keepwarm runs: `hooks/spin.tsx`, a `Client` with its own 200 ms frame clock (◜◝◞◟), so hours of keepwarm cost the pane no redraws; without `Client` (or with `animations` off) a still `↻` | while it runs |
 
 The test kit advances the mock clock and reads the drawing in between, so each animation is tested at a midpoint as well as at its end.
+
+## Words when they matter (0.11)
+
+Every one of them states only figures the mod measured; none promises a saving.
+
+- **One large tool result** (`tool.call`, main conversation, interactive): when the result's estimated size (characters ÷ 4, the same estimate as *What the conversation holds*) is at least `max(10k, 2 % of the window)` (`isContextHog`), a toast names the short label (never a raw path) and the size. Once per call.
+- **MCP servers** (Context tab): each server's tokens as a share of the context Claude Code measured (`shareOfRequest`) – its tool definitions go out with every request.
+- **/compact note** (Context tab): when Claude Code's `Messages` category is at least 20k tokens and a quarter of the context (`compactNote`). The wording follows the docs: `/compact` "free[s] up context by summarizing the conversation so far" (commands) and compacting a large context "is itself a large request" (costs). What the summary keeps is not known before, so no saving is named.
+- **Plan limits** (`checkLimits`, after every reading and main request, interactive): when a limit is at least 50 % used and `limitForecast` – the pace since the window started – says it is full before `resetsAt`, one toast per window (`kind@resetsAt`), and with `limitNotice` on a `$.ui.notify`. After a reload in a running session the windows that already qualify are taken silently.
+- **After /clear** (`session.end` with `reason: 'clear'`, then `classic.SessionStart` `clear`): the ended conversation's cost, main requests, share from the cache and cold re-writes are read at `session.end` and shown once the new conversation starts. Whether `$.state` still holds them at that moment is not documented; an empty reading shows nothing. A real exit has nowhere to show anything (`session.end` has a 1.5 s budget and no output).
