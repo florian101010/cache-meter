@@ -15,6 +15,9 @@ Changes for Anthropic's plugin directory, whose validation blocked 0.5.1.
 
 ### Changed
 - Every call on `$` written as `$.noun.method(…)`, and `$` passed only to top-level functions (pane `Raster` lookup, two test helpers), as the directory's checks expect.
+- No parameter named `h` any more: in a `.tsx` file JSX compiles to calls of `h`, and the directory blocked the three `update` callbacks that used it.
+- The `classic.SessionStart`, `classic.StopFailure` and `classic.PostModelSwitch` hooks do their own work first and end with `return next(e)`, the shape the directory reads as leaving the event unchanged.
+- No URLs in code comments and no `$PWD` in the example commands of README, CONTRIBUTING and AGENTS: the directory read them together as an environment value that could be sent to a remote host.
 - README images and brand sources moved to the `assets` branch, so the plugin on `main` holds no image files other than its icon.
 
 ## [0.5.1] – 2026-10-12

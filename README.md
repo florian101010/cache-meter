@@ -197,7 +197,7 @@ Run `/reload-plugins` in an open session, or start a new one. `/plugin` then sho
 
 ```bash
 git clone https://github.com/florian101010/cache-meter.git
-claude --plugin-dir "$PWD/cache-meter"          # for one session
+claude --plugin-dir /absolute/path/to/cache-meter   # for one session (the clone's absolute path)
 ```
 
 To load the clone in every session, add its **absolute** path to `CLAUDE_CODE_PLUGIN_DIRS` in the `env` block of `~/.claude/settings.json` (paths separated by `:`; see [settings and environment variables](https://code.claude.com/docs/en/plugins/mods/reference#settings-and-environment-variables)). Claude Code then loads the clone exactly as it is checked out – keep that checkout on `main` and develop in a separate worktree. While a copy named `cache-meter` is already loaded that way, `--plugin-dir` cannot load a second one (the first wins); see [CONTRIBUTING.md](CONTRIBUTING.md#set-up) for how to try a worktree.

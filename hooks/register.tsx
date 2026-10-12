@@ -5,10 +5,10 @@
 //                         sums, subagents, rate limits, cost, keepwarm.
 // /keepwarm [2h|off]:     pings the cache through $.model.fork shortly before it lapses.
 //
-// Single source of truth for every API fact below: the official docs
-// (https://code.claude.com/docs/en/plugins/mods/overview and its pages) and the type declaration of
-// the running build (.claude-plugin/types/claude-code/index.d.ts) — not memory. Sections cited as
-// "interface § …", "prompt-caching § …" etc. are pages under https://code.claude.com/docs/en/.
+// Single source of truth for every API fact below: the official Claude Code mods documentation and
+// its pages (links in CONTRIBUTING.md) and the type declaration of the running build
+// (.claude-plugin/types/claude-code/index.d.ts) — not memory. Sections cited as "interface § …",
+// "prompt-caching § …" etc. are pages of that documentation.
 //
 // Sources: turn.step (each request's four token counts), session.measure (context, limits, cost),
 // $.session.usage summary (auto-compact point, estimated locally), classic.SessionStart (resume:
@@ -207,11 +207,11 @@ async function recordCheck($: EngineInterface, engineWarm: boolean, source: 'mod
   if (cache === null) return
   const now = await $.clock.now()
   const ourWarm = cacheStatus(cache, now, (await ttlNow($)).ms).kind === 'warm'
-  await update($, healthA, h => ({
-    ...h,
+  await update($, healthA, prev => ({
+    ...prev,
     checks: {
-      agreed: h.checks.agreed + (engineWarm === ourWarm ? 1 : 0),
-      differed: h.checks.differed + (engineWarm === ourWarm ? 0 : 1),
+      agreed: prev.checks.agreed + (engineWarm === ourWarm ? 1 : 0),
+      differed: prev.checks.differed + (engineWarm === ourWarm ? 0 : 1),
       last: { at: now, engineWarm, ourWarm, source },
     },
   }))
@@ -389,7 +389,6 @@ export const register: Register = (on, options) => {
   // (interface § Load a saved value again after /clear). Resume and fork also say how long ago the
   // last response was, so the countdown carries on.
   on('classic.SessionStart', { source: ['clear', 'resume', 'fork'] }, async ($, e, next) => {
-    const result = await next(e)
     await loadTtlConfig($)
     await measureNow($)
     if ((e.source === 'resume' || e.source === 'fork') && e.seconds_since_last_response !== undefined) {
@@ -408,7 +407,7 @@ export const register: Register = (on, options) => {
       await update($, cacheA, () => cache)
     }
 
-    return result
+    return next(e)
   })
 
   // Each model request: the four token counts as the API reported them (events § Follow a turn).
@@ -484,18 +483,18 @@ export const register: Register = (on, options) => {
         ms: t.endedAt === undefined ? null : Math.max(0, t.endedAt - t.startedAt),
       }))
       if (!isNormalStop(stop) || calls.length > 0) {
-        await update($, healthA, h => {
-          const serverTools = { ...h.serverTools }
+        await update($, healthA, prev => {
+          const serverTools = { ...prev.serverTools }
           for (const c of calls) {
             const sum = serverTools[c.name] ?? { count: 0, ms: 0 }
             serverTools[c.name] = { count: sum.count + 1, ms: sum.ms + (c.ms ?? 0) }
           }
 
           return {
-            ...h,
-            stops: stop !== null && !isNormalStop(stop) ? bump(h.stops, stop) : h.stops,
+            ...prev,
+            stops: stop !== null && !isNormalStop(stop) ? bump(prev.stops, stop) : prev.stops,
             serverTools,
-            lastServerTools: calls.length > 0 ? { at: startedAt, calls } : h.lastServerTools,
+            lastServerTools: calls.length > 0 ? { at: startedAt, calls } : prev.lastServerTools,
           }
         })
       }
@@ -507,12 +506,11 @@ export const register: Register = (on, options) => {
   // A turn ended on an error (settings hook event StopFailure, observed only): counted by kind,
   // the main conversation and subagents apart (agent_id is set for a subagent).
   on('classic.StopFailure', async ($, e, next) => {
-    const result = await next(e)
-    await update($, healthA, h =>
-      e.agent_id === undefined ? { ...h, errors: bump(h.errors, e.error) } : { ...h, subErrors: bump(h.subErrors, e.error) },
+    await update($, healthA, prev =>
+      e.agent_id === undefined ? { ...prev, errors: bump(prev.errors, e.error) } : { ...prev, subErrors: bump(prev.subErrors, e.error) },
     )
 
-    return result
+    return next(e)
   })
 
   // A main turn has ended, also when aborted (events § Follow a turn; TurnCompleteInput.isAborted):
@@ -582,7 +580,6 @@ export const register: Register = (on, options) => {
 
   // A real model switch starts a cold cache; the event carries the engine's own TTL and estimate.
   on('classic.PostModelSwitch', async ($, e, next) => {
-    const result = await next(e)
     // Before the cache is set cold below: what Claude Code and Cache Meter each thought of it.
     await recordCheck($, e.prompt_cache_warm, e.source === 'resume' ? 'resume' : 'model')
     await update($, ttlA, () => e.cache_ttl)
@@ -599,7 +596,7 @@ export const register: Register = (on, options) => {
       await update($, measureA, m => (m === null ? m : { ...m, autoCompactWindow: 0 }))
     }
 
-    return result
+    return next(e)
   })
 
   // /tokens toggles. rows: the height asked for above the prompt, default a third (types: PaneOpenArgs.rows);
