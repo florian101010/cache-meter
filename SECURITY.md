@@ -11,7 +11,7 @@ Cache Meter is a [Claude Code mod](https://code.claude.com/docs/en/plugins/mods/
 | Files | none read or written |
 | Network | none of its own. `/keepwarm` calls `$.model.fork` – one request over your own conversation, through Claude Code; after `/keepwarm auto` it does so by itself during breaks (opt-in per session, at most 12 per break, off on a miss). **Count exactly** in the Context tab calls `$.session.usage({ breakdown: 'full' })`, which makes Claude Code count tokens with the API, one request per tool and memory file, as `/context` does – only when you press it. With the options `expiryNotice` or `limitNotice` on, `$.ui.notify` raises a notification through your own notification channel |
 | Clipboard | only on `/tokens report`: a Markdown summary through `$.ui.copy`, the way `/copy` writes – never on its own |
-| Session data | reads `$.session.usage` (context fill, the breakdown as Claude Code's local estimate, cost, plan limits, start time), `$.session.turns` and `$.agent.list` (each subagent's type and task description) |
+| Session data | reads `$.session.usage` (context fill, the breakdown as Claude Code's local estimate, cost, plan limits, start time), `$.session.turns`, `$.session.surfaces` (whether a terminal draws, for the `/tui fullscreen` tip) and `$.agent.list` (each subagent's type and task description) |
 | Processes | none |
 | Environment | reads `FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL`, `ENABLE_PROMPT_CACHING_1H`; writes nothing |
 | Settings | reads the merged settings once per session start or reset, and uses only `promptCacheTtl` |

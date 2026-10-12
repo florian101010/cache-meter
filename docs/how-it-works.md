@@ -11,9 +11,9 @@ This page describes the design of the mod for people who want to change it or ch
 | `turn.step` (async generator) | the four token counts of each model request; main conversation vs. subagent via `e.agentId`. Before a main request: `e.model` and `e.effort` against the last main request – a change that splits a warm cache (≥ 10k tokens) gets a toast. `/effort` and `/fast` fire no `config.set` and have no `/config` row (measured with 2.1.296: the rows are `model`, `thinking`, `switchModelsOnFlag`), so this is the earliest point; `/model` is caught at `PreModelSwitch`. Per subagent: summed under its id, named once from `$.agent.list()` (type and description) | *events › Follow a turn*; types: `TurnStepInput.model`/`effort`, `TurnStepResult.usage`, `AgentInfo`; prompt-caching › *Changing effort level* (5.5 models and Fable 5.1 keep the cache) |
 | `turn.start` | the session cost (`$.session.usage().cost.usd`) when a turn starts, keyed by `turnId` | *events › Follow a turn*; types: `SessionCost` (sums every priced response, subagents included) |
 | `turn.complete` | resets the count of running main requests, also after an abort (`isAborted`); for a main turn that sent a request and was not aborted, returns `{ text }` – the line under the answer: cost since `turn.start`, requests counted in `turn.step` by `turnId`, `e.usage` totals. Option `turnLine` | *reference › Turns* (“`{ text }` to show a line under the answer”); types: `TurnCompleteResult` |
-| `tool.call` (every tool) | after `await next(e)`, unless denied: an MCP call (`mcp__…`) is counted by wire name; for the main conversation (no `agentId`) the result's size is estimated as characters ÷ 4 of core's `text` ("the result as the model reads it") and summed under the tool and a label from `toolLabel` (file path, `~`-shortened; Bash: first word that is not `VAR=value`, last path segment). No `text` (another mod's own answer): not counted. Returns the result unchanged | types: `ToolCallResult.text`, `AgentLoop.agentId`; *events › Guard or change a tool call* |
+| `tool.call` (every tool) | after `await next(e)`, unless denied: an MCP call (`mcp__…`) is counted by wire name; for the main conversation (no `agentId`) the result's size is estimated as characters ÷ 4 of core's `text` ("the result as the model reads it") and summed under the tool and a label from `toolLabel` (file path, `~`-shortened; Bash: first word that is not `VAR=value`, last path segment). No `text` (another mod's own answer): not counted. Returns the result unchanged; a single large result raises a toast (*One large tool result* below) | types: `ToolCallResult.text`, `AgentLoop.agentId`; *events › Guard or change a tool call* |
 | `classic.PreModelSwitch` | while `prompt_cache_warm` and switching to another model with ≥ 10k context: a toast with `context_tokens`, `estimated_cache_write_usd` and the countdown; returns `next(e)`, never a decision – `ask` is a refusal on `/config` and `set_model`, and the event's `command` source includes the `/config` Model row | hooks › *PreModelSwitch decision control*; prompt-caching › *Switching models* (Claude Code confirms by itself while the cache is warm) |
-| `session.measure` | context fill, plan limits, cost after each turn | *reference › Session*; types: `SessionMeasureInput` |
+| `session.measure` | context fill, plan limits, cost after each turn; then `checkLimits` (plan-limit warning) | *reference › Session*; types: `SessionMeasureInput` |
 | `session.compact` | a real compaction (not `precompute`, not a subagent) empties the cache | types: `SessionCompactInput` |
 | `classic.PostModelSwitch` | a real switch (not `source: 'resume'`, not to the same model) leaves the cache cold; carries `cache_ttl` and `estimated_cache_write_usd` | types: `PostModelSwitchHookInput` |
 | `ui.render` `AbovePrompt` | the band; puts `await next(e)` below its own row so other mods' content stays | *interface › Pick where to draw › Band above the prompt* |
@@ -25,7 +25,7 @@ This page describes the design of the mod for people who want to change it or ch
 | `session.end` with `reason: 'clear'` | puts together the ended conversation's figures for a toast in the next one (see *After /clear* below) | *reference › Session*; types: `SessionEndInput` |
 | `ui.fault` | a surface module (the café or the turning keepwarm arrow, told apart by `e.module`) failed to load, draw or run: that one is left out from then on, the reason goes to the debug log (`$.ui.log`, `to: 'debug'`) | *reference › Interface* (v2.1.289+); types: `UiFaultInput` |
 
-Calls (as `claude plugin validate` lists them): `$.agent.list`, `$.clock.after`, `$.clock.every`, `$.clock.now`, `$.command.register`, `$.env.get` (three literal names), `$.model.fork`, `$.ui.log` (the reason of a failed animation, to the debug log), `$.session.surfaces` (whether a terminal draws: the `/tui fullscreen` tip), `$.session.compact`, `$.session.turns`, `$.session.usage`, `$.settings.read`, `$.state` (through `atom`/`read`/`update`), `$.ui.close`, `$.ui.copy`, `$.ui.invalidate`, `$.ui.notify`, `$.ui.open`, `$.ui.panes`, `$.ui.resolve`, `$.ui.toast`. No `$.fs`, `$.store`, `$.http` or `$.process`.
+Calls (as `claude plugin validate` lists them): `$.agent.list`, `$.clock.after`, `$.clock.every`, `$.clock.now`, `$.command.register`, `$.env.get` (three literal names), `$.model.fork`, `$.ui.log` (reasons of failures – a failed animation, a notification not sent, the `/clear` summary – to the debug log), `$.session.surfaces` (whether a terminal draws: the `/tui fullscreen` tip), `$.session.compact`, `$.session.turns`, `$.session.usage`, `$.settings.read`, `$.state` (through `atom`/`read`/`update`), `$.ui.close`, `$.ui.copy`, `$.ui.invalidate`, `$.ui.notify`, `$.ui.open`, `$.ui.panes`, `$.ui.resolve`, `$.ui.toast`. No `$.fs`, `$.store`, `$.http` or `$.process`.
 
 ## State
 
@@ -66,7 +66,7 @@ A main request counts as a cold rewrite when all of these hold:
 2. it wrote at least 10,000 tokens to the cache, and
 3. it wrote more than it read – so a wrong TTL assumption cannot turn a warm request into a "cold" one.
 
-The first request of a new session and the first after `/compact` or `/clear` find no cache at all and are not counted. The pane shows the last five with their cause; the totals cover the whole session. After a cold rewrite caused by a pause in this session, a toast suggests `/keepwarm` (10 s), unless keepwarm is already running or the session is not interactive.
+The first request of a new session and the first after `/compact` or `/clear` find no cache at all and are not counted. The pane shows the last three with their cause; the totals cover the whole session. After a cold rewrite caused by a pause in this session, a toast suggests `/keepwarm` (10 s), unless keepwarm is already running or the session is not interactive.
 
 ## `/keepwarm`
 
@@ -125,7 +125,7 @@ The surface seats the pane, not the mod (*interface › Pick where to draw*): do
 
 ## Context tab
 
-After each turn the `session.measure` hook reads `$.session.usage({ breakdown: 'summary' })` – Claude Code's local estimate, which sends no request (types: `SessionUsageArgs`) – and keeps the heaviest items of `context.breakdown` (types: `SessionContextBreakdown`): categories of kind `used`, memory files, loaded MCP tools summed per `serverName` (tools with `isLoaded: false` sit behind tool search and are only counted), agents, and `skills.includedSkills` of `totalSkills`. **Count exactly** calls `breakdown: 'full'`, which sends one token-count request per tool and memory file as `/context` does – only on a press, never on a timer. The card says which one it shows (`estimate` or `exact`) and when. `ContextCategory.color` is not used: its format is undocumented, and an unknown color would make the whole tree invalid.
+After each turn the `session.measure` hook reads `$.session.usage({ breakdown: 'summary' })` – Claude Code's local estimate, which sends no request (types: `SessionUsageArgs`) – and keeps the heaviest items of `context.breakdown` (types: `SessionContextBreakdown`): categories of kind `used`, memory files, loaded MCP tools summed per `serverName` (tools with `isLoaded: false` sit behind tool search and are only counted), agents, and `skills.includedSkills` of `totalSkills`. **Count exactly** calls `breakdown: 'full'`, which sends one token-count request per tool and memory file as `/context` does – only on a press, never on a timer. The card says which one it shows (`estimate` or `exact`) and when. `ContextCategory.color` (a theme key, types: `ContextCategory`) is not used: the pane colours by its own scale, the same in every tab.
 
 ## Health tab
 
@@ -133,7 +133,7 @@ After each turn the `session.measure` hook reads `$.session.usage({ breakdown: '
 |---|---|
 | Age, prompts | `$.session.usage().startedAt` (`/clear` starts it over), `$.session.turns()`, read in `session.measure` |
 | Cost, $/h, $/prompt | `cost.usd` (as `/cost`) over age and prompts; labelled *API value* when plan limits are reported (a subscription: `rateLimits` is empty off one, types `SessionMeasureInput`), *spent* otherwise |
-| Stops | `turn.step` result `stopReason` of main requests; `end_turn`, `tool_use` and none are normal, the rest is counted (*events › Follow a turn*) |
+| Stops | `turn.step` result `stopReason` of main requests; `end_turn`, `tool_use` and none are normal, the rest is counted (types: `TurnStopReason`) |
 | Errors | settings hook event `StopFailure` (`classic.StopFailure`, observed with `next(e)`), its `error`; `agent_id` set = subagent, counted apart |
 | Server | `turn.step` result `serverToolUses` (v2.1.290+): tool calls the API ran itself, such as the advisor; no `tool.call` fires for them. Duration = `endedAt − startedAt`, `–` without `endedAt` |
 | Warm miss | a main request warm by the countdown (cache seen, not expired) that wrote ≥ 10k tokens and read less than it wrote: model, effort, fast mode or the tool definitions changed (prompt-caching › *Actions that invalidate the cache*; editing CLAUDE.md mid-session keeps the cache, › *Actions that keep the cache*), or the real TTL is shorter than the one assumed. The pause before the last one is shown to tell the two apart; the prompt sections are not compared |
@@ -144,7 +144,7 @@ After each turn the `session.measure` hook reads `$.session.usage({ breakdown: '
 
 ## Band layout
 
-The band is one row sized to `e.props.bodyColumns`. The width of every segment is computed first; on a narrow terminal it drops, in order: the cost segment (`API value $X` on a subscription, `spent $X` otherwise, hidden at $0), the re-write hint (or `· /keepwarm?` in the last stretch), the auto-compact note, then the bar (minimum six cells). The `[ Compact ]` button is hidden while `e.props.isWorking` and while the `/tokens` pane is placed (`$.ui.panes()`), so the first Ctrl+X Tab reaches the pane; opening and closing the pane redraws the band. The weather symbols are single-width characters, not emoji, so the row lines up in every terminal font.
+The band is one row sized to `e.props.bodyColumns`. The width of every segment is computed first; on a narrow terminal it drops, in order: the ping heartbeat (`· ping ok · … read`) and the `cold: good time to` note – each shown only when cost and the auto-compact point fit beside it – then the cost segment (`API value $X` on a subscription, `spent $X` otherwise, hidden at $0), the re-write hint (or `· /keepwarm?` in the last stretch), the auto-compact note, then the bar (minimum six cells). The `[ Compact ]` button is hidden while `e.props.isWorking` and while the `/tokens` pane is placed (`$.ui.panes()`), so the first Ctrl+X Tab reaches the pane; opening and closing the pane redraws the band. The weather symbols are single-width characters, not emoji, so the row lines up in every terminal font.
 
 ## Tests
 
@@ -159,7 +159,7 @@ With the option `cacheTtl` set to `auto`, the TTL is derived in this order, foll
 3. `CLAUDE_CODE_PROMPT_CACHE_TTL` (`5m` / `1h`)
 4. the `promptCacheTtl` setting (`5m` / `1h`)
 5. `ENABLE_PROMPT_CACHING_1H=1` → 1h
-6. a plan limit at 100 % or more – Claude Code then draws usage credits and drops to 5m → 5m
+6. a plan limit at 100 % or more → 5m – an assumption: Claude Code drops to 5m once it draws usage credits beyond the limit (*prompt caching › Which TTL each request gets*), which a mod cannot see; the limit stands in for it
 7. the value Claude Code reported on the last model switch
 8. otherwise 60m (subscription within plan usage)
 
@@ -173,7 +173,7 @@ With the option `cacheTtl` set to `auto`, the TTL is derived in this order, foll
 | Countdown after `--resume` | `seconds_since_last_response` counts from the end of the last response, so the countdown is optimistic by that response's duration. If Claude Code reports `prompt_cache_likely_expired`, the cache is shown cold |
 | Dollar amounts | only Claude Code's own estimates and the `/cost` total – no price table of its own |
 | Other invalidations | a model switch, an MCP or plugin change can invalidate the cache before the TTL ends ([actions that invalidate the cache](https://code.claude.com/docs/en/prompt-caching#actions-that-invalidate-the-cache)) – visible as a low hit rate |
-| Subagents | have their own caches with a five-minute TTL; counted in the totals, not in the countdown |
+| Subagents | have their own caches, with a five-minute TTL by default (one hour with `ENABLE_PROMPT_CACHING_1H`); counted in the totals, not in the countdown |
 
 ## Limit forecast
 
@@ -236,7 +236,7 @@ The test kit advances the mock clock and reads the drawing in between, so each a
 
 Every one of them states only figures the mod measured; none promises a saving.
 
-- **One large tool result** (`tool.call`, main conversation, interactive): when the result's estimated size (characters ÷ 4, the same estimate as *What the conversation holds*) is at least `max(10k, 2 % of the window)` (`isContextHog`), a toast names the short label (never a raw path) and the size. Once per call, and at most one such toast per 20 s (`HOG_GAP_MS`).
+- **One large tool result** (`tool.call`, main conversation, interactive): when the result's estimated size (characters ÷ 4, the same estimate as *What the conversation holds*) is at least `max(10k, 2 % of the window)` (`isContextHog`), a toast names the label as the Context tab shows it (`~`-shortened, masked) and the size. Once per call, and at most one such toast per 20 s (`HOG_GAP_MS`).
 - **MCP servers** (Context tab): each server's tokens as a share of the context Claude Code measured (`shareOfRequest`) – its tool definitions go out with every request.
 - **/compact note** (Context tab): when Claude Code's `Messages` category is at least 20k tokens and a quarter of the context (`compactNote`). The wording follows the docs: `/compact` "free[s] up context by summarizing the conversation so far" (commands) and compacting a large context "is itself a large request" (costs). What the summary keeps is not known before, so no saving is named.
 - **Plan limits** (`checkLimits`, after every reading and main request, interactive): when a limit is at least 50 % used and `limitForecast` – the pace since the window started – says it is full before `resetsAt`, one toast per window (`isWarnedWindow`: the same kind and a reset time within a minute – the module list survives `/clear`, which resets `limitStart`, so `/clear` does not warn again), and with `limitNotice` on a `$.ui.notify`; a notification not sent or refused leaves the toast and a line in the debug log. The forecast needs 10 minutes of readings in the window (`FORECAST_MIN_MS`). After a reload in a running session the windows that already qualify are taken silently – `isInteractive` is set first in `session.start` for that.
