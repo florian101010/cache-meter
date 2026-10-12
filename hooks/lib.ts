@@ -773,3 +773,41 @@ export function cafeState(
 
   return isLow ? 'last' : 'warm'
 }
+
+/** Ease-out (cubic) of a progress 0…1: fast first, gentle at the end. */
+export function easeOut(t: number): number {
+  const c = Math.max(0, Math.min(1, t))
+
+  return 1 - (1 - c) ** 3
+}
+
+/** How far an animation that started at `start` and lasts `ms` has come at `now`: 0…1, eased. */
+export function progress(start: number, now: number, ms: number): number {
+  return ms <= 0 ? 1 : easeOut((now - start) / ms)
+}
+
+/** A value on its way from `from` to `to`, at an eased progress `p` (0…1). */
+export function tween(from: number, to: number, p: number): number {
+  return from + (to - from) * Math.max(0, Math.min(1, p))
+}
+
+/** A 24-bit colour mixed towards white by `amount` (0…1); the terminal-default marker stays as it is. */
+export function lighten(color: number, amount: number): number {
+  if (color === DEFAULT_COLOR) return color
+  const mix = (v: number) => Math.round(v + (255 - v) * amount)
+
+  return (mix((color >> 16) & 0xff) << 16) | (mix((color >> 8) & 0xff) << 8) | mix(color & 0xff)
+}
+
+/**
+ * A shine passing over a one-row meter: the cell at `at` (and its neighbours, a little less) drawn
+ * lighter. `at` outside the row leaves it unchanged.
+ */
+export function shineCells(cells: readonly Cell[], at: number): Cell[] {
+  return cells.map((cell, x) => {
+    const d = Math.abs(x - at)
+    if (d > 1) return cell
+
+    return [cell[0], lighten(cell[1], d === 0 ? 0.6 : 0.3), cell[2]]
+  })
+}

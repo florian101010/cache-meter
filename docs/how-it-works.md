@@ -208,12 +208,23 @@ Option `sessionBudget` (dollars, `0` = off) against `cost.usd`, checked after ev
 
 `session.measure` fires after each turn (*reference › Session*), so a long first turn used to show no context fill and no cost. After every main request `turn.step` now reads the plain `$.session.usage()` – "the plain call costs nothing" (types: `$.session.usage`) – and updates `measure`'s fill, tokens, cost, plan limits and their window starts, then checks the session budget. An empty limit list ("empty when none has a reading", types) keeps the last limits and window starts instead of wiping them. The context history, the prompt count and the auto-compact point stay per turn, from `session.measure`, so the auto-compact forecast keeps counting prompts. Whether Claude Code has already added the newest response's cost at that moment is not documented; at the latest the next request or the end of the turn brings it.
 
-## The café and the minute flash
+## Animations: the café, the minute flash and the short ones
 
-Option `animations` (default `on`). Both live in the Overview only.
+Option `animations` (default `on`). All of them live in the Overview only; none in the band.
 
 **The café** is a `Client` (interface › *Build a tree from elements*): `hooks/cafe.tsx`, a surface module the engine reads off the `module: "./cafe.tsx"` literal – it is not a hooks module and is not listed in `hooks.json`. It runs on the drawing side with its own frame clock (`surface.every`, 250 ms, started once while its state is still undefined) and gets no mods API; the pane hands it one word as props, from `cafeState` in `lib.ts`: `ping` while a keepwarm heartbeat shows, `brewing` for 12 s after a request wrote a fresh cache, `working` while a turn is open, then `cold`, `empty`, `last` or `warm` from the countdown. A new word reaches the running instance with its state kept (`ClientProps.props`). It is drawn only when the pane is docked (`placement: 'dock'`), where the outer Box takes the room's height (`minHeight` = `scroll.bodyRows`) and the café grows into what the cards leave (`flexGrow: 1`). It reads its own size (`surface.rows`, `surface.columns`): with fewer than 7 rows or 20 columns it draws a single line, so the region never shows half a figure; with no room left it is that one line. A tab switch, closing the pane or `animations: off` removes the Client, which ends its timer. Its redraws are its own region's (`setState`), not the pane hook's; whether they count against the pane's redraw limit is undocumented (reference › *Limits* names only `$.ui.invalidate`). If the file fails to load, draw or run, `ui.fault` marks it broken and the pane leaves it out from then on; the engine draws the pane again by itself.
 
 **The minute flash:** when the Overview draws a different minute than it last drew, the digits take the theme's `text` colour for 450 ms, then one `$.clock.after` redraws them in the state colour. Not on the first draw, after a reload (the module's memory starts empty), on another tab, or while the last minute counts seconds. The change is noticed where the digits are drawn, so it flashes whatever redraw shows the new minute.
 
 The test kit drives a `Client`'s frame clock and size but does not report what the module draws, so `sceneRows` (pure) and the module function (with stand-in elements) are tested directly; how the scene looks docked is checked by hand.
+
+**The short ones** share one redraw train: `animate(until)` asks for a redraw every 100 ms until the latest end any of them asked for, one `$.clock.after` chain at a time, so overlapping animations never stack timers – at most 10 redraws a second, under the 30 of the shown pane (reference › *Limits*). Each animation keeps only its start time; the drawing reads its eased progress off the clock (`progress`, `tween` in `lib.ts`). None starts on the first draw, after a reload or after a tab switch, because each compares with the value the Overview last drew (kept only while the Overview is drawn):
+
+| Animation | When | Length |
+|---|---|---|
+| Shine over the countdown bar | with the minute flash, a lightened cell (and its neighbours, a little less) runs across the bar (`shineCells`) | 600 ms |
+| New request column | the newest column's height grows from 0 to its share; only the height, so the hover areas stay | 450 ms |
+| Cost and cache saving | count from the figure on screen – mid-count too – to the new one | 600 ms |
+| Turning keepwarm arrow | while keepwarm runs: `hooks/spin.tsx`, a `Client` with its own 200 ms frame clock (◜◝◞◟), so hours of keepwarm cost the pane no redraws; without `Client` (or with `animations` off) a still `↻` | while it runs |
+
+The test kit advances the mock clock and reads the drawing in between, so each animation is tested at a midpoint as well as at its end.

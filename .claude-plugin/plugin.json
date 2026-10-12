@@ -72,7 +72,7 @@
     "animations": {
       "type": "string",
       "title": "Animations",
-      "description": "on: in the docked dashboard (fullscreen renderer) a small café under the request chart acts out the cache – a barista sips while it is warm, watches the clock in the last stretch, naps once it is cold and tops up on a keepwarm ping – and the big countdown flashes once at each new minute. The café runs four frames a second only while the Overview is on screen and gets nothing but the cache's state. off: no café, no flash.",
+      "description": "on: in the docked dashboard (fullscreen renderer) a small café under the request chart acts out the cache – a barista sips while it is warm, watches the clock in the last stretch, naps once it is cold and tops up on a keepwarm ping. On the Overview the countdown flashes and its bar shines at each new minute, new request columns grow in, cost and saving count up, and the keepwarm arrow turns while it runs – each a fraction of a second, the café four frames a second, only while the Overview is on screen. The animation files get nothing but the cache's state. off: none of it.",
       "options": [
         "on",
         "off"

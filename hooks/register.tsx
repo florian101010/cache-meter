@@ -79,6 +79,9 @@ import {
   stopLabel,
   errorLabel,
   cafeState,
+  progress,
+  shineCells,
+  tween,
 } from './lib'
 import type { BreakdownLike, Mark } from './lib'
 
@@ -175,8 +178,28 @@ let brewedAt: number | null = null
 // The countdown's minute as last drawn, and until when its digits flash after it changed.
 let shownMinute: string | null = null
 let flashUntil = 0
-let isFlashPending = false
+// Short animations on the Overview (option animations): one redraw train for all of them, every
+// ANIM_FRAME_MS until the last one ends – far under the 30 redraws a second of the shown pane
+// (reference › Limits). Each animation keeps only its start; the drawing reads progress off the clock.
+let animEnd = 0
+let isAnimPending = false
+// The shine over the countdown bar, started with the minute flash.
+let shineStart = 0
+// The newest request column grows in: how many requests the Overview last drew, and when one came.
+let shownSteps: number | null = null
+let growStart = 0
+// Cost and the cache saving count to a new value: the value last drawn, where the count started.
+let shownUsd: number | null = null
+let usdFrom = 0
+let usdStart = 0
+let shownSaving: number | null = null
+let savingFrom = 0
+let savingStart = 0
 const FLASH_MS = 450
+const ANIM_FRAME_MS = 100
+const SHINE_MS = 600
+const GROW_MS = 450
+const COUNT_MS = 600
 // How long the café brews after a request wrote a fresh cache.
 const BREW_MS = 12_000
 // Opening the dashboard as a sidebar by itself (option autoSidebar): only once the band has been drawn
@@ -717,7 +740,17 @@ export const register: Register = (on, options) => {
   brewedAt = null
   shownMinute = null
   flashUntil = 0
-  isFlashPending = false
+  animEnd = 0
+  isAnimPending = false
+  shineStart = 0
+  shownSteps = null
+  growStart = 0
+  shownUsd = null
+  usdFrom = 0
+  usdStart = 0
+  shownSaving = null
+  savingFrom = 0
+  savingStart = 0
 
   on('session.start', async ($, e, next) => {
     const result = await next(e)
@@ -1308,6 +1341,8 @@ export const register: Register = (on, options) => {
     seat = e.props.placement
     // Raster (colored cells) is drawn by the terminal only (reference › Elements); elsewhere text.
     const Raster = 'Raster' in elements ? elements.Raster : null
+    // Client (a surface module's region) is drawn by the terminal and the Desktop app (reference › Elements).
+    const Client = 'Client' in elements ? elements.Client : null
     const steps = await read($, stepsA)
     const totals: Totals = await read($, totalsA)
     const measure = await read($, measureA)
@@ -1334,11 +1369,12 @@ export const register: Register = (on, options) => {
     const fullIn = Math.max(16, cols - 4)
 
     // A one-row meter: Raster cells in the terminal, the same runs as colored text elsewhere.
-    const gauge = (key: string, width: number, fraction: number, fill: number, theme: string, marks: readonly Mark[] = []) => {
+    const gauge = (key: string, width: number, fraction: number, fill: number, theme: string, marks: readonly Mark[] = [], shineAt: number | null = null) => {
       const runs = meterRuns(width, fraction, marks)
+      const cells = meterCells(runs, fill, marks)
 
       return Raster ? (
-        <Raster key={key} columns={width} rows={1} cells={rasterCells(meterCells(runs, fill, marks))} />
+        <Raster key={key} columns={width} rows={1} cells={rasterCells(shineAt === null ? cells : shineCells(cells, shineAt))} />
       ) : (
         <Text wrap="truncate-end">
           {runs.map(r => (
@@ -1361,10 +1397,8 @@ export const register: Register = (on, options) => {
     const minuteNow = animations && tab === 'overview' && isWarm && !isSeconds ? number : null
     if (minuteNow !== null && shownMinute !== null && minuteNow !== shownMinute) {
       flashUntil = now + FLASH_MS
-      if (!isFlashPending) {
-        isFlashPending = true
-        $.clock.after(FLASH_MS + 50, () => endFlash($))
-      }
+      shineStart = now
+      animate($, now + Math.max(FLASH_MS, SHINE_MS) + 50)
     }
     shownMinute = minuteNow
     const isFlash = minuteNow !== null && now < flashUntil
@@ -1422,7 +1456,16 @@ export const register: Register = (on, options) => {
             </Text>
           </Box>
         </Box>
-        {gauge('countdown', leftIn, isWarm ? remaining / ttl.ms : 0, isWarm ? (isLow ? FILL.low : FILL.warm) : FILL.cold, stateColor, pingMarks)}
+        {gauge(
+          'countdown',
+          leftIn,
+          isWarm ? remaining / ttl.ms : 0,
+          isWarm ? (isLow ? FILL.low : FILL.warm) : FILL.cold,
+          stateColor,
+          pingMarks,
+          // The shine runs once across the bar with the minute flash.
+          minuteNow !== null && now < shineStart + SHINE_MS ? Math.floor(progress(shineStart, now, SHINE_MS) * (leftIn + 2)) - 1 : null,
+        )}
         {status.kind === 'expired' && rewriteTokens > 0 && (
           <Text color="warning" wrap="truncate-end">
             next message re-writes ≈ {stake}
@@ -1442,9 +1485,11 @@ export const register: Register = (on, options) => {
     const keepCard = (
       <Box borderStyle="round" borderColor="claude" borderDimColor={!isKeeping} paddingX={1} flexDirection="column">
         <Box flexDirection="row" justifyContent="space-between">
+          {/* While keepwarm runs the arrow turns (option animations), in a Client of its own. */}
+          {isKeeping && animations && Client !== null && <Client key="keep-spin" module="./spin.tsx" width={1} />}
           <Text wrap="truncate-end">
             <Text color="claude" bold>
-              {isKeeping ? '↻ Keepwarm on' : '↻ Keepwarm'}
+              {isKeeping && animations && Client !== null ? ' Keepwarm on' : isKeeping ? '↻ Keepwarm on' : '↻ Keepwarm'}
             </Text>
             <Text dimColor>
               {isKeeping && keep.until !== null ? ` until ${hhmm(keep.until)}` : ` off${keep.pings > 0 && tier !== 'narrow' ? ` · last run ${keep.pings} pings` : ''}`}
@@ -1518,6 +1563,27 @@ export const register: Register = (on, options) => {
     // What caching saved: every input token at the base price against what reads and writes cost,
     // with the last request's model and the current TTL for the whole session (README › Pane).
     const saving = cacheSaving(totals.main, readMultiplier(steps.at(-1)?.model ?? ''), writeMultiplier(ttl.ms))
+    // Cost and saving count to a new value on the Overview (option animations): from what was on screen
+    // – mid-count too – to the new figure; not on the first draw, after a reload or on another tab.
+    const isCounting = animations && tab === 'overview'
+    const usdNow = measure?.usd ?? null
+    if (isCounting && usdNow !== null && shownUsd !== null && usdNow !== shownUsd) {
+      usdFrom = tween(usdFrom, shownUsd, progress(usdStart, now, COUNT_MS))
+      usdStart = now
+      animate($, now + COUNT_MS + 50)
+    }
+    shownUsd = isCounting ? usdNow : null
+    const usdShown = usdNow === null || !isCounting || now >= usdStart + COUNT_MS ? usdNow : tween(usdFrom, usdNow, progress(usdStart, now, COUNT_MS))
+    if (!isCounting || usdNow === null) usdFrom = usdNow ?? 0
+    if (isCounting && saving !== null && shownSaving !== null && saving !== shownSaving) {
+      savingFrom = tween(savingFrom, shownSaving, progress(savingStart, now, COUNT_MS))
+      savingStart = now
+      animate($, now + COUNT_MS + 50)
+    }
+    shownSaving = isCounting ? saving : null
+    const savingShown =
+      saving === null || !isCounting || now >= savingStart + COUNT_MS ? saving : Math.round(tween(savingFrom, saving, progress(savingStart, now, COUNT_MS)))
+    if (!isCounting || saving === null) savingFrom = saving ?? 0
     const errorCount = Object.values(health.errors).reduce((a, n) => a + n, 0)
     const stopCount = Object.values(health.stops).reduce((a, n) => a + n, 0)
     const issues = [
@@ -1537,9 +1603,9 @@ export const register: Register = (on, options) => {
               Session
             </Text>
           </Box>
-          {saving !== null && (
+          {saving !== null && savingShown !== null && (
             <Text bold color={saving >= 0 ? 'success' : 'warning'} wrap="truncate-end">
-              {saving >= 0 ? `cache saved ${saving}%${tier === 'narrow' ? '' : ' of input cost'}` : `cache cost +${-saving}%`}
+              {savingShown >= 0 ? `cache saved ${savingShown}%${tier === 'narrow' ? '' : ' of input cost'}` : `cache cost +${-savingShown}%`}
             </Text>
           )}
         </Box>
@@ -1550,7 +1616,7 @@ export const register: Register = (on, options) => {
           <Text dimColor>
             {totals.mainSteps} requests{historySince === null ? '' : ` since ${hhmm(historySince)}`} ·{' '}
           </Text>
-          <Text bold>{measure?.usd == null ? '–' : `${isPlan(measure) ? '≈ ' : ''}$${measure.usd.toFixed(2)}`}</Text>
+          <Text bold>{usdShown === null ? '–' : `${isPlan(measure) ? '≈ ' : ''}$${usdShown.toFixed(2)}`}</Text>
           <Text dimColor>{measure?.usd == null ? '' : costLabel(measure, tier !== 'narrow')}</Text>
         </Text>
         {totals.subSteps > 0 && (
@@ -1625,14 +1691,24 @@ export const register: Register = (on, options) => {
     const shown = steps.slice(-slots)
     const last = steps.at(-1)
     const lastHit = last === undefined ? null : hitPct(last)
-    const columns = shown.map(s => {
+    // The newest request column grows in on the Overview (option animations); not on the first draw.
+    const isGrowing = animations && tab === 'overview'
+    if (isGrowing && shownSteps !== null && steps.length > shownSteps) {
+      growStart = now
+      animate($, now + GROW_MS + 50)
+    }
+    shownSteps = isGrowing ? steps.length : null
+    const grow = isGrowing && now < growStart + GROW_MS ? progress(growStart, now, GROW_MS) : 1
+    const columns = shown.map((s, i) => {
       const all = s.input + s.read + s.write
       const hit = hitPct(s) ?? 100
 
       // The first write of a cache (session start, after /compact) is not a loss: drawn in blue.
       const color = s.kind === 'first' ? FILL.context : hit >= 80 ? HEALTH.good : hit >= 50 ? HEALTH.fair : HEALTH.poor
 
-      return { share: all > 0 ? (s.input + s.write) / all : 0, color }
+      const share = all > 0 ? (s.input + s.write) / all : 0
+
+      return { share: i === shown.length - 1 ? share * grow : share, color }
     })
     const requestsCard = (
       <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="column">
@@ -2053,7 +2129,6 @@ export const register: Register = (on, options) => {
 
     // The café under the request chart (option animations): only docked, where the pane has the room's
     // height; the outer Box takes it, and the café grows into what the cards leave (BoxProps.flexGrow).
-    const Client = 'Client' in elements ? elements.Client : null
     const showCafe = animations && !isCafeBroken && Client !== null && e.props.placement === 'dock' && tab === 'overview'
 
     return (
@@ -2223,9 +2298,23 @@ function columnDetail(s: Step, width: number): string {
   return text.padEnd(width)
 }
 
-// The countdown's flash ends: one redraw after it, at most one pending at a time.
-function endFlash($: EngineInterface) {
-  isFlashPending = false
+// Keeps the Overview redrawing every ANIM_FRAME_MS until `until` (the latest end asked for); one train
+// at a time, so animations that overlap share it instead of stacking timers.
+function animate($: EngineInterface, until: number) {
+  if (!animations) return
+  animEnd = Math.max(animEnd, until)
+  if (isAnimPending) return
+  isAnimPending = true
+  $.clock.after(ANIM_FRAME_MS, () => animTick($))
+}
+
+async function animTick($: EngineInterface) {
   $.ui.invalidate('ui.render')
+  const now = await $.clock.now()
+  if (now < animEnd) {
+    $.clock.after(ANIM_FRAME_MS, () => animTick($))
+  } else {
+    isAnimPending = false
+  }
 }
 

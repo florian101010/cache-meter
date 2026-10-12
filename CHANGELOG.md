@@ -8,7 +8,8 @@ A café that acts out the cache.
 
 ### Added
 - **The café** (option `animations`, on by default): docked beside the chat, the room under the request chart shows a pixel barista (orange, with a brown cap and a white apron – a figure of its own) and a cup – stirring while Claude works, coffee dripping into the cup when a fresh cache is written, steam and a sip while it is warm, thin steam and a watched clock in the last stretch, a puff on a keepwarm ping, a grey cup and a nap once it is cold. A separate surface module (`hooks/cafe.tsx`, a `Client`) with its own frame clock at four frames a second, only while the Overview is on screen; it gets nothing but the cache's state word. With too little room, one line.
-- **Minute flash:** the big countdown lights up once at each new minute.
+- **Minute flash:** the big countdown lights up once at each new minute, and a shine runs across its bar.
+- **Short animations on the Overview:** a new request column grows in from below, cost and the cache saving count up to a new figure, and the keepwarm arrow turns while keepwarm runs (`hooks/spin.tsx`, a `Client` of its own). One redraw train for all of them, at most 10 redraws a second; none on the first draw, after a reload or a tab switch; all off with `animations: off`.
 - `ui.fault`: if the café's file fails, the pane leaves it out.
 - With too little room the café's one-line fallback stands still: its frame clock asks for no redraw, so terminal apps that repaint badly see no traffic there.
 

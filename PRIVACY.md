@@ -17,7 +17,7 @@ Only what Claude Code reports to mods within your session:
 
 It never reads the text of your prompts, and no files. Claude's answer is only compared with what the turn returned, to keep another mod's line, never kept. Of tool calls it reads only what the list above names: the result's text is measured for its length and dropped; for Bash only a word that looks like a program name becomes the label – anything with `$`, quotes, `;`, `|`, `&` or a leading `-` gives just `Bash`. The line it shows under an answer is its own; the answer is not changed. Whether Claude reads that line is not documented.
 
-The café animation (option `animations`) is a separate file that runs where the pane is drawn. It receives one word from the mod – the cache's state, such as `warm` or `cold` – and gets no mods API (types: `ClientSurface`); its code makes no other call.
+The café animation and the turning keepwarm arrow (option `animations`) are separate files that run where the pane is drawn; the arrow gets nothing at all. It receives one word from the mod – the cache's state, such as `warm` or `cold` – and gets no mods API (types: `ClientSurface`); its code makes no other call.
 
 What Claude does read: the short replies of its commands (`/tokens`, `/keepwarm`, `/tokens report`) – Claude Code adds a command's text to the conversation (mods › api › Add a command). They hold confirmations, never your data.
 

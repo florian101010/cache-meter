@@ -6,6 +6,7 @@ import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 import Cafe, { FRAME_MS, SCENE_ROWS, sceneRows } from '../hooks/cafe'
+import Spin, { SPIN_FRAMES, SPIN_MS } from '../hooks/spin'
 import type { CafeState } from '../hooks/cafe'
 import {
   FIVE_MIN,
@@ -663,8 +664,11 @@ test('pane: the keepwarm button starts and stops keepwarm', async ($, on) => {
   await ui.press({ key: 'keepwarm-start' })
   // The toast box is narrow: one short line.
   expect(toasts.some(t => /^Keepwarm on until \d\d:\d\d · pings at ≤ 10 min left$/.test(t))).toBe(true)
-  expect(await ui.find({ type: 'Text', text: '↻ Keepwarm on' })).toBeDefined()
+  // The arrow turns in a Client of its own while keepwarm runs.
+  expect((await ui.find({ key: 'keep-spin' }))?.props).toMatchObject({ module: 'hooks/spin.tsx' })
+  expect(await ui.find({ type: 'Text', text: ' Keepwarm on' })).toBeDefined()
   await ui.press({ key: 'keepwarm-stop' })
+  expect(await ui.find({ key: 'keep-spin' })).toBeUndefined()
   expect(toasts.some(t => t.startsWith('Keepwarm off'))).toBe(true)
   expect(await ui.find({ type: 'Button', key: 'keepwarm-start' })).toBeDefined()
   await ui.unmount()
@@ -2060,4 +2064,133 @@ test('Health tab: the session card names the Markdown report', async ($, on) => 
   world(on)
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   expect(await healthText($, /^copy as Markdown: \/tokens report$/)).toBeDefined()
+})
+
+test('keepwarm card: a still arrow with animations = off', { options: { animations: 'off' } }, async ($, on) => {
+  world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  await ui.press({ key: 'keepwarm-start' })
+  expect(await ui.find({ type: 'Text', text: '↻ Keepwarm on' })).toBeDefined()
+  expect(await ui.find({ key: 'keep-spin' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('spin module: one timer, and each tick turns the arrow a quarter', () => {
+  const tag = (type: string) => (props: object) => ({ type, props })
+  let state: { f: number } | undefined
+  let tick: () => void = () => {}
+  let timers = 0
+  const surface = {
+    elements: { Box: tag('Box'), Text: tag('Text') },
+    get state() {
+      return state
+    },
+    setState: (next: { f: number }) => {
+      state = next
+    },
+    columns: 1,
+    rows: 1,
+    every: (ms: number, fn: () => void) => {
+      expect(ms).toBe(SPIN_MS)
+      timers += 1
+      tick = fn
+
+      return () => {}
+    },
+    onPointer: () => () => {},
+    onKey: () => () => {},
+    post: () => {},
+  }
+  const frame = () => JSON.stringify(Spin({}, surface as never))
+  expect(frame()).toContain(SPIN_FRAMES[0])
+  tick()
+  expect(frame()).toContain(SPIN_FRAMES[1])
+  tick()
+  tick()
+  tick()
+  expect(frame()).toContain(SPIN_FRAMES[0])
+  expect(timers).toBe(1)
+})
+
+// Decodes a Raster's cells: per cell the code point and the foreground colour.
+function rasterOf(cells: unknown): { cp: number; fg: number }[] {
+  const bytes = Array.from(atob(String(cells)), c => c.charCodeAt(0))
+  const words: number[] = []
+  for (let i = 0; i < bytes.length; i += 4) words.push(bytes[i]! | (bytes[i + 1]! << 8) | (bytes[i + 2]! << 16) | (bytes[i + 3]! << 24))
+  const out: { cp: number; fg: number }[] = []
+  for (let i = 0; i < words.length; i += 3) out.push({ cp: words[i]!, fg: words[i + 1]! })
+
+  return out
+}
+
+test('animation: cost counts to its new value – a figure in between, then the new one', async ($, on) => {
+  const { clock, next } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  next.usd = 1
+  await step($)
+  const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  const cost = async () => Number(String((await ui.find({ type: 'Text', text: /^≈? ?\$\d+\.\d\d$/ }))?.text).replace(/[^\d.]/g, ''))
+  expect(await cost()).toBe(1)
+  next.usd = 2
+  await step($)
+  await clock.advance(200)
+  const mid = await cost()
+  expect(mid).toBeGreaterThan(1)
+  expect(mid).toBeLessThan(2)
+  await clock.advance(700)
+  expect(await cost()).toBe(2)
+  await ui.unmount()
+})
+
+test('animation: a new request column grows in from below', async ($, on) => {
+  const { clock, next } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  // A request that reads nothing from the cache: a full-height column.
+  next.write = 150_000
+  next.read = 0
+  await step($)
+  const ink = async () =>
+    rasterOf((await ui.find({ type: 'Raster', key: 'requests-1' }))?.props.cells)
+      .filter(c => c.cp >= 0x2581 && c.cp <= 0x2588)
+      .reduce((sum, c) => sum + (c.cp - 0x2580), 0)
+  await clock.advance(50)
+  const mid = await ink()
+  await clock.advance(600)
+  const full = await ink()
+  expect(mid).toBeGreaterThan(0)
+  expect(mid).toBeLessThan(full)
+  await ui.unmount()
+})
+
+test('animation: a shine passes over the countdown bar with the minute flash', async ($, on) => {
+  const { clock } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  const colours = async () => new Set(rasterOf((await ui.find({ type: 'Raster', key: 'countdown' }))?.props.cells).map(c => c.fg))
+  await clock.advance(60_000)
+  await clock.advance(250)
+  const mid = await colours()
+  await clock.advance(800)
+  const after = await colours()
+  // While it passes, the bar holds lighter colours it does not hold before or after.
+  expect([...mid].some(c => !after.has(c))).toBe(true)
+  await ui.unmount()
+})
+
+test('animation: off with animations = off – the new figure at once, no shine', { options: { animations: 'off' } }, async ($, on) => {
+  const { clock, next } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  next.usd = 1
+  await step($)
+  const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  next.usd = 2
+  await step($)
+  await clock.advance(200)
+  expect(await ui.find({ type: 'Text', text: /^≈? ?\$2\.00$/ })).toBeDefined()
+  await ui.unmount()
 })

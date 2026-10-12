@@ -70,6 +70,7 @@ Code conventions enforced by `validate`: helpers that take `$` are top-level fun
 | `.claude-plugin/marketplace.json` | makes the repository a one-plugin marketplace (`cache-meter@cache-meter`) |
 | `hooks/hooks.json` → `hooks/register.tsx` | every hook: data sources, band, pane, commands, keepwarm |
 | `hooks/lib.ts` | pure functions: TTL derivation, hit rate, formatting, thresholds |
+| `hooks/spin.tsx` | the turning keepwarm arrow: a surface module (`Client`), no `$`, no props. Not in `hooks.json` |
 | `hooks/cafe.tsx` | the café animation: a surface module (`Client`), no `$`, gets only the cache's state word; `sceneRows` is pure and unit-tested. Not listed in `hooks.json` – it is found through `module: "./cafe.tsx"` |
 | `types/index.d.ts` | type contract of every `$.state` value |
 | `tests/cache-meter.test.tsx` | tests for `claude plugin test` |
