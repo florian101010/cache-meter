@@ -51,7 +51,7 @@ export type Totals = { main: Usage4; sub: Usage4; mainSteps: number; subSteps: n
 
 export type KeepWarm = {
   until: number | null
-  /** Pings and tokens read in this run – for /keepwarm auto, since it was switched on. */
+  /** Pings and tokens read in this run – for /keepwarm auto, since it was switched on (restarted from 0 after /clear, /resume, /branch). */
   pings: number
   readTokens: number
   lastPingAt: number | null

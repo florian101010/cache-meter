@@ -156,7 +156,7 @@ export function parseKeepCommand(args: string): { mode: 'run' | 'auto'; ms: numb
   return ms === null ? { mode: 'off' } : { mode: 'run', ms }
 }
 
-/** A length as the person typed it: `2h`, `90m`, `2h 30m`. */
+/** A length for the person: `2h`, `45m`, `1h 30m`. */
 export function durationLabel(ms: number): string {
   const min = Math.round(ms / 60_000)
   const h = Math.floor(min / 60)

@@ -153,6 +153,9 @@ let isPinging = false
 // /keepwarm auto, beside $.state: /clear, /resume and /branch reset the state, but the person switched
 // it on for the session – restored there, waiting for the next answer. Null = off.
 let autoMs: number | null = null
+// What /keepwarm auto did while you were away (a break outlasted it, or it switched off): its toast fades
+// unseen, so the word comes again at your next own prompt.
+let autoNote: string | null = null
 let mainRequests = 0
 // The line under each answer (option turnLine), and per open turn the session cost at its start and
 // its main requests. Keyed by turnId; a reload loses at most the line of the turn that was running.
@@ -374,11 +377,11 @@ async function tick($: EngineInterface) {
   // A soft end: a fixed run is over; for auto only this break – it stays on and covers the next one.
   if (now > keep.until || (isAuto ? keep.pausePings : keep.pings) >= MAX_PINGS) {
     await update($, keepA, k => ({ ...k, until: null }))
-    $.ui.toast(
-      isAuto
-        ? `Keepwarm auto: break longer than ${durationLabel(keep.auto ?? 0)}${keep.pausePings >= MAX_PINGS ? ` (${MAX_PINGS} pings)` : ''} – the cache may expire; on again with your next answer`
-        : `Keepwarm finished (${keep.pings} pings)`,
-    )
+    const text = isAuto
+      ? `Keepwarm auto: break longer than ${durationLabel(keep.auto ?? 0)}${keep.pausePings >= MAX_PINGS ? ` (${MAX_PINGS} pings)` : ''} – the cache may expire; on again with your next answer`
+      : `Keepwarm finished (${keep.pings} pings)`
+    $.ui.toast(text)
+    if (isAuto) autoNote = text
 
     return
   }
@@ -402,7 +405,16 @@ async function tick($: EngineInterface) {
   try {
     // Timed at the request's start: the conservative end of the window (an assumption, see README).
     const startedAt = await $.clock.now()
-    const reply = await $.model.fork({ prompt: 'Reply with the single word: warm' })
+    let reply: Awaited<ReturnType<typeof $.model.fork>>
+    try {
+      reply = await $.model.fork({ prompt: 'Reply with the single word: warm' })
+    } catch (error) {
+      // Refused before it was sent – a request Claude Code will not send, or another mod's deny (api ›
+      // Call a model): pinging again every tick would never work, so it stops for good.
+      await hardStop($, `the ping was refused (${cleanLabel(error instanceof Error ? error.message : String(error))})`)
+
+      return
+    }
     if (!reply.isAnswered) {
       await hardStop($, `the ping got no answer (${reply.reason})`)
 
@@ -788,14 +800,18 @@ async function hardStop($: EngineInterface, why: string) {
   const wasAuto = (await read($, keepA)).auto !== null
   autoMs = null
   await update($, keepA, k => ({ ...k, until: null, auto: null }))
-  $.ui.toast(`Keepwarm${wasAuto ? ' auto' : ''} off: ${why}`)
+  const text = `Keepwarm${wasAuto ? ' auto' : ''} off: ${why}`
+  $.ui.toast(text)
+  if (wasAuto) autoNote = text
 }
 
 // /keepwarm auto: every own prompt and every finished main request – never a ping of its own – moves the
 // window to "now + the break" and starts a new break's ping count. While you work no ping is due anyway
 // (each request refreshes the cache); they come only once you have been away long enough.
-async function rearmAuto($: EngineInterface) {
-  if (isPinging) return
+async function rearmAuto($: EngineInterface, isOwnPrompt = false) {
+  // A request while a ping is in flight may be the ping itself (undocumented whether a fork raises a
+  // main-thread turn.step); a prompt the person typed never is.
+  if (isPinging && !isOwnPrompt) return
   const keep = await read($, keepA)
   if (keep.auto === null) return
   const now = await $.clock.now()
@@ -866,6 +882,32 @@ async function pressKeepWarm($: EngineInterface, ms: number | null) {
   $.ui.toast(short, { timeoutMs: 8_000 })
 }
 
+// Keepwarm sends requests that cost, so it starts only on the person's own word: typed at the terminal
+// (composer) or sent from their phone or browser (bridge) – not another mod's $.command.run, a schedule
+// or a peer session (types: PromptOrigin). Stopping it is open to anyone.
+const NOT_YOURS = 'Keepwarm starts only when you type the command yourself. Not started.'
+function isPersonsCommand(e: { origin?: { kind: string } }): boolean {
+  return e.origin?.kind === 'composer' || e.origin?.kind === 'bridge'
+}
+
+const COMMANDS = [
+  {
+    name: 'tokens',
+    description: 'Prompt-cache and token dashboard – tabs: overview, context (what fills it), health (errors, cost rate); report copies a session summary',
+    argumentHint: '[overview | context | health | report]',
+  },
+  {
+    name: 'keepwarm',
+    description: 'Keep the cache warm through a break – auto: every break (a ping costs one cache read)',
+    argumentHint: '[2h | 30m | auto | off]  (10m … 8h)',
+  },
+  {
+    name: 'keepwarm-auto',
+    description: 'Keep the cache warm through every break, pinging by itself (each ping one cache read) – /keepwarm off stops it',
+    argumentHint: '[2h]  longest break covered (10m … 8h)',
+  },
+]
+
 export const register: Register = (on, options) => {
   setting = typeof options.cacheTtl === 'string' ? options.cacheTtl : 'auto'
   autoSidebar = typeof options.autoSidebar === 'string' ? options.autoSidebar : 'auto'
@@ -874,6 +916,7 @@ export const register: Register = (on, options) => {
   isDismissed = false
   isPinging = false
   autoMs = null
+  autoNote = null
   mainRequests = 0
   showTurnLine = options.turnLine !== 'off'
   expiryNotice = options.expiryNotice === 'on'
@@ -921,6 +964,13 @@ export const register: Register = (on, options) => {
     await measureNow($)
     promptBase = await turnsNow($)
     await noteHistoryStart($)
+    // A reload keeps the state, not the module's variables: /keepwarm auto carries on. State written by an
+    // older version (before 0.12) has no auto fields – read as off.
+    const kept = await read($, keepA)
+    if (kept.auto === undefined || kept.pausePings === undefined) {
+      await update($, keepA, k => ({ ...k, auto: k.auto ?? null, pausePings: k.pausePings ?? 0 }))
+    }
+    autoMs = kept.auto ?? null
     // session.start is the first event of every load: a fresh session warns from 0; a reload in a running
     // one (requests already counted, state kept) takes the level reached without a toast.
     budgetWarned = 0
@@ -931,8 +981,6 @@ export const register: Register = (on, options) => {
       const t: Totals = await read($, totalsA)
       convo = { steps: t.mainSteps, main: t.main, coldCount: t.coldCount, coldWritten: t.coldWritten }
       convoUsdBase = null
-      // A reload keeps the state, not the module's variables: /keepwarm auto carries on.
-      autoMs = (await read($, keepA)).auto
     } else {
       startConversation((await read($, measureA))?.usd ?? null, 'start')
     }
@@ -943,24 +991,14 @@ export const register: Register = (on, options) => {
       // Soon after start, once the band has been drawn and said whether the session is fullscreen.
       $.clock.after(2_000, () => maybeAutoOpen($))
     }
-    try {
-      await $.command.register({
-        name: 'tokens',
-        description: 'Prompt-cache and token dashboard – tabs: overview, context (what fills it), health (errors, cost rate); report copies a session summary',
-        argumentHint: '[overview | context | health | report]',
-      })
-      await $.command.register({
-        name: 'keepwarm',
-        description: 'Keep the cache warm through a break – auto: every break (a ping costs one cache read)',
-        argumentHint: '[2h | 30m | auto | off]  (10m … 8h)',
-      })
-      await $.command.register({
-        name: 'keepwarm-auto',
-        description: 'Keep the cache warm through every break this session – /keepwarm off stops it',
-        argumentHint: '[2h]  longest break covered (10m … 8h)',
-      })
-    } catch {
-      // Without the commands the band still works.
+    // Each command on its own: a name another plugin took fails only that one (api › Add a command), and
+    // the debug log says which. Without the commands the band still works.
+    for (const command of COMMANDS) {
+      try {
+        await $.command.register(command)
+      } catch (error) {
+        $.ui.log(`/${command.name} not registered: ${cleanLabel(error instanceof Error ? error.message : String(error))}`, { to: 'debug' })
+      }
     }
 
     return result
@@ -1408,7 +1446,14 @@ export const register: Register = (on, options) => {
   // closes it (the band keeps the summary). Docked beside a fullscreen transcript it is a sidebar and stays.
   on('prompt.submit', async ($, e, next) => {
     // Back from a break: /keepwarm auto's window starts over (not for a mod's or a command's prompt).
-    if (e.origin.kind === 'composer') await rearmAuto($)
+    if (e.origin.kind === 'composer') {
+      await rearmAuto($, true)
+      // Back: what auto did meanwhile, once more where it is seen.
+      if (autoNote !== null) {
+        $.ui.toast(autoNote, { timeoutMs: 12_000 })
+        autoNote = null
+      }
+    }
     if (e.origin.kind === 'composer' && seat === 'inline' && (await $.ui.panes()).some(p => p.id === PANE)) {
       await $.ui.close({ id: PANE })
       $.ui.invalidate('ui.render')
@@ -1420,14 +1465,17 @@ export const register: Register = (on, options) => {
   on('command.run', { command: 'keepwarm' }, async ($, e) => {
     const c = parseKeepCommand(e.args)
     if (c === undefined) return { text: 'Usage: /keepwarm [10m … 8h | auto [10m … 8h] | off] – 2h when left out.' }
+    if (c.mode === 'off') return { text: await stopKeepWarm($) }
+    if (!isPersonsCommand(e)) return { text: NOT_YOURS }
 
-    return { text: c.mode === 'off' ? await stopKeepWarm($) : c.mode === 'auto' ? await startAuto($, c.ms) : await startKeepWarm($, c.ms) }
+    return { text: c.mode === 'auto' ? await startAuto($, c.ms) : await startKeepWarm($, c.ms) }
   })
 
   // The same as /keepwarm auto, as a command of its own so the typeahead lists it beside /keepwarm.
   on('command.run', { command: 'keepwarm-auto' }, async ($, e) => {
     const c = parseKeepCommand(`auto ${e.args}`)
     if (c === undefined || c.mode !== 'auto') return { text: 'Usage: /keepwarm-auto [10m … 8h] – breaks up to 2h when left out. /keepwarm off stops it.' }
+    if (!isPersonsCommand(e)) return { text: NOT_YOURS }
 
     return { text: await startAuto($, c.ms) }
   })

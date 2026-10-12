@@ -7,9 +7,10 @@ All notable changes to Cache Meter, a Claude Code mod. The format follows [Keep 
 Every break, by itself.
 
 ### Added
-- **`/keepwarm auto`** (also `/keepwarm-auto`, listed beside `/keepwarm` in the typeahead): once typed, every break of the session is covered. Each prompt and answer moves the window to *now + 2h* (`/keepwarm auto 4h`, 10m to 8h), so the ping goes out only once you have been away long enough – lunch, a call, a long read; your next prompt ends the break. Opt-in per session, nothing stored; stays on through `/clear`, `/resume` and `/branch`. At most 12 pings per break; a longer break lets the cache go and the next answer covers the next one; a miss, an unanswered ping or a 5-minute TTL switches it off for good. The keepwarm card reads *Keepwarm auto · breaks up to 2h*.
+- **`/keepwarm auto`** (also `/keepwarm-auto`, listed beside `/keepwarm` in the typeahead): once typed, every break of the session is covered. Each prompt and answer moves the window to *now + 2h* (`/keepwarm auto 4h`, 10m to 8h), so the ping goes out only once you have been away long enough – lunch, a call, a long read; your next prompt ends the break. Opt-in per session, nothing stored; stays on through `/clear`, `/resume` and `/branch`. At most 12 pings per break; a longer break lets the cache go and the next answer covers the next one; a miss, an unanswered or refused ping or a 5-minute TTL switches it off for good, and what happened while you were away is said again at your next prompt. It starts only on your own command (typed, or through Remote Control) – another mod's `$.command.run` is refused. The keepwarm card reads *Keepwarm auto · breaks up to 2h*.
 
 ### Changed
+- Each command is registered on its own: a name another plugin took fails only that one, with a debug-log line.
 - `/keepwarm` shows `auto` in its argument hint; the cold-rewrite tip mentions `/keepwarm auto`; `/tokens report` names an auto run.
 - Docs: *sends nothing you have not switched on* – with `/keepwarm auto` on, its pings go out by themselves (README, PRIVACY, SECURITY, AGENTS). The README's `/keepwarm` range is 10m–8h, as the command takes it (it said 30m).
 
