@@ -1,6 +1,6 @@
-# Cache Meter
+# Cache Meter for Claude Code
 
-**A [Claude Code mod](https://code.claude.com/docs/en/plugins/mods/overview) that shows your prompt cache and token usage at a glance** – how long the cache stays warm, how well each request hits it, how full the context is, what every request cost in tokens, and, on request, keeps the cache warm while you step away.
+**Know before your prompt cache expires.** Cache Meter is a [Claude Code mod](https://code.claude.com/docs/en/plugins/mods/overview) that puts the prompt cache on screen: a countdown until it expires, the hit rate of every request, how full the context is and what each request cost – and, if you ask, it keeps the cache warm while you step away.
 
 [![CI](https://github.com/florian101010/cache-meter/actions/workflows/ci.yml/badge.svg)](https://github.com/florian101010/cache-meter/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -11,7 +11,21 @@
 ● cache 42m ■■■■■■■■■■■■■■□□□□□□ 93% hit · ☀ context 9% (auto-compact 97%) [ Compact ]
 ```
 
-> **What is a Claude Code mod?** A mod is a Claude Code plugin whose JavaScript/TypeScript hooks run *inside* Claude Code: it can draw a band above the prompt, open panes, add slash commands and react to events such as each model request. See the official [mods overview](https://code.claude.com/docs/en/plugins/mods/overview). Cache Meter is a mod only – no skills, no MCP server, no settings hooks.
+## Why
+
+Claude Code re-sends your whole conversation with every message and relies on the prompt cache so the API doesn't reprocess it. The cache lives for one hour after the last request on a Claude subscription, five minutes on an API key. Step away longer and the next message re-writes the entire context – a [noticeably slower turn](https://code.claude.com/docs/en/prompt-caching#cache-lifetime), billed at the [cache write rate](https://code.claude.com/docs/en/prompt-caching#check-cache-performance) – and nothing on screen tells you it is about to happen.
+
+Cache Meter shows it, all the time:
+
+- **A countdown** until the cache expires, turning yellow when it is about to.
+- **The hit rate** of every request, so a cache that keeps missing stands out.
+- **Context fill** against the auto-compact point, with a Compact button.
+- **Every request's tokens** in a pane – read from cache, written to cache, uncached – plus subagents, cost and your 5-hour and weekly plan limits.
+- **`/keepwarm`** to keep the cache alive through a break, with hard limits so it never runs up your plan.
+
+It only listens and draws: it never touches your prompts or tool calls, writes nothing to disk and calls nothing except the pings you start.
+
+> **What is a Claude Code mod?** A mod is a Claude Code plugin whose TypeScript hooks run *inside* Claude Code: it can draw above the prompt, open panes, add slash commands and react to events such as each model request. See the official [mods overview](https://code.claude.com/docs/en/plugins/mods/overview). Cache Meter is a mod only – no skills, no MCP server, no settings hooks.
 
 > **For AI coding agents:** start with **[AGENTS.md](AGENTS.md)** – what the mod does, how to install it for a user, how to verify and test it, and the rules for changing it, on one page. Machine-readable index: [llms.txt](llms.txt).
 
@@ -34,6 +48,7 @@ In the new session the band appears above the prompt after the first answer; typ
 - [How it works](#how-it-works)
 - [Assumptions and limitations](#assumptions-and-limitations)
 - [Privacy, cost and permissions](#privacy-cost-and-permissions)
+- [FAQ](#faq)
 - [Development](#development)
 - [License](#license)
 
@@ -150,6 +165,20 @@ Data flow, state, the cold-rewrite rule and every threshold: [docs/how-it-works.
 - **Cost:** none, except `/keepwarm`. Each ping reads your whole context at the model's cache-read price ([pricing](https://platform.claude.com/docs/en/about-claude/pricing)) and counts against your plan. How cache reads count towards the 5-hour and weekly limits is not documented – watch the limits in the pane.
 
 More in [SECURITY.md](SECURITY.md).
+
+## FAQ
+
+**Does it cost anything?** No – except `/keepwarm`, which you start yourself. Each ping reads your context from the cache at the cache-read price and counts against your plan; it stops after 12 pings at most.
+
+**Isn't this what `/usage` shows?** `/usage` reports the session's hit ratio and whether the cache is warm, when you ask. Cache Meter shows how long it stays warm, all the time, per request, with history – and can keep it warm.
+
+**Does it work with an API key or a cloud provider?** Yes. Claude Code's default TTL there is five minutes; set `cacheTtl` to `5m` (see [Configuration](#configuration)). `/keepwarm` is disabled at a five-minute TTL.
+
+**Does it read or change my prompts?** No. It hooks model requests only to read their token counts. See [SECURITY.md](SECURITY.md) for everything it can reach.
+
+**Where does it work?** In the Claude Code terminal and the Code tab of the Desktop app. In the VS Code extension and under `claude -p` it runs but draws nothing.
+
+**How do I remove it?** `claude plugin uninstall cache-meter@cache-meter`.
 
 ## Development
 

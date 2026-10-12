@@ -1,6 +1,6 @@
 # Cache Meter
 
-> A Claude Code mod (a Claude Code plugin whose TypeScript hooks run inside Claude Code) that shows the prompt cache and token usage: a countdown until the cache expires, the hit rate of each request, context fill and auto-compact point above the prompt; a /tokens pane with per-request history, totals, plan limits and cold rewrites; and /keepwarm to keep the cache warm. Install: `claude plugin install cache-meter --marketplace florian101010/cache-meter`. Test: `claude plugin validate --strict . && claude plugin test .`. Requires Claude Code ≥ 2.1.287. MIT.
+> Cache Meter for Claude Code – know before your prompt cache expires. A Claude Code mod (a Claude Code plugin whose TypeScript hooks run inside Claude Code) that shows the prompt cache and token usage: a countdown until the cache expires, the hit rate of each request, context fill and auto-compact point above the prompt; a /tokens pane with per-request history, totals, plan limits and cold rewrites; and /keepwarm to keep the cache warm. Install: `claude plugin install cache-meter --marketplace florian101010/cache-meter`. Test: `claude plugin validate --strict . && claude plugin test .`. Requires Claude Code ≥ 2.1.287. MIT.
 
 ## Start here
 

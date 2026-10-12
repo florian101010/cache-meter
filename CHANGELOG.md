@@ -7,6 +7,10 @@ All notable changes to Cache Meter, a Claude Code mod. The format follows [Keep 
 ### Changed
 - The whole mod is in English: band (`empty`, `expired`, `context`, `auto-compact`, `rewrite`), the `/tokens` pane, toasts, command answers and descriptions, TTL sources, plan-limit names, and the keepwarm ping prompt.
 - `/keepwarm` takes `off` (or `0`) to stop; the German `aus` is no longer accepted.
+- README leads with what the mod is for ("Why"), adds an FAQ; display name "Cache Meter for Claude Code" in the docs.
+
+### Added
+- Directory listing fields in `plugin.json`: `documentationUrl`, `supportUrl`, `privacyPolicyUrl`.
 
 ## [0.2.1] – 2026-10-12
 
