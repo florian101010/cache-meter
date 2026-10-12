@@ -18,9 +18,10 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { CacheInfo, ColdWrite, Health, KeepWarm, Measure, ServerToolCall, Totals, TtlConfig, Usage4 } from '../types'
+import type { AgentUse, CacheInfo, ColdWrite, Health, KeepWarm, Measure, ServerToolCall, Totals, TtlConfig, Usage4 } from '../types'
 import {
   COLD_MIN,
+  FIVE_MIN,
   HOUR,
   MAX_PINGS,
   PING_HIT_SHARE,
@@ -28,6 +29,12 @@ import {
   PING_WRITE_SHARE,
   ZERO,
   add,
+  agentLabel,
+  breakCause,
+  effortKeepsCache,
+  expiryText,
+  requestChange,
+  toolDiff,
   isUnexpectedWrite,
   limitForecast,
   nextLimitStarts,
@@ -92,6 +99,7 @@ const keepA = atom({ plugin: 'cache-meter', key: 'keepWarm' } as const, {
   lastPingAt: null,
 })
 const coldA = atom({ plugin: 'cache-meter', key: 'coldWrites' } as const, [])
+const agentsA = atom({ plugin: 'cache-meter', key: 'agents' } as const, {} as Record<string, AgentUse>)
 const contextMapA = atom({ plugin: 'cache-meter', key: 'contextMap' } as const, null)
 const healthA = atom({ plugin: 'cache-meter', key: 'health' } as const, {
   stops: {},
@@ -120,6 +128,12 @@ let mainRequests = 0
 // The line under each answer (option turnLine), and per open turn the session cost at its start and
 // its main requests. Keyed by turnId; a reload loses at most the line of the turn that was running.
 let showTurnLine = true
+// The model and effort of the last main request, to see what the next one changes (option-free;
+// a reload starts without one, so it never warns about a change it did not see).
+let lastMain: { model: string; effort?: string | number } | null = null
+// Option expiryNotice, and the cache window it already notified for (cache.lastAt), so it fires once.
+let expiryNotice = false
+let notifiedFor: number | null = null
 let openTurns: Record<string, { usd: number | null; requests: number }> = {}
 // Where the surface last seated the pane: beside a fullscreen transcript (dock) or above the prompt (inline).
 let seat: 'dock' | 'inline' | null = null
@@ -245,6 +259,7 @@ async function maybeAutoOpen($: EngineInterface) {
 async function tick($: EngineInterface) {
   $.ui.invalidate('ui.render')
   await maybeAutoOpen($)
+  await maybeNotify($)
   const keep = await read($, keepA)
   // No ping while a main request runs: that request touches the cache anyway.
   if (keep.until === null || isPinging || mainRequests > 0) return
@@ -299,6 +314,86 @@ async function tick($: EngineInterface) {
   } finally {
     isPinging = false
   }
+}
+
+// Why a warm cache was re-written: a fresh, free context estimate (no request, types:
+// SessionUsageArgs) shows whether the loaded MCP tools changed since the last turn.
+async function explainBreak(
+  $: EngineInterface,
+  before: CacheInfo | null,
+  startedAt: number,
+  prev: { model: string; effort?: string | number } | null,
+  model: string,
+  effort: string | number | undefined,
+  change: string | null,
+): Promise<string> {
+  const was = (await read($, contextMapA))?.mcpServers.flatMap(s => s.toolNames ?? []) ?? null
+  let tools: { added: number; removed: number } | null = null
+  try {
+    const usage = await $.session.usage({ breakdown: 'summary' })
+    await mapContext($, usage.context.breakdown, 'summary')
+    const is = (await read($, contextMapA))?.mcpServers.flatMap(s => s.toolNames ?? []) ?? null
+    tools = was === null || is === null ? null : toolDiff(was, is)
+  } catch {
+    tools = null
+  }
+  const effortOnly =
+    prev !== null && prev.effort !== undefined && effort !== undefined && prev.effort !== effort && effortKeepsCache(model)
+      ? `effort ${prev.effort} → ${effort}`
+      : null
+
+  return breakCause({
+    change,
+    effortOnly,
+    tools,
+    idleMs: before === null ? null : Math.max(0, startedAt - before.lastAt),
+    ttlMs: (await ttlNow($)).ms,
+  })
+}
+
+// A subagent's request: summed under its id; its type and task looked up once ($.agent.list).
+async function countAgent($: EngineInterface, id: string, u: Usage4, model: string) {
+  const known = (await read($, agentsA))[id]
+  let label = known?.label ?? null
+  if (label === null) {
+    try {
+      label = agentLabel((await $.agent.list()).find(a => a.id === id), id)
+    } catch {
+      label = agentLabel(undefined, id)
+    }
+  }
+  await update($, agentsA, all => {
+    const was = all[id] ?? { ...ZERO, steps: 0, label: label ?? id, model }
+
+    return { ...all, [id]: { ...add(was, u), steps: was.steps + 1, label: was.label, model } }
+  })
+}
+
+// Option expiryNotice: once per cache window, at the band's "low" mark, a native notification through
+// the person's own channel ($.ui.notify; nothing limits how often, so the guards are here).
+async function maybeNotify($: EngineInterface) {
+  if (!expiryNotice || !isInteractive || mainRequests > 0 || isPinging) return
+  const now = await $.clock.now()
+  const keep = await read($, keepA)
+  if (keep.until !== null && keep.until > now) return
+  const cache = await read($, cacheA)
+  const ttl = await ttlNow($)
+  const status = cacheStatus(cache, now, ttl.ms)
+  if (cache === null || status.kind !== 'warm' || ttl.ms < HOUR || cache.contextTokens < COLD_MIN) return
+  if (status.remaining > ttl.ms * PING_SHARE || notifiedFor === cache.lastAt) return
+  notifiedFor = cache.lastAt
+  let reason: string | null = null
+  try {
+    const sent = await $.ui.notify(expiryText(status.remaining, cache.contextTokens), { title: 'Cache Meter' })
+    reason = sent.isSent ? null : sent.reason
+  } catch {
+    reason = 'refused'
+  }
+  await update($, healthA, h => {
+    const n = h.notice ?? { sent: 0, lastReason: null }
+
+    return { ...h, notice: reason === null ? { sent: n.sent + 1, lastReason: null } : { ...n, lastReason: reason } }
+  })
 }
 
 async function resetCache($: EngineInterface) {
@@ -371,6 +466,9 @@ export const register: Register = (on, options) => {
   isPinging = false
   mainRequests = 0
   showTurnLine = options.turnLine !== 'off'
+  expiryNotice = options.expiryNotice === 'on'
+  lastMain = null
+  notifiedFor = null
   openTurns = {}
 
   on('session.start', async ($, e, next) => {
@@ -442,11 +540,25 @@ export const register: Register = (on, options) => {
     let startedAt = 0
     let before: CacheInfo | null = null
     let wasCold = false
+    let prevMain: { model: string; effort?: string | number } | null = null
+    let change: string | null = null
     try {
       startedAt = await $.clock.now()
       // Was the main cache already expired when this request started? (read before the request)
       before = isMain ? await read($, cacheA) : null
       wasCold = before !== null && cacheStatus(before, startedAt, (await ttlNow($)).ms).kind === 'expired'
+      if (isMain) {
+        // At the moment the request goes out: a model or effort that splits a warm cache. /effort and
+        // /fast fire no config.set and have no /config row (measured with 2.1.296), so this is the
+        // earliest point; /model is caught before, at PreModelSwitch, and leaves the cache cold here.
+        const now = { model: e.model, ...(e.effort !== undefined ? { effort: e.effort } : {}) }
+        prevMain = lastMain
+        change = requestChange(prevMain, now)
+        lastMain = now
+        if (change !== null && isInteractive && !wasCold && before !== null && before.lastAt > 0 && before.contextTokens >= COLD_MIN) {
+          $.ui.toast(`This request re-writes ${short(before.contextTokens)} tokens to the cache: ${change}`, { timeoutMs: 10_000 })
+        }
+      }
       result = yield* next(e)
     } finally {
       if (isMain) mainRequests = Math.max(0, mainRequests - 1)
@@ -461,6 +573,7 @@ export const register: Register = (on, options) => {
       }
       if (e.agentId !== undefined) {
         await update($, totalsA, t => ({ ...t, sub: add(t.sub, u), subSteps: t.subSteps + 1 }))
+        await countAgent($, e.agentId, u, usage.model)
       } else {
         // Cold by the clock AND by the counts (more written than read), so a wrong TTL assumption
         // cannot turn a warm request into a "cold" one. A request with no cache before it (session
@@ -478,8 +591,10 @@ export const register: Register = (on, options) => {
             // at a cache that lives shorter than the TTL assumed (API key without promptCacheTtl).
             const lastIdleMs = before === null ? null : Math.max(0, startedAt - before.lastAt)
 
-            return { ...h, unexpected: { count: prev.count + 1, written: prev.written + u.write, lastAt: startedAt, lastIdleMs } }
+            return { ...h, unexpected: { ...prev, count: prev.count + 1, written: prev.written + u.write, lastAt: startedAt, lastIdleMs } }
           })
+          const lastCause = await explainBreak($, before, startedAt, prevMain, e.model, e.effort, change)
+          await update($, healthA, h => ({ ...h, unexpected: { ...h.unexpected, lastCause } }))
         }
         await update($, cacheA, () => ({
           lastAt: startedAt,
@@ -879,6 +994,7 @@ export const register: Register = (on, options) => {
     const colds = await read($, coldA)
     const map = await read($, contextMapA)
     const health: Health = await read($, healthA)
+    const agents = await read($, agentsA)
     const ttl = await ttlNow($)
     const now = await $.clock.now()
     const status = cacheStatus(cache, now, ttl.ms)
@@ -1330,6 +1446,10 @@ export const register: Register = (on, options) => {
     const serverNames = Object.entries(health.serverTools).sort((a, b) => b[1].ms - a[1].ms)
     const lastCheck = health.checks.last
     const unexpected = health.unexpected ?? { count: 0, written: 0, lastAt: null, lastIdleMs: null }
+    const notice = health.notice ?? { sent: 0, lastReason: null }
+    const agentRows = Object.values(agents)
+      .sort((a, b) => b.input + b.read + b.write + b.output - (a.input + a.read + a.write + a.output))
+      .slice(0, 5)
     const healthView = (
       <Box flexDirection="column">
         <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="column">
@@ -1394,6 +1514,31 @@ export const register: Register = (on, options) => {
         </Box>
         <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="column">
           <Text color="claude" bold>
+            Subagents
+          </Text>
+          {agentRows.length === 0 && <Text dimColor>none this session</Text>}
+          {agentRows.map(a => {
+            // Subagents fall outside the main conversation's TTL bucket: five minutes by default
+            // (prompt-caching › Subagents and the cache), so writes are priced at the 5-minute rate.
+            const saved = cacheSaving(a, readMultiplier(a.model), writeMultiplier(FIVE_MIN))
+            const hit = hitPct(a)
+
+            return (
+              <Text wrap="truncate-end">
+                <Text bold>{short(a.input + a.read + a.write + a.output)}</Text>
+                <Text dimColor> tok · {a.steps} req · </Text>
+                <Text color={hitColor(hit)}>{hit === null ? '–' : `${hit}%`}</Text>
+                <Text dimColor> hit{saved === null ? '' : saved >= 0 ? ` · cache saved ${saved}%` : ` · cache cost +${-saved}%`} · </Text>
+                <Text>{a.label}</Text>
+              </Text>
+            )
+          })}
+          {Object.keys(agents).length > agentRows.length && (
+            <Text dimColor>+{Object.keys(agents).length - agentRows.length} more</Text>
+          )}
+        </Box>
+        <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="column">
+          <Text color="claude" bold>
             Cache check
           </Text>
           {lastCheck === null ? (
@@ -1429,9 +1574,20 @@ export const register: Register = (on, options) => {
           </Text>
           {unexpected.count > 0 && (
             <Text dimColor wrap="truncate-end">
-              {''.padEnd(10)}after seconds: model, effort, fast mode or the tool set changed (not CLAUDE.md edits); after minutes: the cache lives shorter than assumed (option cacheTtl)
+              {''.padEnd(10)}
+              {unexpected.lastCause ?? 'after seconds: model, effort, fast mode or the tool set changed (not CLAUDE.md edits); after minutes: the cache lives shorter than assumed (option cacheTtl)'}
             </Text>
           )}
+          <Text wrap="truncate-end">
+            {label('Notice')}
+            {!expiryNotice ? (
+              <Text dimColor>off – option expiryNotice sends a notification before the cache expires</Text>
+            ) : notice.lastReason !== null ? (
+              <Text color="warning">not sent: {notice.lastReason} · {notice.sent} sent</Text>
+            ) : (
+              <Text color="success">on · {notice.sent} sent</Text>
+            )}
+          </Text>
         </Box>
       </Box>
     )

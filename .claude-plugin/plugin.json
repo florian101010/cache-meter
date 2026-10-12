@@ -1,7 +1,7 @@
 {
   "name": "cache-meter",
   "displayName": "Cache Meter",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Claude Code mod: /keepwarm keeps your prompt cache alive through a break; a countdown, hit rate, context fill and API value above the prompt; and a /tokens dashboard with what caching saved, what fills your context, API errors and cost per hour.",
   "author": {
     "name": "Florian Grimmer",
@@ -58,6 +58,16 @@
         "off"
       ],
       "default": "on"
+    },
+    "expiryNotice": {
+      "type": "string",
+      "title": "Notification before the cache expires",
+      "description": "on: once per cache window, when about 10 minutes are left (17 % of the TTL) and keepwarm is off, a native notification through your own notification channel (Claude Code's preferredNotifChannel setting) – so you can still type /keepwarm. Only with a one-hour TTL and at least 10k tokens of context. off: none.",
+      "options": [
+        "off",
+        "on"
+      ],
+      "default": "off"
     }
   }
 }

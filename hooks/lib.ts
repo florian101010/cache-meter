@@ -524,3 +524,71 @@ export function switchNote(tokens: number, usd: number, isListPrice: boolean, re
 
   return `Model switch re-writes ${short(tokens)} tokens to the cache (${price})${warm} – after it expires, switching adds nothing`
 }
+
+/**
+ * Whether changing effort keeps the cache on this model: on Opus 5.5, Sonnet 5.5, Haiku 5.5 and
+ * Fable 5.1 with an API key or a subscription it does (prompt-caching › Changing effort level).
+ */
+export function effortKeepsCache(model: string): boolean {
+  return /(opus|sonnet|haiku)-5-5|fable-5-1/.test(model)
+}
+
+/** What changed between two main requests that splits the cache: a model or an effort that does not keep it. */
+export function requestChange(
+  prev: { model: string; effort?: string | number } | null,
+  next: { model: string; effort?: string | number },
+): string | null {
+  if (prev === null) return null
+  if (prev.model !== next.model) return `model ${prev.model} → ${next.model}`
+  if (prev.effort !== next.effort && prev.effort !== undefined && next.effort !== undefined && !effortKeepsCache(next.model)) {
+    return `effort ${prev.effort} → ${next.effort}`
+  }
+
+  return null
+}
+
+/** MCP tools loaded before and after: how many came and went. */
+export function toolDiff(before: readonly string[], after: readonly string[]): { added: number; removed: number } {
+  const was = new Set(before)
+  const is = new Set(after)
+
+  return { added: [...is].filter(n => !was.has(n)).length, removed: [...was].filter(n => !is.has(n)).length }
+}
+
+/**
+ * Why a warm cache was re-written, from what is observable: the model, an effort that splits the
+ * cache, the tool set, a pause longer than the real TTL, an effort change on a model that keeps the
+ * cache only with an API key or a subscription. The rest is named, not guessed
+ * (prompt-caching › Actions that invalidate the cache).
+ */
+export function breakCause(i: {
+  change: string | null
+  effortOnly: string | null
+  tools: { added: number; removed: number } | null
+  idleMs: number | null
+  ttlMs: number
+}): string {
+  if (i.change !== null) return `${i.change} – each splits the cache`
+  if (i.tools !== null && (i.tools.added > 0 || i.tools.removed > 0)) {
+    return `tool set changed (+${i.tools.added} / −${i.tools.removed} MCP tools)`
+  }
+  if (i.idleMs !== null && i.idleMs >= FIVE_MIN && i.ttlMs > FIVE_MIN) {
+    return `after ${duration(i.idleMs)} idle: the real TTL is likely 5m, not ${duration(i.ttlMs)} (option cacheTtl)`
+  }
+  if (i.effortOnly !== null) return `${i.effortOnly} – keeps the cache on this model only with an API key or a subscription`
+
+  return 'not observable here: fast mode turned on, a plugin reload, a tool deny rule, or removed images'
+}
+
+/** The expiry notification's text. */
+export function expiryText(remainingMs: number, tokens: number): string {
+  return `Prompt cache expires in ${remainingLabel(remainingMs)} – the next prompt would re-write ${short(tokens)} tokens. Type /keepwarm to keep it.`
+}
+
+/** A subagent's name in the Health tab: its type and task, else its id. */
+export function agentLabel(entry: { type?: string; description?: string } | undefined, id: string): string {
+  if (entry === undefined) return id.slice(0, 12)
+  const what = entry.description?.trim() ?? ''
+
+  return what === '' ? entry.type ?? id.slice(0, 12) : `${entry.type ?? 'agent'}: ${what}`
+}
