@@ -1,5 +1,5 @@
 // Tests for cache-meter. How the kit fires events and stubs Claude Code's answers follows
-// https://code.claude.com/docs/en/plugins/mods/test (single source of truth, not memory).
+// the official mods documentation, page "test" (single source of truth, not memory).
 
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
