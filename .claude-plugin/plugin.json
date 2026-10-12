@@ -1,7 +1,7 @@
 {
   "name": "cache-meter",
   "displayName": "Cache Meter",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Claude Code mod: keep your prompt cache warm through a break with /keepwarm, and see when it expires, its hit rate, context fill and every request's tokens above the prompt.",
   "author": {
     "name": "Florian Grimmer",

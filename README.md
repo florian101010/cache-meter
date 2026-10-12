@@ -25,37 +25,11 @@ claude plugin install cache-meter --marketplace florian101010/cache-meter --scop
 
 The band above the prompt, always there:
 
-```text
-● cache 38m ■■■■■■■■■■■■■□□□□□□□ 99% hit · ☀ context 15% (auto-compact 97%) · API value $1.10 [ Compact ]
-```
+![The band above the prompt: cache 60m with a green countdown bar, 100% hit, context 15%, auto-compact at 97%, API value $1.06 and a Compact button](docs/images/band.png)
 
-`/tokens`, the dashboard (example values; colors in your terminal):
+`/tokens` – the dashboard, here as a sidebar beside the chat (Claude Code's fullscreen renderer):
 
-```text
-◉ Cache Meter  1: Overview  2: Context  3: Health                              prompt cache · tokens
-╭───────────────────────────────────────────────╮ ╭────────────────────────────────────────────────╮
-│ ▀▀█ █▀█  WARM · min left · until 15:32        │ │ Context 15%                      150.2k / 1.0M │
-│  ▀█ █▀█  hit 99% last · 86% session           │ │ ██████▉░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░┃ │
-│ ▀▀▀ ▀▀▀  TTL 60m · subscription               │ │ ┃ auto-compact 97%                 trend ▁▂▃▅▆ │
-│ ████████┃███████████████████▌░░░░░░░░░░░░░░░░ │ ╰────────────────────────────────────────────────╯
-│ expiry costs a re-write of ≈ 150k tokens      │ ╭────────────────────────────────────────────────╮
-╰───────────────────────────────────────────────╯ │ Session          cache saved 54% of input cost │
-╭───────────────────────────────────────────────╮ │ read 460k · written 122k · new 8 · out 1.3k    │
-│ ↻ Keepwarm off                w: Keep warm 2h │ │ 4 requests · ≈ $1.09 API value (API-key price) │
-│ Break ahead? A ping ≈ 1/20 of a re-write.     │ │ Cold       None – warm for every request.      │
-╰───────────────────────────────────────────────╯ │ 5 hours    ██░░░░░░░░░  12% · resets Mon 17:10 │
-                                                  ╰────────────────────────────────────────────────╯
-╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
-│ Requests                       height = share not from cache · blue = first write · newest right │
-│                                                                         ▃▃                       │
-│                                                                         ██                       │
-│                                                                         ██                       │
-│ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁██▁▁▁▁▂▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
-│ 14:02                                                                                      15:31 │
-│ last 150.2k in · 99% hit · out 570                                                               │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-/tokens context | health · keys: ctrl+x tab, then 1–3 · w keep warm · c compact           c: Compact
-```
+<img src="docs/images/overview.png" width="640" alt="The /tokens overview: a big 60-minute countdown marked WARM with the expiry time and where keepwarm would ping, a keepwarm card with a 'Keep warm 2h' button, the context gauge with the auto-compact marker, session totals with 'cache saved 40% of input cost' and the plan limits, and a column chart of every request">
 
 > **What is a Claude Code mod?** A mod is a Claude Code plugin whose TypeScript hooks run *inside* Claude Code: it can draw above the prompt, open panes, add slash commands and react to events such as each model request. See the official [mods overview](https://code.claude.com/docs/en/plugins/mods/overview). Cache Meter is a mod only – no skills, no MCP server, no settings hooks.
 
@@ -134,6 +108,11 @@ In the new session the band appears above the prompt after the first answer; typ
 **Pane `/tokens`** – a dashboard that fits its space: two columns above the prompt from 110 columns, one column as a sidebar, a compact version in a narrow sidebar. It shows a big countdown with the expiry time and a `┃` where keepwarm would ping, what expiry would cost, a keepwarm card with one-key start (`w`), a context gauge marking the auto-compact point, **what caching saved** (share of the input cost, from the price multipliers – see [Prices](CONTRIBUTING.md#prices)), session totals for the main conversation and subagents, cost as in `/cost` (API list price), plan limits with reset times, the cold rewrites of the session, and a **column chart of every request** – its height is the share not read from the cache, so a cold re-write stands out as a tall red column. `/tokens` again or Esc at an empty prompt closes it; above the prompt it also closes when you send your next prompt.
 
 **Tab `2: Context`** – where your context goes, in tokens: categories (memory files, system tools, skills, messages …), the heaviest CLAUDE.md and rule files, MCP servers with their tool count, how many skills made it into the listing (e.g. *120 of 154*). Claude Code estimates this locally after each turn, for free – the same data `/context` shows, but always at hand. **Count exactly** (`x`) asks the API, one request per tool and memory file, only when you press it.
+
+<p>
+<img src="docs/images/context.png" width="49%" alt="The Context tab: where the context goes by category, the heaviest memory files, MCP servers, skills listed of total and agents">
+<img src="docs/images/health.png" width="49%" alt="The Health tab: session age, prompts, cost as API value per prompt, tokens per prompt, stop reasons, API errors, server-side tool calls and the cache check">
+</p>
 
 **Tab `3: Health`** – session age, prompts, cost at API prices per hour and per prompt, tokens per prompt; requests that ended unusually (output limit, context full, compaction, refusal); API errors (overloaded, rate limit …) – Claude Code shows each one once and moves on, this keeps the tally; server-side tool calls such as the [advisor](https://code.claude.com/docs/en/advisor) with their time; and Claude Code's own verdict on the cache at model switches and resumes, checked against Cache Meter's countdown.
 
