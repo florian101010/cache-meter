@@ -26,7 +26,7 @@
   "documentationUrl": "https://github.com/florian101010/cache-meter#readme",
   "supportUrl": "https://github.com/florian101010/cache-meter/issues",
   "privacyPolicyUrl": "https://github.com/florian101010/cache-meter/blob/main/PRIVACY.md",
-  "icon": "./icon.png",
+  "icon": "./.claude-plugin/icon.png",
   "types": "./types/index.d.ts",
   "userConfig": {
     "cacheTtl": {

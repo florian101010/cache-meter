@@ -126,7 +126,6 @@ tests/cache-meter.test.tsx        tests run by `claude plugin test`
 docs/how-it-works.md              design and data flow
 AGENTS.md                         guide for coding agents: install, verify, test, change
 .claude/CLAUDE.md                 imports AGENTS.md for Claude Code sessions in this repository
-icon.png                          the plugin's icon for its listing in Anthropic's directory (manifest field icon)
 llms.txt                          machine-readable index of the documentation
 .github/workflows/upstream.yml    weekly: tests on the newest Claude Code, official docs compared
 .github/scripts/upstream-docs.sh          content hashes of the official pages (--check, --write)
