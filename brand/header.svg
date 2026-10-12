@@ -35,7 +35,7 @@
 <text x="442" y="282" font-family="'Helvetica Neue', 'Segoe UI', Roboto, Arial, sans-serif" font-size="34" fill="#cdd6f4">to a coffee break <tspan fill="url(#claim)" font-weight="700">again.</tspan></text>
 </g>
 <g opacity="0"><animate attributeName="opacity" from="0" to="1" dur="0.9s" begin="0.7s" fill="freeze"/><animateTransform attributeName="transform" type="translate" from="0 14" to="0 0" dur="0.9s" begin="0.7s" fill="freeze"/>
-<text x="442" y="336" font-family="'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="17" fill="#7f849c">live countdown · /keepwarm · /tokens dashboard</text>
+<text x="442" y="336" font-family="'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="17" fill="#7f849c">live countdown · /keepwarm auto · cost per answer · /tokens</text>
 </g>
 <rect x="1" y="1" width="1278" height="398" rx="27" fill="none" stroke="#ffffff" stroke-opacity="0.06" stroke-width="2"/>
 </svg>

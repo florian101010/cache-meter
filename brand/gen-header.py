@@ -99,7 +99,7 @@ def scene(t=None):
 <text x="442" y="282" font-family="{FONT}" font-size="34" fill="#cdd6f4">to a coffee break <tspan fill="url(#claim)" font-weight="700">again.</tspan></text>
 </g>
 <g opacity="{o0}">{fade(0.7)}
-<text x="442" y="336" font-family="{MONO}" font-size="17" fill="#7f849c">live countdown · /keepwarm · /tokens dashboard</text>
+<text x="442" y="336" font-family="{MONO}" font-size="17" fill="#7f849c">live countdown · /keepwarm auto · cost per answer · /tokens</text>
 </g>
 <rect x="1" y="1" width="{W-2}" height="{H-2}" rx="27" fill="none" stroke="#ffffff" stroke-opacity="0.06" stroke-width="2"/>
 </svg>'''
