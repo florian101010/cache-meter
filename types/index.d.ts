@@ -1,16 +1,21 @@
 export type Usage4 = { input: number; read: number; write: number; output: number }
 
-/** One model request as the API counted it. `agent` marks a subagent's loop. */
-export type Step = Usage4 & { at: number; agent: boolean; model: string }
+/** One main-thread model request as the API counted it, timed at the request's start. */
+export type Step = Usage4 & { at: number; model: string }
 
-/** The main thread's prompt cache: when it was last touched, and how well the last request hit it. */
+/** The main thread's prompt cache: when a request last touched it, and how well the last one hit it. */
 export type CacheInfo = {
+  /** Start of the request that last read or wrote the cache (the lifetime counts from there). 0 = known cold. */
   lastAt: number
   hitPct: number | null
-  /** Tokens the next request re-sends (input + read + write + output of the last response). */
+  /** Tokens the next request re-sends, as far as known (input + read + write + output of the last response). */
   contextTokens: number
   /** What re-caching would cost, when the engine estimated it (resume, model switch). */
   rewriteUsd: number | null
+  /** Why the cache is known cold although the clock cannot say (lastAt 0): a model switch or a resume. */
+  coldReason: 'model' | 'resume' | null
+  /** On a cold resume: how long the session had been idle, as Claude Code reported it. */
+  idleBeforeMs: number | null
 }
 
 export type Limit = { kind: string; percentUsed: number; resetsAt?: string }
@@ -19,17 +24,28 @@ export type Measure = {
   percent: number | null
   tokens: number | null
   window: number
-  /** Auto-compact threshold over the same window as `percent`; null when auto-compact is off. */
+  /** Auto-compact threshold over the same window as `percent`; null while unknown or when off. */
   autoCompactPct: number | null
+  /** True when the session reported auto-compact as switched off. */
+  isAutoCompactOff: boolean
+  /** The window the auto-compact figure was computed for; 0 = compute again. */
+  autoCompactWindow: number
   /** Context tokens after each main-thread turn, oldest first. */
   history: number[]
   limits: Limit[]
   usd: number | null
 }
 
-export type Totals = { main: Usage4; sub: Usage4; mainSteps: number; subSteps: number }
+/** Session sums; the cold-rewrite count and tokens are kept apart from the (capped) list of cold rewrites. */
+export type Totals = { main: Usage4; sub: Usage4; mainSteps: number; subSteps: number; coldCount: number; coldWritten: number }
 
 export type KeepWarm = { until: number | null; pings: number; readTokens: number; lastPingAt: number | null }
+
+/** A main request that found the cache expired and wrote it anew: after a pause, a model switch, or a resume. */
+export type ColdWrite = { at: number; written: number; cause: 'pause' | 'model' | 'resume'; idleMs: number | null }
+
+/** The TTL controls Claude Code documents (prompt-caching § Choose the TTL yourself), read at start. */
+export type TtlConfig = { force5m: boolean; envTtl: string | null; settingTtl: string | null; enable1h: boolean }
 
 declare module 'claude-code' {
   interface PluginState {
@@ -40,6 +56,8 @@ declare module 'claude-code' {
       measure: Measure | null
       reportedTtl: '5m' | '1h' | null
       keepWarm: KeepWarm
+      ttlConfig: TtlConfig
+      coldWrites: ColdWrite[]
     }
   }
 }

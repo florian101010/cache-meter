@@ -1,7 +1,7 @@
 {
   "name": "cache-meter",
-  "version": "0.1.0",
-  "description": "Prompt-Cache-Countdown, Trefferquote und Kontext im Band über dem Prompt; Token-Verlauf, Limits und Keepwarm im Pane /tokens",
+  "version": "0.2.0",
+  "description": "Prompt-Cache-Countdown, Trefferquote und Kontext im Band über dem Prompt; Token-Verlauf, kalte Neuschreibungen, Limits und Keepwarm im Pane /tokens",
   "author": {
     "name": "Florian Grimmer"
   },
@@ -10,7 +10,7 @@
     "cacheTtl": {
       "type": "string",
       "title": "Cache-TTL",
-      "description": "auto: 60m, bei überschrittenem Abo-Limit 5m; ein von Claude Code gemeldeter Wert (Modellwechsel) gewinnt. 60m/5m: fest.",
+      "description": "auto: aus Claude Codes TTL-Steuerung (FORCE_PROMPT_CACHING_5M, CLAUDE_CODE_PROMPT_CACHE_TTL, promptCacheTtl, ENABLE_PROMPT_CACHING_1H) hergeleitet, sonst 5m bei erreichtem Abo-Limit, sonst der beim Modellwechsel gemeldete Wert, sonst 60m. 60m/5m: fest (gewinnt vor allem anderen).",
       "options": [
         "auto",
         "60m",
