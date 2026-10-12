@@ -2,6 +2,11 @@
 
 All notable changes to Cache Meter, a Claude Code mod. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.4] – 2026-10-12
+
+### Changed
+- The last policy hold of the directory (MCP_FORWARDS_CREDENTIAL_ENV) read `hooks/lib.ts` as reading the environment: a variable named `env` (the TTL from Claude Code's setting) and a `Map.set` call. Renamed, and the MCP server sums use a plain record. No change in behaviour.
+
 ## [0.5.3] – 2026-10-12
 
 ### Docs
@@ -125,7 +130,8 @@ Changes for Anthropic's plugin directory, whose validation blocked 0.5.1.
 - Pane `/tokens`: per-request token history, totals, plan limits, cost.
 - `/keepwarm`.
 
-[0.5.3]: https://github.com/florian101010/cache-meter/compare/bc581d0...HEAD
+[0.5.4]: https://github.com/florian101010/cache-meter/compare/9175da5...HEAD
+[0.5.3]: https://github.com/florian101010/cache-meter/compare/bc581d0...9175da5
 [0.5.2]: https://github.com/florian101010/cache-meter/compare/cache-meter--v0.5.1...bc581d0
 [0.5.1]: https://github.com/florian101010/cache-meter/compare/cache-meter--v0.5.0...cache-meter--v0.5.1
 [0.5.0]: https://github.com/florian101010/cache-meter/compare/a520960...cache-meter--v0.5.0
