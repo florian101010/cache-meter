@@ -15,7 +15,7 @@ Claude Code re-sends your entire conversation with every message. The prompt cac
 - **Keep it** – type **`/keepwarm`** before lunch or a meeting. Shortly before expiry it sends one tiny ping that keeps the cache alive – about **1/20 of the cost of a re-write**, with hard limits so it never runs away.
 - **Understand it** – **`/tokens`** opens a dashboard: every request's cache hits and misses, cold re-writes and why they happened, what caching saved you, context fill and your plan limits – plus a **Context** tab (which CLAUDE.md files, MCP servers and skills fill your context) and a **Health** tab (API errors, requests cut off at the output limit, the advisor's time, cost per hour at API prices).
 
-Safe by design: it never changes your prompts or tool calls, writes nothing to disk and sends nothing except the pings you start. Free and MIT-licensed.
+Safe by design: it never changes your prompts or tool calls and writes nothing to disk. It sends nothing on its own – only the `/keepwarm` pings and, if you press **Count exactly**, the token counts `/context` would make. Free and MIT-licensed.
 
 ```bash
 claude plugin install cache-meter --marketplace florian101010/cache-meter --scope user
@@ -26,13 +26,13 @@ claude plugin install cache-meter --marketplace florian101010/cache-meter --scop
 The band above the prompt, always there:
 
 ```text
-● cache 38m ■■■■■■■■■■■■■□□□□□□□ 99% hit · ☀ context 15% (auto-compact 97%) [ Compact ]
+● cache 38m ■■■■■■■■■■■■■□□□□□□□ 99% hit · ☀ context 15% (auto-compact 97%) · API $1.10 [ Compact ]
 ```
 
 `/tokens`, the dashboard (example values; colors in your terminal):
 
 ```text
-◉ Cache Meter                                                                  prompt cache · tokens
+◉ Cache Meter  1: Overview  2: Context  3: Health                              prompt cache · tokens
 ╭───────────────────────────────────────────────╮ ╭────────────────────────────────────────────────╮
 │ ▀▀█ █▀█  WARM · min left · until 15:32        │ │ Context 15%                      150.2k / 1.0M │
 │  ▀█ █▀█  hit 99% last · 86% session           │ │ ██████▉░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░┃ │
@@ -41,12 +41,12 @@ The band above the prompt, always there:
 │ expiry costs a re-write of ≈ 150k tokens      │ ╭────────────────────────────────────────────────╮
 ╰───────────────────────────────────────────────╯ │ Session          cache saved 54% of input cost │
 ╭───────────────────────────────────────────────╮ │ read 460k · written 122k · new 8 · out 1.3k    │
-│ ↻ Keepwarm off                w: Keep warm 2h │ │ 4 requests · $1.09 list price                  │
+│ ↻ Keepwarm off                w: Keep warm 2h │ │ 4 requests · ≈ $1.09 at API prices (as /cost)  │
 │ Break ahead? A ping ≈ 1/20 of a re-write.     │ │ Cold       None – warm for every request.      │
 ╰───────────────────────────────────────────────╯ │ 5 hours    ██░░░░░░░░░  12% · resets Mon 17:10 │
                                                   ╰────────────────────────────────────────────────╯
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
-│ Requests                                   height = share not read from the cache · newest right │
+│ Requests                       height = share not from cache · blue = first write · newest right │
 │                                                                         ▃▃                       │
 │                                                                         ██                       │
 │                                                                         ██                       │
@@ -54,7 +54,7 @@ The band above the prompt, always there:
 │ 14:02                                                                                      15:31 │
 │ last 150.2k in · 99% hit · out 570                                                               │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-keys after ctrl+x tab: w keep warm · c compact · Esc back                                 c: Compact
+click a tab, or ctrl+x tab for keys: 1–3 · w keep warm · c compact                        c: Compact
 ```
 
 > **What is a Claude Code mod?** A mod is a Claude Code plugin whose TypeScript hooks run *inside* Claude Code: it can draw above the prompt, open panes, add slash commands and react to events such as each model request. See the official [mods overview](https://code.claude.com/docs/en/plugins/mods/overview). Cache Meter is a mod only – no skills, no MCP server, no settings hooks.
@@ -146,6 +146,7 @@ In the new session the band appears above the prompt after the first answer; typ
 - **Claude Code 2.1.287 or later** in the terminal, or 2.1.286 or later in the Code tab of the Desktop app (see [where mods run](https://code.claude.com/docs/en/plugins/mods/overview#where-mods-run)). Tested with **2.1.296**.
 - Mods enabled – the default; see [turn mods on or off](https://code.claude.com/docs/en/plugins/mods/overview#turn-mods-on-or-off).
 - In the VS Code extension and under `claude -p` the hooks run but nothing is drawn, and `/keepwarm` refuses to start.
+- The Health tab's server-side tool calls (e.g. the advisor) need Claude Code 2.1.290 or later; earlier versions do not report them.
 
 ## Installation
 
@@ -181,7 +182,11 @@ To load the clone in every session, add its **absolute** path to `CLAUDE_CODE_PL
 | What | How |
 |---|---|
 | See cache and context | the band above the prompt, always on |
-| Open the full view | `/tokens` |
+| Open the full view | `/tokens` – again to close; Esc at an empty prompt closes it above the prompt |
+| Open a tab directly | `/tokens context`, `/tokens health`, `/tokens overview` (a prefix is enough: `/tokens h`) – switches an open pane instead of closing it |
+| Switch tabs by key | click a tab, or press ctrl+x, then Tab (the pane gets the keys), then `1`–`3`; Esc hands the keys back |
+| Count the context exactly | `x` or **Count exactly** in the Context tab – one API request per tool and memory file, as `/context` |
+| Pane beside the chat | `/tui fullscreen` (Claude Code's fullscreen renderer): from 110 columns the pane docks as a sidebar and stays open while you chat; `/tui default` switches back |
 | Keep the cache warm | `/keepwarm` (2 h), `/keepwarm 30m` … `/keepwarm 8h`, also `/keepwarm 120m` – interactive sessions only |
 | Stop keeping it warm | `/keepwarm off` (or `0`) – reports pings and tokens read |
 | Compact | the `[ Compact ]` button in the band or the pane (between turns only) |
@@ -192,20 +197,18 @@ One option, `cacheTtl` – `auto` (default), `60m` or `5m`. Set it with `/config
 
 With `auto`, Cache Meter follows Claude Code's own TTL controls and your plan state ([full order](docs/how-it-works.md#how-the-ttl-is-derived)). On an API key or a cloud provider Claude Code's default is five minutes: set `cacheTtl` to `5m`, or set `promptCacheTtl`.
 
-
-
-
 ## Privacy, cost and permissions
 
-- **Writes nothing to disk and sends nothing anywhere** except the `/keepwarm` pings. All values live in session state (`$.state`) and are gone after `/clear`, `/resume`, `/branch` or the end of the session.
+- **Writes nothing to disk and sends nothing on its own.** Requests leave only when you ask: the `/keepwarm` pings, and **Count exactly** in the Context tab (token counts through Claude Code, as `/context` makes them). All values live in session state (`$.state`) and are gone after `/clear`, `/resume`, `/branch` or the end of the session.
+- **Reads what Claude Code reports to mods:** token counts of each request, context fill and its breakdown (Claude Code's free local estimate), cost, plan limits, stop reasons, API errors, server-side tool calls, and Claude Code's verdict on the cache at model switches and resumes.
 - **Reads** the environment variables `FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL` and `ENABLE_PROMPT_CACHING_1H`, and the `promptCacheTtl` setting through `$.settings.read()`.
-- **Cost:** none, except `/keepwarm`. Each ping reads your whole context at the model's cache-read price ([pricing](https://platform.claude.com/docs/en/about-claude/pricing)) and counts against your plan. How cache reads count towards the 5-hour and weekly limits is not documented – watch the limits in the pane.
+- **Cost:** none, except `/keepwarm` and **Count exactly**. Each ping reads your whole context at the model's cache-read price ([pricing](https://platform.claude.com/docs/en/about-claude/pricing)) and counts against your plan. How cache reads count towards the 5-hour and weekly limits is not documented – watch the limits in the pane.
 
 More in [SECURITY.md](SECURITY.md).
 
 ## FAQ
 
-**Does it cost anything?** No – except `/keepwarm`, which you start yourself. Each ping reads your context at the cache-read price – about 1/20 of re-writing it after expiry (1/40 on Opus 5.5 and Sonnet 5.5, 1/80 on Fable 5.1 and Mythos 5.1) – and counts against your plan; at most 12 pings per run.
+**Does it cost anything?** No – except `/keepwarm` and the Context tab's **Count exactly**, which you start yourself. Each ping reads your context at the cache-read price – about 1/20 of re-writing it after expiry (1/40 on Opus 5.5 and Sonnet 5.5, 1/80 on Fable 5.1 and Mythos 5.1) – and counts against your plan; at most 12 pings per run.
 
 **Does `/keepwarm` really keep the cache alive?** A cache read keeps the entry for the duration of its original write – one hour for the main conversation ([pricing](https://platform.claude.com/docs/en/about-claude/pricing)). Check it on your setup with `/usage` after a break (see [above](#keep-the-cache-warm-with-keepwarm)).
 
@@ -213,7 +216,9 @@ More in [SECURITY.md](SECURITY.md).
 
 **Does it work with an API key or a cloud provider?** Yes. Claude Code's default TTL there is five minutes; set `cacheTtl` to `5m` (see [Configuration](#configuration)). `/keepwarm` is disabled at a five-minute TTL.
 
-**Does it read or change my prompts?** No. It hooks model requests only to read their token counts. See [SECURITY.md](SECURITY.md) for everything it can reach.
+**Does it read or change my prompts?** No. It hooks model requests only to read their token counts, stop reasons and server-side tool calls.
+
+**Why does the pane sit above the prompt and not beside the chat?** Claude Code places it, not the mod: beside the chat only in its fullscreen renderer (`/tui fullscreen`) from 110 columns, otherwise above the prompt – there your next prompt closes it so it doesn't take rows from the conversation. See [SECURITY.md](SECURITY.md) for everything it can reach.
 
 **Where does it work?** In the Claude Code terminal and the Code tab of the Desktop app. In the VS Code extension and under `claude -p` it runs but draws nothing.
 

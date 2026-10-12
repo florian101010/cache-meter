@@ -1,6 +1,6 @@
 # Cache Meter (Claude Code Mod)
 
-> Cache Meter, a Claude Code mod – keep your prompt cache warm through a break with /keepwarm and see when it is about to expire. A Claude Code mod (a Claude Code plugin whose TypeScript hooks run inside Claude Code) that shows the prompt cache and token usage: a countdown until the cache expires, the hit rate of each request, context fill and auto-compact point above the prompt; a /tokens pane with per-request history, totals, plan limits and cold rewrites; and /keepwarm to keep the cache warm. Install: `claude plugin install cache-meter --marketplace florian101010/cache-meter`. Test: `claude plugin validate --strict . && claude plugin test .`. Requires Claude Code ≥ 2.1.287. MIT.
+> Cache Meter, a Claude Code mod – keep your prompt cache warm through a break with /keepwarm and see when it is about to expire. A Claude Code mod (a Claude Code plugin whose TypeScript hooks run inside Claude Code) that shows the prompt cache and token usage: a countdown until the cache expires, the hit rate of each request, context fill and auto-compact point above the prompt; the session's cost at API prices; a /tokens pane with three tabs – Overview (per-request chart, what caching saved, totals, plan limits, cold rewrites), Context (which memory files, MCP servers and skills fill the context) and Health (rates, unusual stops, API errors, server-side tool calls, Claude Code's cache verdict); and /keepwarm to keep the cache warm. Install: `claude plugin install cache-meter --marketplace florian101010/cache-meter`. Test: `claude plugin validate --strict . && claude plugin test .`. Requires Claude Code ≥ 2.1.287. MIT.
 
 ## Start here
 
@@ -9,7 +9,7 @@
 
 ## Details
 
-- [docs/how-it-works.md](https://raw.githubusercontent.com/florian101010/cache-meter/main/docs/how-it-works.md): events, state, thresholds, cold-rewrite rule, keepwarm algorithm
+- [docs/how-it-works.md](https://raw.githubusercontent.com/florian101010/cache-meter/main/docs/how-it-works.md): events, state, thresholds, cold-rewrite rule, keepwarm algorithm, pane layout, the Context and Health tabs and their sources, the saving formula
 - [CONTRIBUTING.md](https://raw.githubusercontent.com/florian101010/cache-meter/main/CONTRIBUTING.md): the documentation-first rule and the change workflow
 - [SECURITY.md](https://raw.githubusercontent.com/florian101010/cache-meter/main/SECURITY.md): everything the mod can reach
 - [CHANGELOG.md](https://raw.githubusercontent.com/florian101010/cache-meter/main/CHANGELOG.md): versions
