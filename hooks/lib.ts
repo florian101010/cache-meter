@@ -147,6 +147,21 @@ export const MAX_PINGS = 12
 /** A ping counts as a hit when it read at least this share of the context from the cache. */
 export const PING_HIT_SHARE = 0.5
 
+/** A ping that writes this share of what it read or more missed part of the cache (cache-tax's rule). */
+export const PING_WRITE_SHARE = 0.1
+
+/** A main request that finds the cache expired and writes at least this much counts as a cold rewrite. */
+export const COLD_MIN = 10_000
+
+/** `1h12m`, `45m`, `30s`. */
+export function duration(ms: number): string {
+  const m = Math.floor(ms / 60_000)
+  if (m >= 60) return `${Math.floor(m / 60)}h${String(m % 60).padStart(2, '0')}m`
+  if (m >= 1) return `${m}m`
+
+  return `${Math.max(0, Math.round(ms / 1000))}s`
+}
+
 export const ZERO: Usage4 = { input: 0, read: 0, write: 0, output: 0 }
 
 export function add(a: Usage4, b: Usage4): Usage4 {

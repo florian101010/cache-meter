@@ -1,7 +1,7 @@
 {
   "name": "cache-meter",
-  "version": "0.1.0",
-  "description": "Prompt-Cache-Countdown, Trefferquote und Kontext im Band über dem Prompt; Token-Verlauf, Limits und Keepwarm im Pane /tokens",
+  "version": "0.2.0",
+  "description": "Prompt-Cache-Countdown, Trefferquote und Kontext im Band über dem Prompt; Token-Verlauf, kalte Neuschreibungen, Limits und Keepwarm im Pane /tokens",
   "author": {
     "name": "Florian Grimmer"
   },

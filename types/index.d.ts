@@ -36,6 +36,9 @@ export type Totals = { main: Usage4; sub: Usage4; mainSteps: number; subSteps: n
 
 export type KeepWarm = { until: number | null; pings: number; readTokens: number; lastPingAt: number | null }
 
+/** A main request that found the cache expired and wrote it anew. `idleMs` null when the last touch is unknown (model switch). */
+export type ColdWrite = { at: number; written: number; idleMs: number | null }
+
 /** The TTL controls Claude Code documents (prompt-caching § Choose the TTL yourself), read at start. */
 export type TtlConfig = { force5m: boolean; envTtl: string | null; settingTtl: string | null; enable1h: boolean }
 
@@ -49,6 +52,7 @@ declare module 'claude-code' {
       reportedTtl: '5m' | '1h' | null
       keepWarm: KeepWarm
       ttlConfig: TtlConfig
+      coldWrites: ColdWrite[]
     }
   }
 }

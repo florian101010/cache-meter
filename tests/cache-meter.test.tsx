@@ -50,11 +50,13 @@ function usageValue(tokens: number | undefined, window: number, threshold: numbe
 }
 
 /** Every stub a session-start-to-turn test needs; registered before the first call on $. */
-function world(on: On, opts: { env?: Record<string, string>; forkRead?: number; forkAnswer?: boolean } = {}) {
+function world(on: On, opts: { env?: Record<string, string>; forkRead?: number; forkWrite?: number; forkAnswer?: boolean } = {}) {
   const clock = mock.clock(on, { now: T0 })
   mock.env(on, opts.env ?? {})
   const toasts: string[] = []
   const forks: string[] = []
+  // What the next main request writes to the cache; a test raises it to stage a cold rewrite.
+  const next = { write: 6_000 }
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['drawn below'] }))
   on('ui.toast', ($, e) => {
     toasts.push(e.text)
@@ -77,7 +79,7 @@ function world(on: On, opts: { env?: Record<string, string>; forkRead?: number; 
           value: {
             isAnswered: true,
             text: 'warm',
-            usage: { input_tokens: 5, output_tokens: 1, cache_read_input_tokens: opts.forkRead ?? 99_000, cache_creation_input_tokens: 0 },
+            usage: { input_tokens: 5, output_tokens: 1, cache_read_input_tokens: opts.forkRead ?? 99_000, cache_creation_input_tokens: opts.forkWrite ?? 0 },
           },
         } as never)
   })
@@ -89,11 +91,11 @@ function world(on: On, opts: { env?: Record<string, string>; forkRead?: number; 
       answer: 'ok',
       toolUses: [],
       stopReason: 'end_turn',
-      usage: { model: 'claude-test', input_tokens: 1_000, output_tokens: 500, cache_read_input_tokens: 93_000, cache_creation_input_tokens: 6_000 },
+      usage: { model: 'claude-test', input_tokens: 1_000, output_tokens: 500, cache_read_input_tokens: 93_000, cache_creation_input_tokens: next.write },
     } as never
   })
 
-  return { clock, toasts, forks }
+  return { clock, toasts, forks, next }
 }
 
 /** Runs a slash command; the kit fills origin and presentation (test § Write a test). */
@@ -311,4 +313,43 @@ test('Pane zeichnet mit Anfragen und Limits auf jeder Oberfläche', async ($, on
     expect(await ui.find({ type: 'Button', key: 'pane-compact' })).toBeDefined()
     await ui.unmount()
   }
+})
+
+test('/keepwarm schaltet ab, wenn ein Ping viel neu schreibt (Teil-Fehltreffer)', async ($, on) => {
+  const { clock, forks, toasts } = world(on, { forkRead: 99_000, forkWrite: 20_000 })
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  await run($, 'keepwarm', '')
+  await clock.advance(51 * 60_000)
+  await clock.settle()
+  expect(forks).toHaveLength(1)
+  expect(toasts.some(t => t.includes('20.0k geschrieben'))).toBe(true)
+  await clock.advance(60 * 60_000)
+  expect(forks).toHaveLength(1)
+})
+
+test('Kalte Neuschreibung: Liste im Pane und Hinweis, warme zählt nicht', async ($, on) => {
+  const { clock, toasts, next } = world(on)
+  await step($)
+  // Warm, but much written (new context): not a cold rewrite.
+  next.write = 150_000
+  await step($)
+  // After a 70-minute break the cache has lapsed; this request writes it anew.
+  await clock.advance(70 * 60_000)
+  await step($)
+  expect(toasts.filter(t => t.startsWith('Cache war kalt: 150.0k'))).toHaveLength(1)
+  const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  expect(await ui.find({ type: 'Text', text: ' neu geschrieben nach 1h10m Pause' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Zusammen 1×/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('Kalte Neuschreibung: kein Hinweis, solange /keepwarm läuft', async ($, on) => {
+  const { clock, toasts, next } = world(on)
+  await step($)
+  await run($, 'keepwarm', '2h')
+  next.write = 150_000
+  await clock.advance(70 * 60_000)
+  await step($)
+  expect(toasts.some(t => t.startsWith('Cache war kalt'))).toBe(false)
 })

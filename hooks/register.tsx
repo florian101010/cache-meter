@@ -18,15 +18,18 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { CacheInfo, KeepWarm, Measure, Totals, TtlConfig, Usage4 } from '../types'
+import type { CacheInfo, ColdWrite, KeepWarm, Measure, Totals, TtlConfig, Usage4 } from '../types'
 import {
+  COLD_MIN,
   HOUR,
   MAX_PINGS,
   PING_HIT_SHARE,
   PING_SHARE,
+  PING_WRITE_SHARE,
   ZERO,
   add,
   cacheStatus,
+  duration,
   forecast,
   hhmm,
   hitPct,
@@ -59,6 +62,7 @@ const keepA = atom({ plugin: 'cache-meter', key: 'keepWarm' } as const, {
   readTokens: 0,
   lastPingAt: null,
 })
+const coldA = atom({ plugin: 'cache-meter', key: 'coldWrites' } as const, [])
 const ttlConfigA = atom({ plugin: 'cache-meter', key: 'ttlConfig' } as const, {
   force5m: false,
   envTtl: null,
@@ -159,11 +163,13 @@ async function tick($: EngineInterface) {
     const measure = await read($, measureA)
     const expected = measure?.tokens ?? cache.contextTokens
     const got = reply.usage.cache_read_input_tokens
+    const wrote = reply.usage.cache_creation_input_tokens
     await update($, keepA, k => ({ ...k, pings: k.pings + 1, readTokens: k.readTokens + got, lastPingAt: startedAt }))
-    if (expected > 0 && got < expected * PING_HIT_SHARE) {
-      // The ping rebuilt the cache instead of reading it: the TTL assumption is wrong. Stop paying.
+    // A miss (little read) or a partial miss (much written next to what was read): the cache was
+    // not what the TTL assumption said. Stop paying for pings. The write rule follows cache-tax.
+    if (got === 0 || (expected > 0 && got < expected * PING_HIT_SHARE) || wrote >= got * PING_WRITE_SHARE) {
       await update($, keepA, k => ({ ...k, until: null }))
-      $.ui.toast(`Warmhalten aus: Ping traf den Cache nicht (${short(got)} von ${short(expected)} gelesen)`)
+      $.ui.toast(`Warmhalten aus: Ping traf den Cache nicht ganz (${short(got)} gelesen, ${short(wrote)} geschrieben)`)
 
       return
     }
@@ -245,6 +251,9 @@ export const register: Register = (on, options) => {
   // Each model request: the four token counts as the API reported them (events § Follow a turn).
   on('turn.step', async function* ($, e, next) {
     const startedAt = await $.clock.now()
+    // Was the main cache already expired when this request started? (read before the request)
+    const before = e.agentId === undefined ? await read($, cacheA) : null
+    const wasCold = before !== null && cacheStatus(before, startedAt, (await ttlNow($)).ms).kind === 'expired'
     const result = yield* next(e)
     const usage = result.usage
     // Whether a keepwarm fork raises turn.step is undocumented: leave its request out either way.
@@ -266,6 +275,15 @@ export const register: Register = (on, options) => {
           contextTokens: u.input + u.read + u.write + u.output,
           rewriteUsd: null,
         }))
+        if (wasCold && before !== null && u.write >= COLD_MIN) {
+          const cold: ColdWrite = { at: startedAt, written: u.write, idleMs: before.lastAt > 0 ? startedAt - before.lastAt : null }
+          await update($, coldA, list => [...list, cold].slice(-20))
+          const keep = await read($, keepA)
+          if (keep.until === null) {
+            // A hint, not an action: cache-tax arms keepwarm by itself here, which spends quota unasked.
+            $.ui.toast(`Cache war kalt: ${short(u.write)} Tokens neu geschrieben – vor der nächsten Pause /keepwarm?`)
+          }
+        }
       }
     }
 
@@ -462,13 +480,14 @@ export const register: Register = (on, options) => {
     const measure = await read($, measureA)
     const cache = await read($, cacheA)
     const keep: KeepWarm = await read($, keepA)
+    const colds = await read($, coldA)
     const ttl = await ttlNow($)
     const now = await $.clock.now()
     const status = cacheStatus(cache, now, ttl.ms)
     const cols = e.props.bodyColumns
     const rows = e.props.scroll.bodyRows
 
-    const shown = steps.slice(-Math.max(3, rows - 24))
+    const shown = steps.slice(-Math.max(3, rows - 30))
     const barWidth = Math.max(10, cols - 34)
     const top = Math.max(1, ...shown.map(s => s.input + s.read + s.write))
     const sessionHit = hitPct(totals.main)
@@ -562,6 +581,22 @@ export const register: Register = (on, options) => {
           {measure?.usd == null ? '–' : `$${measure.usd.toFixed(2)}`}
           <Text dimColor> (wie /cost, Listenpreis)</Text>
         </Text>
+        <Text> </Text>
+
+        <Text bold>Kalte Neuschreibungen dieser Session</Text>
+        {colds.length === 0 && <Text dimColor>Keine – der Cache war bei jeder Anfrage warm.</Text>}
+        {colds.slice(-5).map(c => (
+          <Text>
+            <Text dimColor>{hhmm(c.at)} </Text>
+            <Text color="warning">{short(c.written)}</Text>
+            <Text dimColor> neu geschrieben{c.idleMs === null ? ' (nach Modellwechsel)' : ` nach ${duration(c.idleMs)} Pause`}</Text>
+          </Text>
+        ))}
+        {colds.length > 0 && (
+          <Text dimColor>
+            Zusammen {colds.length}× · {short(colds.reduce((n, c) => n + c.written, 0))} Tokens · /keepwarm vor Pausen verhindert das
+          </Text>
+        )}
         <Text> </Text>
 
         <Text bold>Limits</Text>
