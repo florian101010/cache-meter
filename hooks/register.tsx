@@ -155,6 +155,10 @@ let budgetWarned = 0
 // Prompts already in the transcript when this load or /clear, /resume, /branch began: MCP calls are
 // counted from then on ($.state resets there, $.session.turns() does not), so "unused" counts from there too.
 let promptBase = 0
+// When this process started counting requests, if the transcript already held prompts then: the
+// history lives in memory only (nothing on disk), so a relaunch – /tui switches renderer that way
+// (fullscreen › Enable fullscreen rendering), or claude --resume – starts it over. Null otherwise.
+let historySince: number | null = null
 let openTurns: Record<string, { usd: number | null; requests: number }> = {}
 // Where the surface last seated the pane: beside a fullscreen transcript (dock) or above the prompt (inline).
 let seat: 'dock' | 'inline' | null = null
@@ -604,6 +608,10 @@ async function turnsNow($: EngineInterface): Promise<number> {
   }
 }
 
+async function noteHistoryStart($: EngineInterface) {
+  historySince = promptBase > 0 && (await read($, stepsA)).length === 0 ? await $.clock.now() : null
+}
+
 async function resetCache($: EngineInterface) {
   await update($, cacheA, () => null)
   await update($, measureA, m => (m === null ? m : { ...m, percent: null, tokens: null }))
@@ -683,6 +691,7 @@ export const register: Register = (on, options) => {
   budget = typeof options.sessionBudget === 'number' && options.sessionBudget > 0 ? options.sessionBudget : 0
   budgetWarned = 0
   promptBase = 0
+  historySince = null
   openTurns = {}
 
   on('session.start', async ($, e, next) => {
@@ -690,6 +699,7 @@ export const register: Register = (on, options) => {
     await loadTtlConfig($)
     await measureNow($)
     promptBase = await turnsNow($)
+    await noteHistoryStart($)
     // session.start is the first event of every load: a fresh session warns from 0; a reload in a running
     // one (requests already counted, state kept) takes the level reached without a toast.
     budgetWarned = 0
@@ -727,6 +737,7 @@ export const register: Register = (on, options) => {
     await loadTtlConfig($)
     await measureNow($)
     promptBase = await turnsNow($)
+    await noteHistoryStart($)
     // A new transcript: no last main request to compare the next one with.
     lastMain = null
     await settleBudget($)
@@ -1476,7 +1487,9 @@ export const register: Register = (on, options) => {
           {usageLine(totals.main)}
         </Text>
         <Text wrap="truncate-end">
-          <Text dimColor>{totals.mainSteps} requests · </Text>
+          <Text dimColor>
+            {totals.mainSteps} requests{historySince === null ? '' : ` since ${hhmm(historySince)}`} ·{' '}
+          </Text>
           <Text bold>{measure?.usd == null ? '–' : `${isPlan(measure) ? '≈ ' : ''}$${measure.usd.toFixed(2)}`}</Text>
           <Text dimColor>{measure?.usd == null ? '' : costLabel(measure, tier !== 'narrow')}</Text>
         </Text>
@@ -1577,7 +1590,13 @@ export const register: Register = (on, options) => {
                 : 'not from cache'}
           </Text>
         </Box>
-        {steps.length === 0 && <Text dimColor>No request measured yet.</Text>}
+        {steps.length === 0 && (
+          <Text dimColor wrap="wrap">
+            {historySince === null
+              ? 'No request measured yet.'
+              : `No request since ${hhmm(historySince)}: Cache Meter keeps its history in memory only, so a resume or /tui starts it over.`}
+          </Text>
+        )}
         {steps.length > 0 && Raster && (
           <Box flexDirection="column">
             {/* One keyed Box per request column, in the flow: a keyed Box is a hover scope "while the
@@ -1792,7 +1811,10 @@ export const register: Register = (on, options) => {
           <Text wrap="truncate-end">
             {label('Prompts')}
             <Text bold>{prompts ?? '–'}</Text>
-            <Text dimColor> · {totals.mainSteps} requests</Text>
+            <Text dimColor>
+              {' '}
+              · {totals.mainSteps} requests{historySince === null ? '' : ` since ${hhmm(historySince)}`}
+            </Text>
           </Text>
           <Text wrap="truncate-end">
             {label('Cost')}
@@ -1905,7 +1927,9 @@ export const register: Register = (on, options) => {
           )}
           <Text wrap="truncate-end">
             {label('Warm miss')}
-            {unexpected.count === 0 ? (
+            {unexpected.count === 0 && totals.mainSteps === 0 ? (
+              <Text dimColor>no request measured yet</Text>
+            ) : unexpected.count === 0 ? (
               <Text color="success">none – every warm request read the cache</Text>
             ) : (
               <Text color="warning">

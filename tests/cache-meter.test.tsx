@@ -1802,3 +1802,32 @@ test('live during a turn: requests between prompts leave the auto-compact foreca
   expect(await ui.find({ type: 'Text', text: ' · in ≈ 7 prompts at this pace' })).toBeDefined()
   await ui.unmount()
 })
+
+test('after a relaunch (/tui, --resume): the pane says the history starts over, not "no request"', async ($, on) => {
+  const { next } = world(on)
+  // The transcript already holds prompts when Cache Meter starts counting.
+  next.turns = 3
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  expect(await ui.find({ type: 'Text', text: /^No request since \d\d:\d\d: Cache Meter keeps its history in memory only/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^0 requests since \d\d:\d\d · $/ })).toBeDefined()
+  await ui.unmount()
+  // Nothing measured: Health does not call that a clean record.
+  const miss = await healthText($, /^no request measured yet$/)
+  expect(miss?.props.dimColor).toBe(true)
+  expect(await healthText($, /every warm request read the cache/)).toBeUndefined()
+})
+
+test('a fresh session: no restart note, and the history note leaves once requests are counted', async ($, on) => {
+  const { next } = world(on)
+  next.turns = 0
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  let ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  expect(await ui.find({ type: 'Text', text: 'No request measured yet.' })).toBeDefined()
+  await ui.unmount()
+  await step($)
+  ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  expect(await ui.find({ type: 'Text', text: /^1 requests · $/ })).toBeDefined()
+  await ui.unmount()
+  expect(await healthText($, /every warm request read the cache/)).toBeDefined()
+})

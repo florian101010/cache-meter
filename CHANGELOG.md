@@ -12,9 +12,14 @@ Alive: the band moves when it matters, and a budget keeps a session in check.
 - **Request details on hover** (fullscreen renderer): point at a column of the request chart for its time, tokens, hit rate, writes and output.
 - **Live during a turn:** context, cost and plan limits refresh after every main request (the plain `$.session.usage()`, which costs nothing), not only when the turn ends – no more `–` or `$0.00` during a long first answer, and the session budget warns while an expensive turn still runs. The auto-compact forecast still counts prompts.
 - **Session budget** (option `sessionBudget`, dollars, off by default): the band shows `of $X`, yellow from 80 %, red from 100 %, with a toast at each; the Health tab shows the share.
+- **After a relaunch:** `/tui` and `claude --resume` restart Claude Code with the conversation but not Cache Meter's in-memory history. The pane now says `No request since <time>` and counts `N requests since <time>` instead of a bare `No request measured yet` beside the session's cost.
 - **Keeping up with Claude Code:** a weekly workflow runs the tests on the newest Claude Code and compares the official pages the mod relies on with stored content hashes (`.github/scripts/upstream-docs.sh`, `docs/upstream-docs.txt`); a change opens an issue. CONTRIBUTING lists every official page and what it settles here.
 
+### Changed
+- Health: with no request measured, Warm miss reads `no request measured yet` (dim) instead of a green `none`.
+
 ### Docs
+- README FAQ: why the chart starts empty after `/tui` or a resume, and what to do when a click on a tab selects text instead (fullscreen, touch or trackpad).
 - README: how to update (`claude plugin update cache-meter@cache-meter`, or auto-update for the marketplace).
 
 ## [0.8.0] – 2026-10-12

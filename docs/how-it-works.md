@@ -24,7 +24,7 @@ Calls: `$.clock.now/every`, `$.command.register`, `$.env.get` (three literal nam
 
 ## State
 
-All drawn values live in `$.state`, declared in `types/index.d.ts` (*interface › Keep a value in $.state*). They survive a reload of the module and are reset by `/clear`, `/resume` and `/branch`.
+All drawn values live in `$.state`, declared in `types/index.d.ts` (*interface › Keep a value in $.state*). They survive a reload of the module and are reset by `/clear`, `/resume` and `/branch`, and gone after a relaunch – `/tui` relaunches Claude Code with the conversation intact (*fullscreen › Enable fullscreen rendering*). When the transcript already holds prompts but no request is recorded (`$.session.turns()` > 0 at that point), the pane says `No request since <time>` and counts requests from there, so an empty chart is not mistaken for an idle session.
 
 | Key | Holds |
 |---|---|

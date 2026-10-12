@@ -21,7 +21,7 @@ What Claude does read: the short replies of its commands (`/tokens`, `/keepwarm`
 
 ## What it keeps
 
-Everything stays in memory, in Claude Code's session state and the mod's own variables. Nothing is written to disk. It is gone when the session ends and after `/clear`, `/resume` or `/branch`.
+Everything stays in memory, in Claude Code's session state and the mod's own variables. Nothing is written to disk. It is gone when the session ends, after `/clear`, `/resume` or `/branch`, and when Claude Code relaunches – `/tui` switches renderer that way.
 
 Other mods you load can read that session state – Claude Code lets any loaded mod read any mod's values (type declarations, `$.state`) – and a mod that runs before Cache Meter can see what it puts on the clipboard or in a notification. Paths are stored with your home directory shortened to `~`; tool labels and subagent task descriptions are stored as shown.
 
