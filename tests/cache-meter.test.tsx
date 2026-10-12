@@ -43,6 +43,7 @@ import {
   toolDiff,
   toolLabel,
   isSecretLikePart,
+  dockTip,
   turnLine,
   writeMultiplier,
 } from '../hooks/lib'
@@ -141,6 +142,8 @@ function world(on: On, opts: { env?: Record<string, string>; forkRead?: number; 
     turns: 4,
     // The rate-limit windows $.session.usage reports.
     rateLimits: [] as unknown[],
+    // What $.session.surfaces() answers.
+    surfaces: ['terminal'] as string[],
     // Whether the next tool call is refused (a deny from a hook beneath).
     deny: false,
     server: [] as { id: string; name: string; input: unknown; startedAt: number; endedAt?: number }[],
@@ -179,6 +182,7 @@ function world(on: On, opts: { env?: Record<string, string>; forkRead?: number; 
     return { value: { ...v.value, context, cost: { usd: next.usd } } } as never
   })
   on('turn.start', ($, e) => ({ turnId: e.turnId }))
+  on('session.surfaces', () => ({ value: next.surfaces }) as never)
   // As core answers: `text` is the result as the model reads it (types: ToolCallResult); or a deny from beneath.
   on('tool.call', () => (next.deny ? { deny: 'refused' } : { result: 'ok', ...(next.toolText === null ? {} : { text: next.toolText }) }) as never)
   on('classic.PreModelSwitch', () => ({}))
@@ -2586,4 +2590,36 @@ test('labels: a credential inside a path part or a long key-like run is masked; 
   expect(isSecretLikePart('fantasia.md')).toBe(false)
   expect(isSecretLikePart('a-very-long-but-plain-file-name-without-digits.md')).toBe(false)
   expect(toolLabel('Read', { file_path: '/srv/keys/backup-ghp_abc.txt' })).toBe('Read /srv/keys/…')
+})
+
+test('dock tip: why the pane is above the prompt and how it gets beside the chat', () => {
+  expect(dockTip(false, 200, 'sentence')).toMatch(/^tip: \/tui fullscreen puts this beside the chat as a sidebar \(from 110 columns; Claude Code relaunches with the conversation, the meter starts over\)$/)
+  expect(dockTip(false, 60, 'short')).toBe('tip: /tui fullscreen puts this beside the chat')
+  expect(dockTip(false, 120, 'line')).toBe('tip: /tui fullscreen puts this beside the chat as a sidebar (110+ columns; relaunches, figures start over)')
+  expect(dockTip(true, 100, 'line')).toBe('tip: a window 110 columns or wider puts this beside the chat as a sidebar')
+  expect(dockTip(true, 110, 'line')).toBeNull()
+  expect(dockTip(undefined, 80, 'line')).toBeNull()
+})
+
+test('dock tip: in the /tokens reply and on the Overview above the prompt – not docked, not on Desktop', async ($, on) => {
+  const { next } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  const run1 = await $.command.run({ command: 'tokens', args: '', presentation: { isFullscreen: false, columns: 120 } } as never)
+  expect((run1 as { text: string }).text).toMatch(/above the prompt\. Esc at an empty prompt or \/tokens again closes it\. Tip: \/tui fullscreen puts this beside the chat/)
+  const inline = { ...PANE, viewport: { columns: 120, rows: 40, isFullscreen: false }, props: { ...PANE.props, placement: 'inline' as const } }
+  let ui = await $.ui.mount({ surface: 'terminal', ...inline })
+  expect(await ui.find({ type: 'Text', text: /^tip: \/tui fullscreen/ })).toBeDefined()
+  await ui.press({ key: 'tab-context' })
+  expect(await ui.find({ type: 'Text', text: /^tip:/ })).toBeUndefined()
+  await ui.unmount()
+  ui = await $.ui.mount({ surface: 'terminal', ...DOCK, viewport: { columns: 200, rows: 50, isFullscreen: true } })
+  expect(await ui.find({ type: 'Text', text: /^tip:/ })).toBeUndefined()
+  await ui.unmount()
+  const desk = await $.ui.mount({ surface: 'desktop', ...inline })
+  expect(await desk.find({ type: 'Text', text: /^tip:/ })).toBeUndefined()
+  await desk.unmount()
+  await run($, 'tokens', '')
+  next.surfaces = ['desktop']
+  const run2 = await $.command.run({ command: 'tokens', args: '', presentation: { isFullscreen: false, columns: 120 } } as never)
+  expect((run2 as { text: string }).text).not.toMatch(/Tip/)
 })

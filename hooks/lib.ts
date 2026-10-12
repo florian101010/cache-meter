@@ -865,3 +865,26 @@ export function compactNote(messages: number | null, context: number | null): st
 
 /** A plan limit worth a warning: half used or more, and full before it resets at this pace. */
 export const LIMIT_NOTE_PCT = 50
+
+/** The terminal width from which the fullscreen layout docks a pane beside the transcript (types: Pane.placement). */
+export const DOCK_COLUMNS = 110
+
+/**
+ * Why the pane sits above the prompt and how it gets beside the chat, for a terminal only: on the main
+ * screen `/tui fullscreen` (it saves the setting and relaunches with the conversation – fullscreen ›
+ * Switch – so the mod's in-memory figures start over), in fullscreen a wider window. Null when it already
+ * docks or nothing is known.
+ */
+export function dockTip(isFullscreen: boolean | undefined, columns: number | undefined, size: 'sentence' | 'line' | 'short'): string | null {
+  if (isFullscreen === false) {
+    if (size === 'short') return 'tip: /tui fullscreen puts this beside the chat'
+    if (size === 'line') return `tip: /tui fullscreen puts this beside the chat as a sidebar (${DOCK_COLUMNS}+ columns; relaunches, figures start over)`
+
+    return `tip: /tui fullscreen puts this beside the chat as a sidebar (from ${DOCK_COLUMNS} columns; Claude Code relaunches with the conversation, the meter starts over)`
+  }
+  if (isFullscreen === true && columns !== undefined && columns < DOCK_COLUMNS) {
+    return size === 'short' ? `tip: ${DOCK_COLUMNS}+ columns put this beside the chat` : `tip: a window ${DOCK_COLUMNS} columns or wider puts this beside the chat as a sidebar`
+  }
+
+  return null
+}

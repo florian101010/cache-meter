@@ -79,6 +79,8 @@ import {
   stopLabel,
   errorLabel,
   cafeState,
+  dockTip,
+  DOCK_COLUMNS,
   compactNote,
   LIMIT_NOTE_PCT,
   hogNote,
@@ -1292,14 +1294,17 @@ export const register: Register = (on, options) => {
     const pane = { id: PANE, title: 'Tokens & Cache', rows: columns >= 114 ? 26 : 36 }
     // Docked beside a fullscreen transcript from 110 columns (types: CommandPresentation), the pane is a
     // sidebar: Esc only hands the keys back. Above the prompt Esc closes it (closeOnEscape takes only true).
-    const isDock = e.presentation?.isFullscreen === true && columns >= 110
+    const isDock = e.presentation?.isFullscreen === true && columns >= DOCK_COLUMNS
     await $.ui.open(isDock ? pane : { ...pane, closeOnEscape: true })
     $.ui.invalidate('ui.render')
+
+    // Above the prompt in a terminal: say why, and how it gets beside the chat. /tui is the terminal's.
+    const tip = isDock || !(await $.session.surfaces()).includes('terminal') ? null : dockTip(e.presentation?.isFullscreen, columns, 'sentence')
 
     return {
       text: isDock
         ? 'Opened the "Tokens & Cache" sidebar. /tokens again closes it.'
-        : 'Opened the "Tokens & Cache" pane. Esc at an empty prompt or /tokens again closes it.',
+        : `Opened the "Tokens & Cache" pane above the prompt. Esc at an empty prompt or /tokens again closes it.${tip === null ? '' : ` ${tip[0]!.toUpperCase()}${tip.slice(1)}.`}`,
     }
   })
 
@@ -2266,6 +2271,7 @@ export const register: Register = (on, options) => {
     // Clicks reach a pane only in Claude Code's fullscreen renderer, which captures the mouse
     // (fullscreen › Use the mouse); in the classic renderer the terminal keeps it.
     const canClick = e.viewport?.isFullscreen === true
+    const dockLine = e.props.placement === 'inline' && e.surface === 'terminal' ? dockTip(e.viewport?.isFullscreen, e.viewport?.columns, cols >= 108 ? 'line' : 'short') : null
     const tabButton = (id: typeof tab, name: string, hotkey: string, warn = false) => (
       <Button
         key={`tab-${id}`}
@@ -2344,6 +2350,12 @@ export const register: Register = (on, options) => {
         )}
         {tab === 'context' && contextView}
         {tab === 'health' && healthView}
+        {/* Above the prompt in a terminal, the Overview says how the pane gets beside the chat. */}
+        {tab === 'overview' && dockLine !== null && (
+          <Text dimColor wrap="truncate-end">
+            {dockLine}
+          </Text>
+        )}
         <Box flexDirection="row" justifyContent="space-between">
           {/* Ctrl+X Tab walks the focus band → each open pane → prompt (keybindings › abovePrompt:focus), so
               the pane says when it has the keyboard (Pane.isFocused): digits typed before that reach the chat. */}

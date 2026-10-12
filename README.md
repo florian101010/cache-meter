@@ -44,30 +44,39 @@ Type **`/keepwarm`** before lunch or a meeting. Shortly before expiry one tiny p
 
 **New in 0.6–0.11:** a word when one tool result floods the context · plan-limit warnings · what the conversation came to after `/clear` · a barista who acts out your cache · cost under every answer · warnings before a switch re-writes the cache · the cause of every warm miss · what fills your conversation · auto-compact forecast · per-subagent use · expiry notification · session budget · live last minute and keepwarm heartbeat · a flash at each new minute · hover details · `/tokens report`. → [changelog](CHANGELOG.md)
 
-**Install** – in your shell, then start a new Claude Code session:
+## Quickstart
+
+**1 · Install** – in your shell:
 
 ```bash
 claude plugin install cache-meter --marketplace florian101010/cache-meter --scope user
 ```
 
-**Or let Claude Code do it** – paste this into a session:
+Or let Claude Code do it – paste this into a session (it runs the same command; Claude Code may ask you to approve it):
 
 ```text
 Install the Claude Code mod from https://github.com/florian101010/cache-meter – follow its AGENTS.md.
 ```
 
-It runs the same command (Claude Code may ask you to approve it); start a new session afterwards.
+**2 · Start a new session and ask anything.** Under the answer a line shows what it cost; the band above the prompt shows the cache countdown, hit rate and context.
 
-**Try it** in the new session:
+**3 · Open the dashboard: `/tokens`.** `/tokens context` shows which tool results, files and servers fill your context; `/tokens` again closes it.
 
-1. Ask anything – under the answer a line shows what it cost; the band above the prompt shows the countdown, hit rate and context.
-2. `/tokens` – the dashboard; `/tokens context` shows which tool results, files and servers fill your context.
-3. `/keepwarm` before your next break – then check after the break that the next answer reads from the cache (hit rate in the band).
-4. `/tokens report` – the whole session as Markdown on your clipboard, ready to paste into an issue or a note.
+> [!TIP]
+> **Want the dashboard as a sidebar beside the chat?** Run **`/tui fullscreen`** – Claude Code's fullscreen renderer docks the pane next to the transcript from 110 columns, and it stays open while you chat (mouse clicks work there too). In the classic renderer the pane opens above the prompt instead, and says so in a tip line. The switch relaunches Claude Code with your conversation intact; Cache Meter's figures start over. `/tui default` switches back.
+
+**4 · Before your next break: `/keepwarm`.** After the break, check that the next answer reads from the cache (hit rate in the band). `/tokens report` copies the whole session as Markdown.
+
+| Command | Does |
+|---|---|
+| `/tokens` · `/tokens context` · `/tokens health` | the dashboard, or one tab of it (again: close) |
+| `/tui fullscreen` | the dashboard as a sidebar beside the chat (from 110 columns) |
+| `/keepwarm` · `/keepwarm 30m`…`8h` · `/keepwarm off` | keep the cache warm through a break, with hard limits |
+| `/tokens report` | the session as Markdown on your clipboard |
 
 Safe by design: it never changes your prompts, answers or tool calls, never keeps their text and writes nothing to disk. It sends nothing on its own – only the `/keepwarm` pings and, if you press **Count exactly**, the token counts `/context` would make; with the option `expiryNotice` on, a notification through your own terminal. Free and MIT-licensed.
 
-### What you see
+## What you see
 
 The band above the prompt, always there:
 
@@ -194,7 +203,7 @@ Docked beside the chat, the free room under the request chart becomes a small ca
 
 Small touches go with it, each a fraction of a second: the big countdown flashes and a shine runs over its bar at each new minute; a new request column grows in from below; cost and the cache saving count up to a new figure; and while keepwarm runs, its arrow turns. All of it shows only while the Overview is on screen, never in the band, and stops with the option `animations` set to `off`. The café and the turning arrow are separate files that get nothing but the cache's state word (the arrow not even that): they have no mods API (types: `ClientSurface`), and their code makes no other call.
 
-**Where it shows.** In Claude Code's classic renderer the pane sits above the prompt, and your next prompt closes it so the conversation keeps its room. In the fullscreen renderer (`/tui fullscreen`) it docks beside the chat as a sidebar, opens there by itself at session start (option [`autoSidebar`](#configuration)) and stays open while you work – and there it takes the mouse: click the tabs and buttons, scroll with the wheel, point at the request chart. **Keys, either way:** <kbd>Ctrl</kbd>+<kbd>X</kbd>, then <kbd>Tab</kbd> gives the pane the keyboard (it turns orange), <kbd>1</kbd>–<kbd>3</kbd> switch tabs, <kbd>↓</kbd> / <kbd>Page Down</kbd> scroll, <kbd>Esc</kbd> hands the keys back.
+**Where it shows.** In Claude Code's classic renderer the pane sits above the prompt – a tip line says how to get it beside the chat – and your next prompt closes it so the conversation keeps its room. In the fullscreen renderer (`/tui fullscreen`) it docks beside the chat as a sidebar, opens there by itself at session start (option [`autoSidebar`](#configuration)) and stays open while you work – and there it takes the mouse: click the tabs and buttons, scroll with the wheel, point at the request chart. **Keys, either way:** <kbd>Ctrl</kbd>+<kbd>X</kbd>, then <kbd>Tab</kbd> gives the pane the keyboard (it turns orange), <kbd>1</kbd>–<kbd>3</kbd> switch tabs, <kbd>↓</kbd> / <kbd>Page Down</kbd> scroll, <kbd>Esc</kbd> hands the keys back.
 
 **Switching tabs.** `/tokens context` or `/tokens health` – a prefix is enough; after `/tokens ` Claude Code shows the tab names and `report` as a hint. Or click a tab (fullscreen renderer), or press <kbd>Ctrl</kbd>+<kbd>X</kbd>, then <kbd>Tab</kbd> until the pane turns orange (*keys here*), then `1`–`3`.
 
@@ -210,6 +219,7 @@ It stays with you: the report goes only to your own clipboard – the one of the
 
 ## Contents
 
+- [Quickstart](#quickstart)
 - [Every answer, priced](#every-answer-priced)
 - [Warned before the cache breaks](#warned-before-the-cache-breaks)
 - [Keep the cache warm with `/keepwarm`](#keep-the-cache-warm-with-keepwarm)
