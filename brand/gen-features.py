@@ -224,8 +224,8 @@ BANNERS = [
      "A heads-up before a switch re-writes your cache.", "model and effort switches · a reminder before it expires"),
     ("tokens", "Understand it: /tokens shows why the cache broke and what fills your context.", tokens, "UNDERSTAND IT", "/tokens",
      "Why the cache broke, what fills your context, what it saved.", "warm misses with causes · tool results · subagents · forecasts"),
-    ("report", "Share it: /tokens report copies the whole session as Markdown.", report, "SHARE IT", "/tokens report",
-     "The whole session as Markdown on your clipboard.", "cost · cache · context · subagents · plan limits"),
+    ("report", "Copy it: /tokens report copies the whole session as Markdown to your own clipboard.", report, "COPY IT", "/tokens report",
+     "The whole session as Markdown on your own clipboard.", "cost · cache · context · subagents · plan limits"),
 ]
 
 for name, label, art, eyebrow, title, sub, mono in BANNERS:
