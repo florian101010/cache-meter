@@ -117,8 +117,8 @@ Cache Meter speaks up only with figures it measured – no guessed savings:
 | One tool result floods the context (≥ 10k tokens and ≥ 2 % of the window) | `Read ~/src/big.ts put ≈ 50.0k tokens into the context – sent again with every request until /compact` – the size is an estimate (characters ÷ 4) |
 | A plan limit is half used and, at this pace, full before it resets | `5 hours limit at 60% – full ≈ 18:40 at this pace (resets Mon 20:00)` – once per window; a notification too with `limitNotice` |
 | The conversation's messages are a quarter of the context or more (≥ 20k) | in the Context tab: `Messages 60.0k (30% of the context) are sent again with every request – /compact summarizes them to free space, itself one large request` |
-| An MCP server's tools ride along with every request | in the Context tab, beside each server: its share of each request, and `unused so far` when the session never called it |
-| You `/clear` | `Conversation cleared – it came to $1.50 spent · 12 requests · 94% from cache` (if the ended conversation's figures could still be read) |
+| An MCP server's tools ride along with every request | in the Context tab, beside each server: its share of each request, and `unused so far` after three prompts without a call |
+| You `/clear` | `Conversation cleared – it came to $1.50 spent · 12 requests · 94% from cache` – only what that conversation measured (after `/resume`: *since you resumed it*; after a reload mid-conversation without the cost) |
 
 ## Keep the cache warm with `/keepwarm`
 
@@ -332,7 +332,7 @@ Seven options. Set them with `/config` → `cache-meter.<option>`, or in `~/.cla
 | `turnLine` | `on` (default), `off` | The line under each answer with what it cost and how it used the cache. `off`: no line |
 | `sessionBudget` | `0` (default, off) or dollars, e.g. `5` | A budget for one session, compared with the figure the band shows (spend on an API key, API value on a subscription): the band shows `of $5.00`, turns yellow at 80 % and red at 100 %, and a toast appears once at each. The Health tab shows the share |
 | `expiryNotice` | `off` (default), `on` | `on`: a terminal notification once per cache window when about 10 minutes are left and keepwarm is off – only with a one-hour TTL and at least 10k tokens of context. The Health tab shows how many were sent (a terminal does not confirm delivery), or why one was not (`disabled`, `no-channel`, …) |
-| `limitNotice` | `off` (default), `on` | `on`: a terminal notification through your own channel when a plan limit (5 hours, 7 days) is at least half used and would be full before it resets at the pace since its window started – once per window. The toast in Claude Code comes either way |
+| `limitNotice` | `off` (default), `on` | `on`: a terminal notification through your own channel when a plan limit (5 hours, 7 days, spend limit) is at least half used and would be full before it resets at the pace since its window started (measured over at least 10 minutes) – once per window. The toast in Claude Code comes either way |
 | `animations` | `on` (default), `off` | `on`: in the docked dashboard a small café under the request chart acts out the cache; on the Overview the countdown flashes and its bar shines at each new minute, new request columns grow in, cost and saving count up, and the keepwarm arrow turns while it runs. `off`: none of it – for a calm screen, or a terminal app that leaves traces when parts of the screen redraw |
 
 With `auto`, Cache Meter follows Claude Code's own TTL controls and your plan state ([full order](docs/how-it-works.md#how-the-ttl-is-derived)). On an API key or a cloud provider Claude Code's default is five minutes: set `cacheTtl` to `5m`, or set `promptCacheTtl`.
@@ -369,7 +369,7 @@ With `auto`, Cache Meter follows Claude Code's own TTL controls and your plan st
 | `prompt.submit` | Closes its own pane above the prompt when you send a prompt | Nothing – the prompt is not read, changed or dropped |
 | `ui.close` | Notes that you closed its pane, so it doesn't reopen | Nothing – it never keeps a pane open |
 | `ui.fault` | Notes that one of the animation files (the café, the turning keepwarm arrow) failed to load, draw or run, and leaves that one out from then on; the reason goes to the debug log | Nothing – the rest of the pane draws as before |
-| `session.end` | At a `/clear`: reads what the conversation came to (cost, requests, share from the cache, cold re-writes), shown once the new one starts | Nothing – passes the event on; at a real exit nothing is shown |
+| `session.end` | At a `/clear`: puts together what the conversation came to (cost, requests, share from the cache, cold re-writes) from the mod's own figures, shown once the new one starts | Nothing – passes the event on; at a real exit nothing is shown |
 | `ui.render` (band, its own pane) | Draws the band – keeping what other mods draw below it – and the `/tokens` pane | Only its own drawing |
 
 `claude plugin validate .` prints this list for the version you have.

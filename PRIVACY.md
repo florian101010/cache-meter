@@ -7,7 +7,7 @@ Cache Meter is a [Claude Code mod](https://code.claude.com/docs/en/plugins/mods/
 Only what Claude Code reports to mods within your session:
 
 - **Per model request:** token counts (new, read from cache, written to cache, output), the model id, the stop reason, and the names and durations of server-side tool calls (such as the advisor).
-- **Per tool call:** the tool's name; MCP calls are counted per tool name and shown per server. For the main conversation also a short label – for the file tools (Read, Write, Edit, MultiEdit, NotebookEdit) the file path, home directory shortened to `~`, without query or fragment, never a URL, and a path part that looks like a token shown as `…`; for a Bash command only a word that looks like a program name, never one that looks like a token; nothing for other tools – and the length of the result as the model reads it, to estimate how much it adds to the context. Labels are one line of at most 80 characters. The result's text is measured, not kept; a command's arguments are never read into the label.
+- **Per tool call:** the tool's name; MCP calls are counted per tool name and shown per server. For the main conversation also a short label – for the file tools (Read, Write, Edit, MultiEdit, NotebookEdit) the file path, home directory shortened to `~`, without query or fragment, never a URL, and a path part that looks like a token shown as `…`; for a Bash command only a word that looks like a program name, never one that looks like a token; nothing for other tools. Masked as `…` is any path part with a credential prefix (`ghp_`, `sk-`, `AKIA` …) at its start or after a separator, or a run of 32 or more letters and digits mixed – and the length of the result as the model reads it, to estimate how much it adds to the context. Labels are one line of at most 80 characters. The result's text is measured, not kept; a command's arguments are never read into the label. A path outside your home directory is shown as it is. One label appears unasked: when a single result puts 10k tokens or more (and 2 % of the window) into the context, a toast on your screen names it – shown, not sent anywhere.
 - **Per turn:** the session cost at its start and end, and the turn's token totals, for the line under the answer.
 - **Per subagent:** its type and task description, as Claude Code lists it, and its token counts.
 - **At a model switch:** Claude Code's own estimate of what re-writing the context costs, and whether it thinks the cache is warm.
@@ -23,7 +23,7 @@ What Claude does read: the short replies of its commands (`/tokens`, `/keepwarm`
 
 ## What it keeps
 
-Everything stays in memory, in Claude Code's session state and the mod's own variables. Nothing is written to disk. It is gone when the session ends, after `/clear`, `/resume` or `/branch`, and when Claude Code relaunches – `/tui` switches renderer that way.
+Everything stays in memory, in Claude Code's session state and the mod's own variables. Nothing is written to disk. It is gone when the session ends, after `/clear`, `/resume` or `/branch`, and when Claude Code relaunches – `/tui` switches renderer that way. One exception by design: at `/clear` the ended conversation's totals (cost, request count, cache share, cold re-writes – figures, no text) are kept a moment longer, for the toast in the new conversation, and then dropped.
 
 Other mods you load can read that session state – Claude Code lets any loaded mod read any mod's values (type declarations, `$.state`) – and a mod that runs before Cache Meter can see what it puts on the clipboard or in a notification. Paths are stored with your home directory shortened to `~`; tool labels and subagent task descriptions are stored as shown.
 
@@ -33,7 +33,7 @@ Other mods you load can read that session state – Claude Code lets any loaded 
 
 ## What it sends
 
-Nothing to the author or anyone else, and no telemetry. Two actions you start – `/keepwarm` and **Count exactly** – send requests through Claude Code, with your own credentials, to the provider your session already uses (the Anthropic API or your cloud provider); with `expiryNotice` on, a notification also goes through your own channel:
+Nothing to the author or anyone else, and no telemetry. Two actions you start – `/keepwarm` and **Count exactly** – send requests through Claude Code, with your own credentials, to the provider your session already uses (the Anthropic API or your cloud provider); with `expiryNotice` or `limitNotice` on, a notification also goes through your own channel:
 
 - **`/keepwarm`:** one small request over your conversation shortly before the cache expires (at most 12 per run), to keep the prompt cache alive.
 - **Expiry notification** (only with the option `expiryNotice` on): one notification per cache window through your own notification channel – the one Claude Code's `preferredNotifChannel` setting names – and your `Notification` settings hooks. Its text holds the time left and the context size, nothing else.

@@ -504,7 +504,9 @@ export function nextLimitStarts(
   for (const l of limits) {
     const old = prev[l.kind]
     const resetsAt = l.resetsAt ?? null
-    const isNewWindow = old === undefined || l.percentUsed < old.pct || (old.resetsAt !== null && resetsAt !== null && resetsAt !== old.resetsAt)
+    // A later reset time is a new window; one that moves by under a minute is the same window read again.
+    const isMoved = old?.resetsAt != null && resetsAt !== null && Math.abs(Date.parse(resetsAt) - Date.parse(old.resetsAt)) >= 60_000
+    const isNewWindow = old === undefined || l.percentUsed < old.pct || isMoved
     next[l.kind] = isNewWindow ? { at: now, pct: l.percentUsed, resetsAt } : old
   }
 
@@ -618,6 +620,16 @@ const FILE_TOOLS = new Set(['Read', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit'
 
 /** Words that look like a credential, never shown as a program name. */
 const SECRET_LIKE = /^(gh[poursa]_|github_pat_|sk-|sk_|xox[abprs]-|akia|asia|aiza|glpat-|hf_|npm_|pypi-|dop_v1_|shpat_)/i
+/** The same prefixes anywhere after a separator ("backup-ghp_…"), or a long run of letters and digits
+ * mixed, as tokens and keys are: a path part like that is shown as "…" – masking a harmless name is the
+ * cheaper mistake. */
+const SECRET_INSIDE = /(^|[^A-Za-z0-9])(gh[poursa]_|github_pat_|sk-|sk_|xox[abprs]-|akia|asia|aiza|glpat-|hf_|npm_|pypi-|dop_v1_|shpat_)/i
+
+/** True for a path part that may hold a credential. */
+export function isSecretLikePart(part: string): boolean {
+  if (SECRET_INSIDE.test(part)) return true
+  return (part.match(/[A-Za-z0-9_-]{32,}/g) ?? []).some(run => /[A-Za-z]/.test(run) && /\d/.test(run))
+}
 
 /** A label as it is stored and shown: one line, no control characters, at most 80 characters (the end kept). */
 export function cleanLabel(label: string): string {
@@ -636,10 +648,10 @@ export function toolLabel(tool: string, input: Readonly<Record<string, unknown>>
     // A path, not a URL: anything with a scheme gives just the tool; a query or fragment is cut off.
     if (/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(path)) return tool
 
-    // A path segment that looks like a credential (a file named after a token) is shown as "…".
+    // A path segment that may hold a credential (a file named after a token) is shown as "…".
     const shown = homePath(path.split(/[?#]/)[0] ?? '')
       .split(/([\\/])/)
-      .map(part => (SECRET_LIKE.test(part) ? '…' : part))
+      .map(part => (isSecretLikePart(part) ? '…' : part))
       .join('')
 
     return cleanLabel(`${tool} ${shown}`)

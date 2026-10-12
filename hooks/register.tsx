@@ -206,6 +206,15 @@ let warnedLimits = new Set<string>()
 // What ended at a /clear, read at session.end while the session's state may still hold it; shown once
 // the new conversation starts.
 let pendingSummary: string | null = null
+// The conversation's own figures, kept beside $.state so they survive whatever /clear resets first:
+// main requests, their four token counts, cold re-writes; and the session cost when it began (null when
+// unknown – after a reload in a running conversation – then the summary names no cost).
+let convo = { steps: 0, main: { input: 0, read: 0, write: 0, output: 0 } as Usage4, coldCount: 0, coldWritten: 0 }
+let convoUsdBase: number | null = null
+// A resumed conversation is counted from the resume on: its earlier requests are not in this session.
+let isConvoResumed = false
+// The last large-tool-result toast, so ten large reads in a row raise one word, not ten.
+let lastHogAt = 0
 let savingFrom = 0
 let savingStart = 0
 const FLASH_MS = 450
@@ -215,6 +224,8 @@ const GROW_MS = 450
 const COUNT_MS = 600
 // How long the café brews after a request wrote a fresh cache.
 const BREW_MS = 12_000
+// The shortest gap between two large-tool-result toasts.
+const HOG_GAP_MS = 20_000
 // Opening the dashboard as a sidebar by itself (option autoSidebar): only once the band has been drawn
 // fullscreen, once per load, and never again after the person closed it.
 let autoSidebar = 'auto'
@@ -605,6 +616,18 @@ async function settleBudget($: EngineInterface) {
   budgetWarned = budget <= 0 || usd === null ? 0 : usd >= budget ? 100 : usd >= budget * 0.8 ? 80 : 0
 }
 
+// Option limitNotice: the same words as the toast, as a terminal notification. Not sent ('disabled',
+// 'no-channel', 'no-surface', 'refused') or rejected by a hook: the toast stays the word, and the debug
+// log says why (types: UiNotifyResult).
+async function notify($: EngineInterface, text: string, what: string) {
+  try {
+    const sent = await $.ui.notify(text, { title: 'Cache Meter' })
+    if (!sent.isSent) $.ui.log(`${what} notification not sent: ${sent.reason}`, { to: 'debug' })
+  } catch (error) {
+    $.ui.log(`${what} notification refused: ${error instanceof Error ? error.message : String(error)}`, { to: 'debug' })
+  }
+}
+
 // A plan limit that fills up before it resets: one toast per limit window (and, with limitNotice, a
 // notification), from the same pace forecast the Overview shows. Only where a person reads it. `quiet`
 // takes the windows that already qualify without a word – after a reload in a running session.
@@ -614,39 +637,49 @@ async function checkLimits($: EngineInterface, quiet = false) {
   const now = await $.clock.now()
   for (const l of measure?.limits ?? []) {
     if (l.percentUsed < LIMIT_NOTE_PCT || l.resetsAt === undefined) continue
-    const full = limitForecast(measure?.limitStart?.[l.kind], l.percentUsed, now, l.resetsAt)
-    const key = `${l.kind}@${l.resetsAt}`
+    const start = measure?.limitStart?.[l.kind]
+    const full = limitForecast(start, l.percentUsed, now, l.resetsAt)
+    // The window as the forecast tells it (nextLimitStarts): where it began. Kept in the session state, so
+    // a reload names the same window.
+    const key = `${l.kind}@${start?.at ?? l.resetsAt}`
     if (full === null || warnedLimits.has(key)) continue
     warnedLimits.add(key)
     if (quiet) continue
     const text = `${limitName(l.kind)} limit at ${l.percentUsed}% – full ≈ ${hhmm(full)} at this pace (resets ${resetLabel(l.resetsAt)})`
     $.ui.toast(text, { timeoutMs: 10_000 })
-    if (limitNotice) {
-      try {
-        await $.ui.notify(text, { title: 'Cache Meter' })
-      } catch {
-        // A refused notification (a Notification hook's deny) leaves the toast as the word.
-      }
-    }
+    if (limitNotice) await notify($, text, 'limit')
   }
 }
 
-// What the conversation that just ended came to – only figures it measured: cost as /cost shows it,
-// main requests, the share read from the cache, cold re-writes. Null when it holds no request.
+// A conversation begins (a fresh session, /clear, /resume, /branch): its figures start at zero, its
+// cost is counted from the session cost now.
+function startConversation(usd: number | null, isResumed: boolean) {
+  convo = { steps: 0, main: { input: 0, read: 0, write: 0, output: 0 }, coldCount: 0, coldWritten: 0 }
+  convoUsdBase = usd
+  isConvoResumed = isResumed
+}
+
+// What the conversation that just ended came to – only figures it measured, kept in module variables
+// so they do not depend on what /clear resets first (undocumented): its main requests, the share read
+// from the cache, cold re-writes, and its cost as /cost counts it minus the cost when it began. The cost
+// is left out when that start is not known (a reload mid-conversation) or the reading went back.
 async function conversationSummary($: EngineInterface): Promise<string | null> {
-  const totals: Totals = await read($, totalsA)
-  if (totals.mainSteps === 0) return null
+  if (convo.steps === 0) return null
   const measure = await read($, measureA)
-  const hit = hitPct(totals.main)
-  const usd = measure?.usd ?? null
+  let usd: number | null = null
+  if (convoUsdBase !== null) {
+    const now = (await $.session.usage()).cost?.usd ?? null
+    if (now !== null && now >= convoUsdBase) usd = now - convoUsdBase
+  }
+  const hit = hitPct(convo.main)
   const parts = [
     usd === null ? null : `${isPlan(measure) ? '≈ ' : ''}$${usd.toFixed(2)}${costLabel(measure, false)}`,
-    `${totals.mainSteps} request${totals.mainSteps === 1 ? '' : 's'}`,
+    `${convo.steps} request${convo.steps === 1 ? '' : 's'}`,
     hit === null ? null : `${hit}% from cache`,
-    totals.coldCount > 0 ? `${totals.coldCount} cold re-write${totals.coldCount === 1 ? '' : 's'} (${short(totals.coldWritten)} tokens)` : null,
+    convo.coldCount > 0 ? `${convo.coldCount} cold re-write${convo.coldCount === 1 ? '' : 's'} (${short(convo.coldWritten)} tokens)` : null,
   ].filter((p): p is string => p !== null)
 
-  return `Conversation cleared – it came to ${parts.join(' · ')}`
+  return `Conversation cleared – ${isConvoResumed ? 'since you resumed it, it' : 'it'} came to ${parts.join(' · ')}`
 }
 
 async function checkBudget($: EngineInterface) {
@@ -811,11 +844,17 @@ export const register: Register = (on, options) => {
   limitNotice = options.limitNotice === 'on'
   warnedLimits = new Set()
   pendingSummary = null
+  convo = { steps: 0, main: { input: 0, read: 0, write: 0, output: 0 }, coldCount: 0, coldWritten: 0 }
+  convoUsdBase = null
+  isConvoResumed = false
+  lastHogAt = 0
   savingFrom = 0
   savingStart = 0
 
   on('session.start', async ($, e, next) => {
     const result = await next(e)
+    // First: everything below that only speaks where a person reads it (checkLimits) asks this.
+    isInteractive = e.isInteractive
     await loadTtlConfig($)
     await measureNow($)
     promptBase = await turnsNow($)
@@ -826,9 +865,14 @@ export const register: Register = (on, options) => {
     if ((await read($, stepsA)).length > 0) {
       await settleBudget($)
       await checkLimits($, true)
+      // A reload mid-conversation: the session state still holds its figures, but not its starting cost.
+      const t: Totals = await read($, totalsA)
+      convo = { steps: t.mainSteps, main: t.main, coldCount: t.coldCount, coldWritten: t.coldWritten }
+      convoUsdBase = null
+    } else {
+      startConversation((await read($, measureA))?.usd ?? null, false)
     }
     // Hooks also run under -p and the SDK, where nothing draws (overview § Where mods run).
-    isInteractive = e.isInteractive
     if (e.isInteractive) {
       // Returning the promise lets a mock clock await the tick (test § Test a timer).
       $.clock.every(TICK_MS, () => tick($))
@@ -856,15 +900,15 @@ export const register: Register = (on, options) => {
   // /clear, /resume and /branch reset every $.state value and do not fire session.start again
   // (interface § Load a saved value again after /clear). Resume and fork also say how long ago the
   // last response was, so the countdown carries on.
-  // A /clear ends the conversation; what it came to is read here, while the session's state may still
-  // hold it (whether it does is not documented – an empty reading shows nothing), and shown once the new
-  // conversation starts. A real exit has no place to show anything: the session is gone.
+  // A /clear ends the conversation; what it came to is put together here from the module's own figures
+  // and shown once the new conversation starts. A real exit has no place to show anything.
   on('session.end', async ($, e, next) => {
     if (e.reason === 'clear' && isInteractive) {
       try {
         pendingSummary = await conversationSummary($)
-      } catch {
+      } catch (error) {
         pendingSummary = null
+        $.ui.log(`summary at /clear failed: ${error instanceof Error ? error.message : String(error)}`, { to: 'debug' })
       }
     }
 
@@ -883,6 +927,7 @@ export const register: Register = (on, options) => {
     // A new transcript: no last main request to compare the next one with.
     lastMain = null
     await settleBudget($)
+    startConversation((await read($, measureA))?.usd ?? null, e.source !== 'clear')
     if (e.source === 'resume' || e.source === 'fork') lastResumeAt = await $.clock.now()
     if ((e.source === 'resume' || e.source === 'fork') && e.seconds_since_last_response !== undefined) {
       if (e.prompt_cache_likely_expired !== undefined) await recordCheck($, !e.prompt_cache_likely_expired, 'resume')
@@ -964,6 +1009,7 @@ export const register: Register = (on, options) => {
         }
         await update($, stepsA, list => [...list, { ...u, at: startedAt, model: usage.model, ...(kind ? { kind } : {}) }].slice(-STEPS_KEPT))
         await update($, totalsA, t => ({ ...t, main: add(t.main, u), mainSteps: t.mainSteps + 1 }))
+        convo = { ...convo, steps: convo.steps + 1, main: add(convo.main, u) }
         // A warm cache re-written anyway: counted with the pause before it and its most likely cause, in
         // one write – the cause first, so the pane never pairs a new miss with the previous cause.
         if (isUnexpectedWrite(wasCold, before !== null && before.lastAt > 0, u)) {
@@ -989,6 +1035,7 @@ export const register: Register = (on, options) => {
           const cold: ColdWrite = { at: startedAt, written: u.write, cause, idleMs }
           await update($, coldA, list => [...list, cold].slice(-20))
           await update($, totalsA, t => ({ ...t, coldCount: t.coldCount + 1, coldWritten: t.coldWritten + u.write }))
+          convo = { ...convo, coldCount: convo.coldCount + 1, coldWritten: convo.coldWritten + u.write }
           const keep = await read($, keepA)
           // A hint, not an action: switching keepwarm on by itself would spend quota unasked.
           // Only after a pause in this session: after a model switch or a resume, keepwarm could not have helped.
@@ -1109,7 +1156,9 @@ export const register: Register = (on, options) => {
       const at = await $.clock.now()
       await update($, toolResultsA, prev => addToolResult(prev ?? NO_RESULTS, e.tool, label, tokens, at))
       // One large result is worth a word while it can still be acted on (compact, or read less next time).
-      if (isInteractive && isContextHog(tokens, (await read($, measureA))?.window ?? 0)) {
+      // At most one such toast per HOG_GAP_MS: ten large reads in a row are one word, not ten.
+      if (isInteractive && isContextHog(tokens, (await read($, measureA))?.window ?? 0) && at - lastHogAt >= HOG_GAP_MS) {
+        lastHogAt = at
         $.ui.toast(hogNote(label, e.tool, tokens), { timeoutMs: 10_000 })
       }
     }

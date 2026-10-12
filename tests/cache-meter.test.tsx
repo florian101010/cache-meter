@@ -42,6 +42,7 @@ import {
   tall,
   toolDiff,
   toolLabel,
+  isSecretLikePart,
   turnLine,
   writeMultiplier,
 } from '../hooks/lib'
@@ -138,6 +139,8 @@ function world(on: On, opts: { env?: Record<string, string>; forkRead?: number; 
     notify: { isSent: true, channel: 'terminal' } as Record<string, unknown>,
     // What $.session.turns() answers (prompts in the transcript).
     turns: 4,
+    // The rate-limit windows $.session.usage reports.
+    rateLimits: [] as unknown[],
     // Whether the next tool call is refused (a deny from a hook beneath).
     deny: false,
     server: [] as { id: string; name: string; input: unknown; startedAt: number; endedAt?: number }[],
@@ -171,7 +174,7 @@ function world(on: On, opts: { env?: Record<string, string>; forkRead?: number; 
   on('settings.read', () => ({ value: {} }))
   on('session.usage', ($, e) => {
     usageDetails.push((e as { breakdown?: string }).breakdown)
-    const v = usageValue(next.contextTokens, 1_000_000, 970_000) as { value: { context: { breakdown: Record<string, unknown> } } & Record<string, unknown> }
+    const v = usageValue(next.contextTokens, 1_000_000, 970_000, next.rateLimits) as { value: { context: { breakdown: Record<string, unknown> } } & Record<string, unknown> }
     const context = next.tools === null ? v.value.context : { ...v.value.context, breakdown: { ...v.value.context.breakdown, mcpTools: next.tools } }
     return { value: { ...v.value, context, cost: { usd: next.usd } } } as never
   })
@@ -2229,6 +2232,23 @@ test('context hog: a toast for one large result in the main conversation – not
   expect(toasts.filter(t => /into the context/.test(t))).toHaveLength(1)
 })
 
+test('context hog: the window counts (15k of 1M is no word); one toast per 20 seconds', async ($, on) => {
+  const { next, toasts, clock } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  // 60,000 characters ≈ 15k tokens: over 10k, but under 2 % of the measured 1M window.
+  next.toolText = 'z'.repeat(60_000)
+  await $.tool.call({ tool: 'Read', file_path: '/Users/u/project/mid.ts' } as never)
+  expect(toasts.some(t => /into the context/.test(t))).toBe(false)
+  next.toolText = 'y'.repeat(200_000)
+  await $.tool.call({ tool: 'Read', file_path: '/Users/u/project/a.ts' } as never)
+  await clock.advance(5_000)
+  await $.tool.call({ tool: 'Read', file_path: '/Users/u/project/b.ts' } as never)
+  expect(toasts.filter(t => /into the context/.test(t))).toHaveLength(1)
+  await clock.advance(20_000)
+  await $.tool.call({ tool: 'Read', file_path: '/Users/u/project/c.ts' } as never)
+  expect(toasts.filter(t => /into the context/.test(t))).toHaveLength(2)
+})
+
 test('context hog: no toast without a screen', async ($, on) => {
   const { next, toasts } = world(on)
   await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
@@ -2287,6 +2307,62 @@ test('limit warning: a notification too with limitNotice = on', { options: { lim
   expect(notifies.filter(n => /^5 hours limit at 60%/.test(n))).toHaveLength(1)
 })
 
+test('limit warning: a reload in the same window stays quiet', async ($, on) => {
+  const { clock, toasts, next } = world(on)
+  // Requests and readings before this load (the session state keeps them over a reload) …
+  await step($)
+  await $.session.measure(limitAt(20) as never)
+  await clock.advance(HOUR)
+  await $.session.measure(limitAt(60) as never)
+  // … then the load itself, measuring the same window at 60 %.
+  next.rateLimits = limitAt(60).rateLimits
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await clock.advance(HOUR / 12)
+  await $.session.measure(limitAt(65) as never)
+  expect(toasts.some(t => /limit at/.test(t))).toBe(false)
+})
+
+test('limit warning: again in a new window; none when full only after the reset', async ($, on) => {
+  const { clock, toasts } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  // 49 → 51 % in an hour: half used, but at that pace full long after the reset – no word.
+  await $.session.measure(limitAt(49) as never)
+  await clock.advance(HOUR)
+  await $.session.measure(limitAt(51) as never)
+  expect(toasts.some(t => /limit at/.test(t))).toBe(false)
+  // A new window (another reset time), fast again: a word for it.
+  const next = (pct: number) => ({ ...limitAt(pct), rateLimits: [{ kind: 'five_hour', percentUsed: pct, resetsAt: '2026-10-13T01:00:00Z' }] })
+  await $.session.measure(next(10) as never)
+  await clock.advance(HOUR)
+  await $.session.measure(next(55) as never)
+  expect(toasts.filter(t => /limit at/.test(t))).toHaveLength(1)
+})
+
+test('limit warning: a reset time that drifts by seconds is the same window', async ($, on) => {
+  const { clock, toasts } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  const at = (pct: number, resetsAt: string) => ({ ...limitAt(pct), rateLimits: [{ kind: 'five_hour', percentUsed: pct, resetsAt }] })
+  await $.session.measure(at(20, '2026-10-12T20:00:00Z') as never)
+  await clock.advance(HOUR)
+  await $.session.measure(at(60, '2026-10-12T20:00:00Z') as never)
+  await clock.advance(HOUR / 12)
+  await $.session.measure(at(65, '2026-10-12T20:00:07Z') as never)
+  // Taken for a new window, the pace would start over and warn again a quarter of an hour later.
+  await clock.advance(HOUR / 4)
+  await $.session.measure(at(80, '2026-10-12T20:00:07Z') as never)
+  expect(toasts.filter(t => /limit at/.test(t))).toHaveLength(1)
+})
+
+test('limit warning: a refused notification leaves the toast', { options: { limitNotice: 'on' } }, async ($, on) => {
+  const { clock, toasts, next } = world(on)
+  next.notifyDeny = 'no notifications here'
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await $.session.measure(limitAt(20) as never)
+  await clock.advance(HOUR)
+  await $.session.measure(limitAt(60) as never)
+  expect(toasts.filter(t => /^5 hours limit at 60%/.test(t))).toHaveLength(1)
+})
+
 test('limit warning: none without a screen', async ($, on) => {
   const { clock, toasts } = world(on)
   await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
@@ -2300,15 +2376,65 @@ test('after /clear: what the conversation came to, from figures it measured', as
   const { toasts, next } = world(on)
   // Core's own answer beneath the mod (types: SessionEndResult).
   on('session.end', ($, e) => ({ sessionId: e.sessionId }))
+  // The session had cost $0.50 before this conversation began; /cost counts on.
+  next.usd = 0.5
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
-  next.usd = 1.5
+  next.usd = 2
   await step($)
+  await step($)
+  await $.session.end({ reason: 'clear', sessionId: 's1', resume: {} } as never)
+  await $.classic.SessionStart({ source: 'clear' } as never)
+  let summary = toasts.filter(t => t.startsWith('Conversation cleared'))
+  expect(summary).toHaveLength(1)
+  expect(summary[0]).toMatch(/^Conversation cleared – it came to \$1\.50 spent · 2 requests · \d+% from cache$/)
+  // The next conversation counts from its own start: one request, $0.25.
+  next.usd = 2.25
+  await step($)
+  await $.session.end({ reason: 'clear', sessionId: 's1', resume: {} } as never)
+  await $.classic.SessionStart({ source: 'clear' } as never)
+  summary = toasts.filter(t => t.startsWith('Conversation cleared'))
+  expect(summary[1]).toMatch(/^Conversation cleared – it came to \$0\.25 spent · 1 request · \d+% from cache$/)
+})
+
+test('after /clear: a resumed conversation counts from the resume, a cold re-write is named', async ($, on) => {
+  const { toasts, next, clock } = world(on)
+  on('session.end', ($, e) => ({ sessionId: e.sessionId }))
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await $.classic.SessionStart({ source: 'resume', seconds_since_last_response: 30 } as never)
+  await step($)
+  // An hour later: the next request writes the context again.
+  await clock.advance(61 * 60_000)
+  next.write = 150_000
+  next.read = 0
   await step($)
   await $.session.end({ reason: 'clear', sessionId: 's1', resume: {} } as never)
   await $.classic.SessionStart({ source: 'clear' } as never)
   const summary = toasts.filter(t => t.startsWith('Conversation cleared'))
   expect(summary).toHaveLength(1)
-  expect(summary[0]).toMatch(/^Conversation cleared – it came to \$1\.50 spent · 2 requests · \d+% from cache$/)
+  expect(summary[0]).toMatch(/^Conversation cleared – since you resumed it, it came to \$0\.00 spent · 2 requests · \d+% from cache · 1 cold re-write \(150\.0k tokens\)$/)
+})
+
+test('after /clear: a reload mid-conversation keeps the requests but names no cost', async ($, on) => {
+  const { toasts } = world(on)
+  on('session.end', ($, e) => ({ sessionId: e.sessionId }))
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  // A reload: register again is not part of the kit, session.start again is – with requests in the state.
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  await $.session.end({ reason: 'clear', sessionId: 's1', resume: {} } as never)
+  await $.classic.SessionStart({ source: 'clear' } as never)
+  expect(toasts.filter(t => t.startsWith('Conversation cleared'))).toEqual([expect.stringMatching(/^Conversation cleared – it came to 2 requests · \d+% from cache$/)])
+})
+
+test('after /clear: no word without a screen', async ($, on) => {
+  const { toasts } = world(on)
+  on('session.end', ($, e) => ({ sessionId: e.sessionId }))
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
+  await step($)
+  await $.session.end({ reason: 'clear', sessionId: 's1', resume: {} } as never)
+  await $.classic.SessionStart({ source: 'clear' } as never)
+  expect(toasts.some(t => t.startsWith('Conversation cleared'))).toBe(false)
 })
 
 test('after /clear: nothing when the conversation held no request, and nothing at a real exit', async ($, on) => {
@@ -2450,4 +2576,14 @@ test('pane header: the boundaries – 50 and 36 columns', async ($, on) => {
   expect(await title(49)).toBe('◉|Overview')
   expect(await title(36)).toBe('◉|Overview')
   expect(await title(35)).toBe('◉|Over')
+})
+
+test('labels: a credential inside a path part or a long key-like run is masked; ordinary names stay', () => {
+  expect(isSecretLikePart('backup-ghp_abc.txt')).toBe(true)
+  expect(isSecretLikePart('ghp_abc')).toBe(true)
+  expect(isSecretLikePart('a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8.json')).toBe(true)
+  expect(isSecretLikePart('register.tsx')).toBe(false)
+  expect(isSecretLikePart('fantasia.md')).toBe(false)
+  expect(isSecretLikePart('a-very-long-but-plain-file-name-without-digits.md')).toBe(false)
+  expect(toolLabel('Read', { file_path: '/srv/keys/backup-ghp_abc.txt' })).toBe('Read /srv/keys/…')
 })

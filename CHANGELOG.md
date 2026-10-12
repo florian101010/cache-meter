@@ -7,11 +7,15 @@ All notable changes to Cache Meter, a Claude Code mod. The format follows [Keep 
 Words when they matter – only measured figures, no guessed savings.
 
 ### Added
-- **One tool result floods the context:** a toast when a single result in the main conversation is at least 10k tokens and 2 % of the window – with its short label and the estimated size.
+- **One tool result floods the context:** a toast when a single result in the main conversation is at least 10k tokens and 2 % of the window – with its short label and the estimated size; at most one such toast per 20 seconds.
 - **Plan limits filling up:** a toast once per limit window when a limit is half used and, at the pace since the window started, full before it resets; with the new option `limitNotice` also a notification through your own channel.
 - **/compact note** in the Context tab when the conversation's messages are 20k tokens or more and a quarter of the context – what is re-sent, and that `/compact` summarizes it as one large request; no saving is promised.
 - **MCP servers:** each server's share of every request's context, beside its tools and calls.
-- **After /clear:** what the ended conversation came to – cost, requests, share from the cache, cold re-writes – if its figures can still be read when it ends.
+- **After /clear:** what the ended conversation came to – cost, requests, share from the cache, cold re-writes – from the mod's own figures (after `/resume` counted from there; after a reload without the cost).
+
+### Changed
+- **Labels:** a credential prefix inside a path part (`backup-ghp_…`) and long runs of letters and digits mixed are masked as `…` too, not only a prefix at the start.
+- **Plan limits:** a reset time that moves by under a minute is the same window – the pace no longer starts over.
 
 ## [0.10.0] – 2026-10-12
 

@@ -113,7 +113,7 @@ Fill in the template. CI must be green. Describe what a user sees differently, a
 Images (README screenshots, header, icon and social preview sources) live on the [`assets` branch](https://github.com/florian101010/cache-meter/tree/assets), not on `main`: the directory scans `main`, and image files there hold every version for review. Its README says how to regenerate them.
 
 ```text
-.claude-plugin/plugin.json        manifest: name, version, type contract, the cacheTtl, autoSidebar, turnLine, expiryNotice, sessionBudget and animations options
+.claude-plugin/plugin.json        manifest: name, version, type contract, the cacheTtl, autoSidebar, turnLine, expiryNotice, sessionBudget, animations and limitNotice options
                                   (the folder also holds the listing icon, a static PNG; its source is on the assets branch)
 .claude-plugin/marketplace.json   makes this repository a one-plugin marketplace
 hooks/hooks.json                  points to the hooks module

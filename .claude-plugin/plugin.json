@@ -82,7 +82,7 @@
     "limitNotice": {
       "type": "string",
       "title": "Notification when a plan limit fills up",
-      "description": "on: when a plan limit (5 hours, 7 days) is at least half used and, at the pace since its window started, would be full before it resets, a terminal notification through your own notification channel (Claude Code's preferredNotifChannel setting) – once per limit window. The toast in Claude Code comes either way. off: the toast only.",
+      "description": "on: when a plan limit (5 hours, 7 days, spend limit) is at least half used and, at the pace since its window started (measured over at least 10 minutes), would be full before it resets, a terminal notification through your own notification channel (Claude Code's preferredNotifChannel setting) – once per limit window. The toast in Claude Code comes either way. off: the toast only.",
       "options": [
         "off",
         "on"
