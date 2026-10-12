@@ -12,6 +12,7 @@ import {
   FIVE_MIN,
   HOUR,
   cafeState,
+  faultTarget,
   cacheSaving,
   columnCells,
   forecast,
@@ -2320,4 +2321,33 @@ test('pane header: the boundaries – 50 and 36 columns', async ($, on) => {
   expect(await title(49)).toBe('◉|Overview')
   expect(await title(36)).toBe('◉|Overview')
   expect(await title(35)).toBe('◉|Over')
+})
+
+test('ui.fault: which animation a failed module is', () => {
+  expect(faultTarget('hooks/cafe.tsx')).toBe('cafe')
+  expect(faultTarget('hooks/spin.tsx')).toBe('spin')
+  expect(faultTarget('cafe.tsx')).toBe('cafe')
+  expect(faultTarget('hooks/notcafe.tsx')).toBeNull()
+  expect(faultTarget('hooks/register.tsx')).toBeNull()
+})
+
+test('café: brewing ends by itself after BREW_MS', async ($, on) => {
+  const { clock } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await clock.advance(1_000)
+  const ui = await $.ui.mount({ surface: 'terminal', ...DOCK })
+  const state = async () => ((await ui.find({ key: 'cafe' }))?.props.props as { state: CafeState } | undefined)?.state
+  await step($)
+  expect(await state()).toBe('brewing')
+  await clock.advance(12_200)
+  expect(await state()).toBe('warm')
+  await ui.unmount()
+})
+
+test('café module: an unknown state word shows the empty cup', () => {
+  const tag = (type: string) => (props: object) => ({ type, props })
+  const surface = { elements: { Box: tag('Box'), Text: tag('Text') }, state: { f: 0 }, setState: () => {}, columns: 19, rows: 3, every: () => () => {}, onPointer: () => () => {}, onKey: () => () => {}, post: () => {} }
+  const out = JSON.stringify(Cafe({ state: 'bogus' as CafeState }, surface as never))
+  expect(out).toContain('◌')
+  expect(out).toContain('cup empty')
 })

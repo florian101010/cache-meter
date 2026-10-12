@@ -811,3 +811,11 @@ export function shineCells(cells: readonly Cell[], at: number): Cell[] {
     return [cell[0], lighten(cell[1], d === 0 ? 0.6 : 0.3), cell[2]]
   })
 }
+
+/** Which animation a failed surface module is (types: UiFaultInput.module, its path under the plugin's folder). */
+export function faultTarget(module: string): 'cafe' | 'spin' | null {
+  if (/(^|\/)cafe\.tsx$/.test(module)) return 'cafe'
+  if (/(^|\/)spin\.tsx$/.test(module)) return 'spin'
+
+  return null
+}

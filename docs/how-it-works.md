@@ -20,11 +20,11 @@ This page describes the design of the mod for people who want to change it or ch
 | `ui.render` `Pane` (`requestId: 'cache-meter'`) | the `/tokens` pane; sized by `e.props.bodyColumns` and `e.props.scroll.bodyRows` | *reference › Render sites* |
 | `command.run` `tokens`, `keepwarm` | the two commands | *api › Add a command* |
 | `classic.StopFailure` | an API error ends a turn: counted for the Health tab (main conversation and subagents) | types: `StopFailureHookInput` |
-| `prompt.submit` | notes that you sent a prompt (not its text) – the pane above the prompt closes then | *events › Prompt* |
+| `prompt.submit` | notes that you sent a prompt (not its text) – the pane above the prompt closes then | *events › Rewrite or add to a prompt* |
 | `ui.close` | notes that you closed the pane (it does not reopen by itself) and redraws the band, which takes its Compact button back | types: `UiCloseInput` |
 | `ui.fault` | a surface module (the café or the turning keepwarm arrow, told apart by `e.module`) failed to load, draw or run: that one is left out from then on, the reason goes to the debug log (`$.ui.log`, `to: 'debug'`) | *reference › Interface* (v2.1.289+); types: `UiFaultInput` |
 
-Calls (as `claude plugin validate` lists them): `$.agent.list`, `$.clock.after`, `$.clock.every`, `$.clock.now`, `$.command.register`, `$.env.get` (three literal names), `$.model.fork`, `$.session.compact`, `$.session.turns`, `$.session.usage`, `$.settings.read`, `$.state` (through `atom`/`read`/`update`), `$.ui.close`, `$.ui.copy`, `$.ui.invalidate`, `$.ui.notify`, `$.ui.open`, `$.ui.panes`, `$.ui.resolve`, `$.ui.toast`. No `$.fs`, `$.store`, `$.http` or `$.process`.
+Calls (as `claude plugin validate` lists them): `$.agent.list`, `$.clock.after`, `$.clock.every`, `$.clock.now`, `$.command.register`, `$.env.get` (three literal names), `$.model.fork`, `$.ui.log` (the reason of a failed animation, to the debug log), `$.session.compact`, `$.session.turns`, `$.session.usage`, `$.settings.read`, `$.state` (through `atom`/`read`/`update`), `$.ui.close`, `$.ui.copy`, `$.ui.invalidate`, `$.ui.notify`, `$.ui.open`, `$.ui.panes`, `$.ui.resolve`, `$.ui.toast`. No `$.fs`, `$.store`, `$.http` or `$.process`.
 
 ## State
 
