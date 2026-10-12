@@ -237,38 +237,132 @@ export function rasterCells(cells: readonly Cell[]): string {
   return base64(bytes)
 }
 
-/** Linear mix of two 0xRRGGBB colors, t in 0…1. */
-export function mix(a: number, b: number, t: number): number {
-  const k = Math.max(0, Math.min(1, t))
-  const ch = (shift: number) => Math.round(((a >> shift) & 255) * (1 - k) + ((b >> shift) & 255) * k)
+/** Fill colors of the meters, as 0xRRGGBB (the terminal may round them to its palette, gallery › Raster). */
+export const FILL = {
+  warm: 0x40c070,
+  low: 0xf0b030,
+  cold: 0xe05060,
+  context: 0x7088f0,
+} as const
 
-  return (ch(16) << 16) | (ch(8) << 8) | ch(0)
+/** Colors of the request columns by hit rate: the same thresholds as the hit rate's text color. */
+export const HEALTH = { good: 0x40c070, fair: 0xf0b030, poor: 0xe05060 } as const
+
+export const TRACK = 0x45475a
+
+/** A marker on a meter: the cell it sits on, its Raster color and the theme key the text bar uses. */
+export type Mark = { at: number; color: number; theme: string }
+
+/** A run of same-role characters of a meter; `role` is the index of a mark for a marker cell. */
+export type Run = { text: string; role: 'fill' | 'track' | number }
+
+/** Left-to-right partial blocks, 1/8 to 7/8 of a cell. */
+const EIGHTHS = ['▏', '▎', '▍', '▌', '▋', '▊', '▉']
+
+/** The cell a fraction (0…1) of a `width`-cell meter falls on. */
+export function markAt(fraction: number, width: number): number {
+  return Math.max(0, Math.min(width - 1, Math.round(fraction * width)))
 }
 
-export type Palette = { from: number; to: number }
+/**
+ * A one-row meter as runs: `fraction` of `width` cells filled, to an eighth of a cell, the rest a
+ * dim track, markers drawn over both. One solid fill color, not a gradient: the terminal rounds
+ * Raster colors to a smaller palette (gallery › Raster), which turned a gradient into bands.
+ */
+export function meterRuns(width: number, fraction: number, marks: readonly Mark[] = []): Run[] {
+  const filled = Math.max(0, Math.min(1, fraction)) * width
+  let full = Math.floor(filled)
+  let part = Math.round((filled - full) * 8)
+  if (part === 8) {
+    full += 1
+    part = 0
+  }
+  const runs: Run[] = []
+  const push = (ch: string, role: Run['role']) => {
+    const last = runs[runs.length - 1]
+    if (last !== undefined && last.role === role) last.text += ch
+    else runs.push({ text: ch, role })
+  }
+  for (let i = 0; i < width; i++) {
+    const mark = marks.findIndex(m => m.at === i)
+    if (mark >= 0) push('┃', mark)
+    else if (i < full) push('█', 'fill')
+    else if (i === full && part > 0) push(EIGHTHS[part - 1]!, 'fill')
+    else push('░', 'track')
+  }
 
-export const PALETTE = {
-  warm: { from: 0x1f8a4c, to: 0x7fe0a0 },
-  low: { from: 0xb86e00, to: 0xffd166 },
-  cold: { from: 0x8a1c2b, to: 0xff6b81 },
-  context: { from: 0x3a56d4, to: 0xb4befe },
-} as const satisfies Record<string, Palette>
+  return runs
+}
 
-const TRACK = 0x45475a
-const MARKER = 0xff6b81
+/** The meter's runs as Raster cells. */
+export function meterCells(runs: readonly Run[], fill: number, marks: readonly Mark[] = []): Cell[] {
+  return runs.flatMap(r =>
+    [...r.text].map((ch): Cell => [
+      ch.codePointAt(0)!,
+      r.role === 'fill' ? fill : r.role === 'track' ? TRACK : (marks[r.role]?.color ?? TRACK),
+      DEFAULT_COLOR,
+    ]),
+  )
+}
+
+/** Bottom-up partial blocks, 1/8 to 8/8 of a cell. */
+const LEVELS = [0x2581, 0x2582, 0x2583, 0x2584, 0x2585, 0x2586, 0x2587, 0x2588]
+
+/** One column of the request chart: its height as a share (0…1) and its color. */
+export type Column = { share: number; color: number }
 
 /**
- * A one-row meter: `lit` of `width` cells in one solid color, the rest a dim track; an optional
- * marker cell (e.g. the auto-compact point) drawn as a bright bar. Solid, not a per-cell gradient:
- * the terminal rounds Raster colors to a smaller palette (gallery › Raster), which turned a
- * gradient into visible bands.
+ * A column chart `rows` tall, row-major from the top: one two-cell column per value, newest at the
+ * right edge, heights to an eighth of a cell; any share above zero shows at least an eighth. Slots
+ * without a value, and the bottom row under a zero, show a dim baseline.
  */
-export function meter(width: number, lit: number, palette: Palette, markerAt: number | null = null): Cell[] {
-  return Array.from({ length: width }, (_, i): Cell => {
-    if (markerAt !== null && i === markerAt) return [0x2503, MARKER, DEFAULT_COLOR] // ┃
-    if (i < lit) return [0x2588, mix(palette.from, palette.to, 0.6), DEFAULT_COLOR] // █
-    return [0x2591, TRACK, DEFAULT_COLOR] // ░
-  })
+export function columnCells(values: readonly Column[], width: number, rows: number): Cell[] {
+  const slots = Math.floor(width / 2)
+  const shown = values.slice(-slots)
+  const offset = slots - shown.length
+  const cells: Cell[] = []
+  for (let r = 0; r < rows; r++) {
+    const fromBottom = rows - 1 - r
+    for (let x = 0; x < width; x++) {
+      const v = x < slots * 2 ? shown[Math.floor(x / 2) - offset] : undefined
+      const levels = v === undefined ? 0 : v.share > 0 ? Math.max(1, Math.round(Math.min(1, v.share) * rows * 8)) : 0
+      const level = Math.max(0, Math.min(8, levels - fromBottom * 8))
+      if (level > 0 && v !== undefined) cells.push([LEVELS[level - 1]!, v.color, DEFAULT_COLOR])
+      else if (fromBottom === 0) cells.push([LEVELS[0]!, TRACK, DEFAULT_COLOR])
+      else cells.push([0x20, DEFAULT_COLOR, DEFAULT_COLOR])
+    }
+  }
+
+  return cells
+}
+
+/**
+ * Cache-read price as a multiple of the base input price, by model: 0.05× on Opus 5.5 and Sonnet
+ * 5.5, 0.025× on Fable 5.1 and Mythos 5.1, 0.1× elsewhere. Source and how to keep these current:
+ * CONTRIBUTING.md › Prices (pricing › Prompt caching, checked 2026-10-12).
+ */
+export function readMultiplier(model: string): number {
+  if (/(opus|sonnet)-5-5/.test(model)) return 0.05
+  if (/(fable|mythos)-5-1/.test(model)) return 0.025
+
+  return 0.1
+}
+
+/** Cache-write price as a multiple of the base input price: 2× for a one-hour write, 1.25× for five minutes. */
+export function writeMultiplier(ttlMs: number): number {
+  return ttlMs >= HOUR ? 2 : 1.25
+}
+
+/**
+ * The share of the input cost the cache saved, in percent, against sending every input token
+ * uncached: negative when writing cost more than reading saved. Null before any input.
+ */
+export function cacheSaving(u: Usage4, readMult: number, writeMult: number): number | null {
+  const all = u.input + u.read + u.write
+  if (all === 0) return null
+  const paid = u.input + u.read * readMult + u.write * writeMult
+
+  return Math.round((1 - paid / all) * 100)
 }
 
 /** Right-aligns `text` in `width` columns. */

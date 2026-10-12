@@ -34,8 +34,15 @@ import {
   hhmm,
   hitPct,
   litCells,
-  meter,
-  PALETTE,
+  meterCells,
+  meterRuns,
+  markAt,
+  columnCells,
+  cacheSaving,
+  readMultiplier,
+  writeMultiplier,
+  FILL,
+  HEALTH,
   parseKeepWarm,
   rasterCells,
   remainingLabel,
@@ -46,7 +53,7 @@ import {
   stack,
   tall,
 } from './lib'
-import type { Palette } from './lib'
+import type { Mark } from './lib'
 
 const PANE = 'cache-meter'
 const TICK_MS = 15_000
@@ -441,13 +448,14 @@ export const register: Register = (on, options) => {
 
   // /tokens toggles. rows: the height asked for above the prompt, default a third (types: PaneOpenArgs.rows);
   // closeOnEscape: Esc at the idle, empty prompt closes it too. No focus: hotkeys would swallow typing.
-  on('command.run', { command: 'tokens' }, async $ => {
+  on('command.run', { command: 'tokens' }, async ($, e) => {
     if ((await $.ui.panes()).some(p => p.id === PANE)) {
       await $.ui.close({ id: PANE })
 
       return { text: 'Closed the "Tokens & Cache" pane.' }
     }
-    await $.ui.open({ id: PANE, title: 'Tokens & Cache', rows: 44, closeOnEscape: true })
+    // From about 114 terminal columns the body is wide enough for two columns, which needs fewer rows.
+    await $.ui.open({ id: PANE, title: 'Tokens & Cache', rows: (e.presentation?.columns ?? 80) >= 114 ? 26 : 36, closeOnEscape: true })
 
     return { text: 'Opened the "Tokens & Cache" pane. Esc at an empty prompt or /tokens again closes it.' }
   })
@@ -560,7 +568,7 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Button, Text } = $.ui.resolve(e)
     seat = e.props.placement
-    // Raster (colored cells) is drawn by the terminal only (reference › Elements); elsewhere text bars.
+    // Raster (colored cells) is drawn by the terminal only (reference › Elements); elsewhere text.
     const Raster = e.surface === 'terminal' ? $.ui.resolve(e).Raster : null
     const steps = await read($, stepsA)
     const totals: Totals = await read($, totalsA)
@@ -571,60 +579,321 @@ export const register: Register = (on, options) => {
     const ttl = await ttlNow($)
     const now = await $.clock.now()
     const status = cacheStatus(cache, now, ttl.ms)
-    // Cards have a round border and one column of padding on each side: 4 columns of chrome.
-    const inner = Math.max(20, e.props.bodyColumns - 4)
-    const rows = e.props.scroll.bodyRows
 
-    // A one-row meter: gradient cells in the terminal, a text bar elsewhere.
-    const gauge = (key: string, lit: number, palette: Palette, color: string, markerAt: number | null = null) =>
-      Raster ? (
-        <Raster key={key} columns={inner} rows={1} cells={rasterCells(meter(inner, lit, palette, markerAt))} />
+    // Three widths: a narrow dock (about 48 body columns beside a 120-column terminal) drops the
+    // secondary text; from 110 the cards sit in two columns, so the pane also needs fewer rows.
+    const cols = e.props.bodyColumns
+    const tier = cols < 64 ? 'narrow' : cols < 110 ? 'medium' : 'wide'
+    const left = tier === 'wide' ? Math.floor((cols - 1) / 2) : cols
+    const rightW = tier === 'wide' ? cols - 1 - left : cols
+    // A card has a round border and one column of padding on each side: 4 columns of chrome.
+    const leftIn = Math.max(16, left - 4)
+    const rightIn = Math.max(16, rightW - 4)
+    const fullIn = Math.max(16, cols - 4)
+
+    // A one-row meter: Raster cells in the terminal, the same runs as colored text elsewhere.
+    const gauge = (key: string, width: number, fraction: number, fill: number, theme: string, marks: readonly Mark[] = []) => {
+      const runs = meterRuns(width, fraction, marks)
+
+      return Raster ? (
+        <Raster key={key} columns={width} rows={1} cells={rasterCells(meterCells(runs, fill, marks))} />
       ) : (
-        <Text>
-          <Text color={color}>{'█'.repeat(Math.min(lit, inner))}</Text>
-          <Text color="inactive">
-            {[...'░'.repeat(Math.max(0, inner - lit))].map((c, k) => (markerAt !== null && k + lit === markerAt ? '┃' : c)).join('')}
-          </Text>
+        <Text wrap="truncate-end">
+          {runs.map(r => (
+            <Text color={r.role === 'fill' ? theme : r.role === 'track' ? 'inactive' : marks[r.role]?.theme}>{r.text}</Text>
+          ))}
         </Text>
       )
+    }
 
-    // --- cache card ---------------------------------------------------------------------------
-    const isLow = status.kind === 'warm' && status.remaining <= ttl.ms * PING_SHARE
-    const stateColor = status.kind === 'warm' ? (isLow ? 'warning' : 'success') : 'error'
-    const palette = status.kind === 'warm' ? (isLow ? PALETTE.low : PALETTE.warm) : PALETTE.cold
-    const minutes = status.kind === 'warm' ? Math.ceil(status.remaining / 60_000) : 0
-    const digits = status.kind === 'warm' ? tall(status.remaining >= 60_000 ? String(minutes) : String(Math.ceil(status.remaining / 1000))) : tall('--')
-    const unit = status.kind === 'warm' ? (status.remaining >= 60_000 ? 'min left' : 's left') : ''
-    const stateWord = status.kind === 'warm' ? 'WARM' : status.kind === 'empty' ? 'EMPTY' : 'EXPIRED'
-    const rewriteTokens = measure?.tokens ?? cache?.contextTokens ?? 0
-    const sub =
-      status.kind === 'warm'
-        ? ` · ${unit}`
-        : status.kind === 'empty'
-          ? ' · no answer yet'
-          : rewriteTokens > 0
-            ? ` · next message re-writes ≈ ${cache?.rewriteUsd != null ? `$${cache.rewriteUsd.toFixed(2)}` : `${short(rewriteTokens)} tokens`}`
-            : ''
+    // --- cache --------------------------------------------------------------------------------
+    const isWarm = status.kind === 'warm'
+    const isLow = isWarm && status.remaining <= ttl.ms * PING_SHARE
+    const stateColor = isWarm ? (isLow ? 'warning' : 'success') : 'error'
+    const remaining = isWarm ? status.remaining : 0
+    const isSeconds = isWarm && remaining < 60_000
+    const digits = tall(isWarm ? String(Math.ceil(remaining / (isSeconds ? 1000 : 60_000))) : '--')
+    const lastAt = cache !== null && cache.lastAt > 0 ? cache.lastAt : null
+    const stateWord = isWarm ? 'WARM' : status.kind === 'empty' ? 'EMPTY' : 'EXPIRED'
+    const stateNote = isWarm
+      ? ` · ${isSeconds ? 's' : 'min'} left${lastAt === null || tier === 'narrow' ? '' : ` · until ${hhmm(lastAt + ttl.ms)}`}`
+      : status.kind === 'empty'
+        ? ' · waiting for the first answer'
+        : lastAt === null
+          ? ''
+          : ` · since ${hhmm(lastAt + ttl.ms)}`
     const sessionHit = hitPct(totals.main)
-    const lit = status.kind === 'warm' ? litCells(status.remaining, ttl.ms, inner) : 0
-
-    // --- keepwarm card ------------------------------------------------------------------------
+    const rewriteTokens = measure?.tokens ?? cache?.contextTokens ?? 0
+    const stake =
+      cache?.rewriteUsd != null ? `$${cache.rewriteUsd.toFixed(2)} (${short(rewriteTokens)} tokens)` : `${short(rewriteTokens)} tokens`
+    // Keepwarm pings once PING_SHARE of the TTL is left: the marker shows that point on the countdown.
+    const canKeep = isInteractive && isWarm && ttl.ms >= HOUR
     const isKeeping = keep.until !== null && keep.until > now
-    const pingIn = status.kind === 'warm' ? Math.max(0, status.remaining - ttl.ms * PING_SHARE) : 0
-    const canKeep = isInteractive && status.kind === 'warm' && ttl.ms >= HOUR
+    const pingMarks: Mark[] = canKeep || isKeeping ? [{ at: markAt(PING_SHARE, leftIn), color: 0xd97757, theme: 'claude' }] : []
 
-    // --- context card -------------------------------------------------------------------------
+    const cacheCard = (
+      <Box borderStyle="round" borderColor={stateColor} paddingX={1} flexDirection="column">
+        <Box flexDirection="row">
+          <Box flexDirection="column">
+            {digits.map(row => (
+              <Text color={stateColor} bold>
+                {row}
+              </Text>
+            ))}
+          </Box>
+          <Box flexDirection="column" marginLeft={2} flexShrink={1}>
+            <Text wrap="truncate-end">
+              <Text color={stateColor} bold>
+                {stateWord}
+              </Text>
+              <Text dimColor>{stateNote}</Text>
+            </Text>
+            <Text wrap="truncate-end">
+              <Text dimColor>hit </Text>
+              <Text bold color={hitColor(cache?.hitPct ?? null)}>
+                {cache?.hitPct == null ? '–' : `${cache.hitPct}%`}
+              </Text>
+              {tier !== 'narrow' && <Text dimColor> last · </Text>}
+              {tier !== 'narrow' && (
+                <Text bold color={hitColor(sessionHit)}>
+                  {sessionHit === null ? '–' : `${sessionHit}%`}
+                </Text>
+              )}
+              {tier !== 'narrow' && <Text dimColor> session</Text>}
+            </Text>
+            <Text dimColor wrap="truncate-end">
+              TTL {ttl.label}
+              {tier === 'narrow' ? '' : ` · ${ttl.source}`}
+            </Text>
+          </Box>
+        </Box>
+        {gauge('countdown', leftIn, isWarm ? remaining / ttl.ms : 0, isWarm ? (isLow ? FILL.low : FILL.warm) : FILL.cold, stateColor, pingMarks)}
+        {status.kind === 'expired' && rewriteTokens > 0 && (
+          <Text color="warning" wrap="truncate-end">
+            next message re-writes ≈ {stake}
+          </Text>
+        )}
+        {isWarm && rewriteTokens > 0 && (
+          <Text dimColor wrap="truncate-end">
+            expiry costs a re-write of ≈ {stake}
+            {pingMarks.length > 0 && tier !== 'narrow' ? ' · ┃ keepwarm pings here' : ''}
+          </Text>
+        )}
+      </Box>
+    )
+
+    // --- keepwarm -----------------------------------------------------------------------------
+    const pingIn = isWarm ? Math.max(0, remaining - ttl.ms * PING_SHARE) : 0
+    const keepCard = (
+      <Box borderStyle="round" borderColor="claude" borderDimColor={!isKeeping} paddingX={1} flexDirection="column">
+        <Box flexDirection="row" justifyContent="space-between">
+          <Text wrap="truncate-end">
+            <Text color="claude" bold>
+              {isKeeping ? '↻ Keepwarm on' : '↻ Keepwarm'}
+            </Text>
+            <Text dimColor>
+              {isKeeping && keep.until !== null ? ` until ${hhmm(keep.until)}` : ` off${keep.pings > 0 && tier !== 'narrow' ? ` · last run ${keep.pings} pings` : ''}`}
+            </Text>
+          </Text>
+          {isKeeping ? (
+            <Button key="keepwarm-stop" plain hotkey="s" onPress={() => pressKeepWarm($, null)}>
+              <Text color="claude" bold>
+                Stop
+              </Text>
+            </Button>
+          ) : (
+            canKeep && (
+              <Button key="keepwarm-start" plain hotkey="w" onPress={() => pressKeepWarm($, 2 * HOUR)}>
+                <Text color="claude" bold>
+                  Keep warm 2h
+                </Text>
+              </Button>
+            )
+          )}
+        </Box>
+        <Text dimColor wrap="truncate-end">
+          {isKeeping
+            ? `${keep.pings}/${MAX_PINGS} pings · ${short(keep.readTokens)} read · next ~${remainingLabel(pingIn)}`
+            : canKeep
+              ? 'Break ahead? A ping ≈ 1/20 of a re-write.'
+              : !isInteractive
+                ? 'Interactive sessions only.'
+                : ttl.ms < HOUR
+                  ? `Not worth it at a ${ttl.label} TTL.`
+                  : 'Available once the cache is warm.'}
+        </Text>
+      </Box>
+    )
+
+    // --- context ------------------------------------------------------------------------------
     const percent = measure?.percent ?? null
     const auto = measure?.autoCompactPct ?? null
-    const ctxLit = percent === null ? 0 : Math.round((percent / 100) * inner)
-    const marker = auto === null ? null : Math.min(inner - 1, Math.round((auto / 100) * inner))
+    const autoMarks: Mark[] = auto === null ? [] : [{ at: markAt(auto / 100, rightIn), color: 0xff6b81, theme: 'error' }]
+    const contextCard = (
+      <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="column">
+        <Box flexDirection="row" justifyContent="space-between">
+          <Text wrap="truncate-end">
+            <Text color="claude" bold>
+              Context{' '}
+            </Text>
+            <Text bold>{percent === null ? '–' : `${percent}%`}</Text>
+          </Text>
+          <Text dimColor>{measure?.tokens == null ? '' : `${short(measure.tokens)} / ${short(measure.window)}`}</Text>
+        </Box>
+        {gauge('context', rightIn, (percent ?? 0) / 100, FILL.context, 'suggestion', autoMarks)}
+        <Box flexDirection="row" justifyContent="space-between">
+          <Text wrap="truncate-end">
+            {auto !== null && <Text color="error">┃</Text>}
+            <Text dimColor>
+              {measure?.isAutoCompactOff ? 'auto-compact off' : auto === null ? 'auto-compact unknown' : ` auto-compact ${auto}%`}
+            </Text>
+          </Text>
+          <Text dimColor>{tier !== 'narrow' && measure !== null && measure.history.length > 2 ? `trend ${sparkline(measure.history)}` : ''}</Text>
+        </Box>
+      </Box>
+    )
 
-    // --- requests card ------------------------------------------------------------------------
+    // --- session ------------------------------------------------------------------------------
+    // What caching saved: every input token at the base price against what reads and writes cost,
+    // with the last request's model and the current TTL for the whole session (README › Pane).
+    const saving = cacheSaving(totals.main, readMultiplier(steps.at(-1)?.model ?? ''), writeMultiplier(ttl.ms))
     const limits = measure?.limits ?? []
-    const coldLines = Math.min(3, colds.length)
-    const shown = steps.slice(-Math.max(3, rows - 36 - limits.length - coldLines))
-    const barWidth = Math.max(8, inner - 34)
-    const top = Math.max(1, ...shown.map(s => s.input + s.read + s.write))
+    // Name (11) + bar + ' 100%' (5) + ' · resets Mon 17:10' (19): the bar takes what the column leaves.
+    const limitBar = Math.max(6, Math.min(24, rightIn - 35))
+    const sessionCard = (
+      <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="column">
+        <Box flexDirection="row" justifyContent="space-between">
+          <Text color="claude" bold>
+            Session
+          </Text>
+          {saving !== null && (
+            <Text bold color={saving >= 0 ? 'success' : 'warning'} wrap="truncate-end">
+              {saving >= 0 ? `cache saved ${saving}%${tier === 'narrow' ? '' : ' of input cost'}` : `cache cost +${-saving}%`}
+            </Text>
+          )}
+        </Box>
+        <Text dimColor wrap="truncate-end">
+          {usageLine(totals.main)}
+        </Text>
+        <Text wrap="truncate-end">
+          <Text dimColor>{totals.mainSteps} requests · </Text>
+          <Text bold>{measure?.usd == null ? '–' : `$${measure.usd.toFixed(2)}`}</Text>
+          <Text dimColor> list price</Text>
+        </Text>
+        {totals.subSteps > 0 && (
+          <Text dimColor wrap="truncate-end">
+            subagents {usageLine(totals.sub)} · {totals.subSteps} requests
+          </Text>
+        )}
+        {totals.mainSteps === 0 ? null : colds.length === 0 ? (
+          <Text wrap="truncate-end">
+            <Text dimColor>{'Cold       '}</Text>
+            <Text color="success">None – warm for every request.</Text>
+          </Text>
+        ) : (
+          <Box flexDirection="column">
+            <Text wrap="truncate-end">
+              <Text dimColor>{'Cold       '}</Text>
+              <Text color="warning" bold>
+                Total {totals.coldCount}× · {short(totals.coldWritten)} tokens
+              </Text>
+              <Text dimColor>
+                {colds.some(c => c.cause === 'pause') ? ' · /keepwarm before a break prevents this' : ''}
+                {totals.coldCount > 3 ? ' · showing the last 3' : ''}
+              </Text>
+            </Text>
+            {colds.slice(-3).map(c => (
+              <Text wrap="truncate-end">
+                <Text dimColor>{'           '}{hhmm(c.at)} </Text>
+                <Text color="warning">{short(c.written)}</Text>
+                <Text dimColor>
+                  {' '}re-written
+                  {c.cause === 'model'
+                    ? ' (after a model switch)'
+                    : c.cause === 'resume'
+                      ? ` (after resume${c.idleMs === null ? '' : `, ${duration(c.idleMs)} idle`})`
+                      : ` after ${duration(c.idleMs ?? 0)} idle`}
+                </Text>
+              </Text>
+            ))}
+          </Box>
+        )}
+        {limits.length === 0 && (
+          <Text dimColor wrap="truncate-end">
+            Plan limits: no reading (no subscription, or no answer yet)
+          </Text>
+        )}
+        {limits.map(l => {
+          const used = Math.max(0, Math.min(limitBar, Math.round((l.percentUsed / 100) * limitBar)))
+
+          return (
+            <Text wrap="truncate-end">
+              <Text dimColor>{limitName(l.kind).padEnd(11)}</Text>
+              <Text color={l.percentUsed >= 90 ? 'error' : l.percentUsed >= 70 ? 'warning' : 'success'}>{'█'.repeat(used)}</Text>
+              <Text color="inactive">{'░'.repeat(limitBar - used)}</Text>
+              <Text bold> {right(`${l.percentUsed}%`, 4)}</Text>
+              <Text dimColor>{l.resetsAt ? ` · resets ${resetLabel(l.resetsAt)}` : ''}</Text>
+            </Text>
+          )
+        })}
+      </Box>
+    )
+
+    // --- requests: one column per request, its height the share not read from the cache --------
+    const chartRows = tier === 'narrow' ? 3 : 4
+    const slots = Math.floor(fullIn / 2)
+    const shown = steps.slice(-slots)
+    const last = steps.at(-1)
+    const lastHit = last === undefined ? null : hitPct(last)
+    const columns = shown.map(s => {
+      const all = s.input + s.read + s.write
+      const hit = hitPct(s) ?? 100
+
+      return { share: all > 0 ? (s.input + s.write) / all : 0, color: hit >= 80 ? HEALTH.good : hit >= 50 ? HEALTH.fair : HEALTH.poor }
+    })
+    const requestsCard = (
+      <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="column">
+        <Box flexDirection="row" justifyContent="space-between">
+          <Text color="claude" bold>
+            Requests
+          </Text>
+          <Text dimColor wrap="truncate-end">
+            {tier === 'narrow' ? 'not from cache' : 'height = share not read from the cache · newest right'}
+          </Text>
+        </Box>
+        {steps.length === 0 && <Text dimColor>No request measured yet.</Text>}
+        {steps.length > 0 && Raster && (
+          <Raster key="requests" columns={fullIn} rows={chartRows} cells={rasterCells(columnCells(columns, fullIn, chartRows))} />
+        )}
+        {steps.length > 0 && Raster && (
+          <Box flexDirection="row" justifyContent="space-between">
+            <Text dimColor>{hhmm(shown[0]!.at)}</Text>
+            <Text dimColor>{hhmm(shown.at(-1)!.at)}</Text>
+          </Box>
+        )}
+        {steps.length > 0 &&
+          !Raster &&
+          steps.slice(-4).map(s => (
+            <Text wrap="truncate-end">
+              <Text dimColor>{hhmm(s.at)} </Text>
+              <Text>{right(short(s.input + s.read + s.write), 6)} </Text>
+              <Text bold color={hitColor(hitPct(s))}>
+                {right(hitPct(s) === null ? '–' : `${hitPct(s)}%`, 4)}
+              </Text>
+              <Text dimColor> hit · out {short(s.output)}</Text>
+            </Text>
+          ))}
+        {last !== undefined && Raster && (
+          <Text wrap="truncate-end">
+            <Text dimColor>last {short(last.input + last.read + last.write)} in · </Text>
+            <Text bold color={hitColor(lastHit)}>
+              {lastHit === null ? '–' : `${lastHit}%`}
+            </Text>
+            <Text dimColor> hit · out {short(last.output)}</Text>
+          </Text>
+        )}
+      </Box>
+    )
 
     return (
       <Box flexDirection="column">
@@ -632,236 +901,40 @@ export const register: Register = (on, options) => {
           <Text color="claude" bold>
             ◉ Cache Meter
           </Text>
-          <Text dimColor>prompt cache · tokens · Claude Code mod</Text>
+          <Text dimColor wrap="truncate-end">
+            {tier === 'narrow' ? '' : 'prompt cache · tokens'}
+          </Text>
         </Box>
-
-        <Box borderStyle="round" borderColor={stateColor} paddingX={1} flexDirection="column">
-          <Box flexDirection="row">
-            <Box flexDirection="column">
-              {digits.map(line => (
-                <Text color={stateColor} bold>
-                  {line}
-                </Text>
-              ))}
+        {tier === 'wide' ? (
+          <Box key="columns" flexDirection="row" columnGap={1}>
+            <Box flexDirection="column" width={left}>
+              {cacheCard}
+              {keepCard}
             </Box>
-            <Box flexDirection="column" marginLeft={2}>
-              <Text>
-                <Text color={stateColor} bold>
-                  {stateWord}
-                </Text>
-                <Text dimColor>{sub}</Text>
-              </Text>
-              <Text>
-                <Text dimColor>hit </Text>
-                <Text bold color={hitColor(cache?.hitPct ?? null)}>
-                  {cache?.hitPct == null ? '–' : `${cache.hitPct}%`}
-                </Text>
-                <Text dimColor> last request · </Text>
-                <Text bold color={hitColor(sessionHit)}>
-                  {sessionHit === null ? '–' : `${sessionHit}%`}
-                </Text>
-                <Text dimColor> session</Text>
-              </Text>
-              <Text dimColor>
-                TTL {ttl.label} · {ttl.source}
-              </Text>
+            <Box flexDirection="column" width={rightW}>
+              {contextCard}
+              {sessionCard}
             </Box>
           </Box>
-          {gauge('countdown', lit, palette, stateColor)}
-        </Box>
-
-        <Box borderStyle="round" borderColor="claude" borderDimColor={!isKeeping} paddingX={1} flexDirection="column">
-          {isKeeping && keep.until !== null ? (
-            <Box flexDirection="column">
-              <Text>
-                <Text color="claude" bold>
-                  ↻ Keepwarm on
-                </Text>
-                <Text dimColor> until {hhmm(keep.until)}</Text>
-              </Text>
-              <Text dimColor>
-                {keep.pings}/{MAX_PINGS} pings · {short(keep.readTokens)} tokens read · next ping in ~{remainingLabel(pingIn)}
-              </Text>
-              <Box flexDirection="row">
-                <Button key="keepwarm-stop" plain hotkey="s" onPress={() => pressKeepWarm($, null)}>
-                  <Text color="claude" bold>
-                    Stop keepwarm
-                  </Text>
-                </Button>
-              </Box>
-            </Box>
-          ) : (
-            <Box flexDirection="column">
-              <Text>
-                <Text color="claude" bold>
-                  ↻ Keepwarm
-                </Text>
-                <Text dimColor> off{keep.pings > 0 ? ` · last run ${keep.pings} pings` : ''}</Text>
-              </Text>
-              <Text dimColor>Stepping away? Keep this cache warm – a ping costs about 1/20 of a re-write.</Text>
-              {canKeep ? (
-                <Box flexDirection="row" columnGap={2}>
-                  <Button key="keepwarm-start" plain hotkey="w" onPress={() => pressKeepWarm($, 2 * HOUR)}>
-                    <Text color="claude" bold>
-                      Keep warm 2h
-                    </Text>
-                  </Button>
-                  <Text dimColor>or /keepwarm 30m … 8h</Text>
-                </Box>
-              ) : (
-                <Text dimColor>
-                  {!isInteractive
-                    ? 'Interactive sessions only.'
-                    : ttl.ms < HOUR
-                      ? `Not worth it at a ${ttl.label} TTL.`
-                      : 'Available once the cache is warm (after the next answer).'}
-                </Text>
-              )}
-            </Box>
-          )}
-        </Box>
-
-        <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="column">
-          <Text>
-            <Text color="claude" bold>
-              Context{' '}
-            </Text>
-            <Text bold>{percent === null ? '–' : `${percent}%`}</Text>
-            <Text dimColor>{measure?.tokens == null ? '' : `  ${short(measure.tokens)} / ${short(measure.window)}`}</Text>
-          </Text>
-          {gauge('context', ctxLit, PALETTE.context, 'suggestion', marker)}
-          <Text dimColor>
-            {measure?.isAutoCompactOff
-              ? 'auto-compact off'
-              : auto === null
-                ? 'auto-compact unknown'
-                : `┃ auto-compact at ${auto}%`}
-            {measure !== null && measure.history.length > 2 ? `   trend ${sparkline(measure.history)}` : ''}
-          </Text>
-        </Box>
-
-        <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="column">
-          <Text>
-            <Text color="claude" bold>
-              Requests{' '}
-            </Text>
-            <Text dimColor>main conversation · newest last</Text>
-          </Text>
-          {shown.length === 0 && <Text dimColor>No request measured yet.</Text>}
-          {shown.map(s => {
-            const seg = stack(s, top, barWidth)
-            const used = Math.min(barWidth, seg.read + seg.write + seg.input)
-            const hit = hitPct(s)
-
-            return (
-              <Text>
-                <Text dimColor>{hhmm(s.at)} </Text>
-                <Text color="success">{'█'.repeat(Math.min(seg.read, barWidth))}</Text>
-                <Text color="warning">{'█'.repeat(Math.max(0, Math.min(seg.write, barWidth - seg.read)))}</Text>
-                <Text color="error">{'█'.repeat(Math.max(0, Math.min(seg.input, barWidth - seg.read - seg.write)))}</Text>
-                <Text color="inactive">{'·'.repeat(barWidth - used)}</Text>
-                <Text> {right(short(s.input + s.read + s.write), 6)} </Text>
-                <Text bold color={hitColor(hit)}>
-                  {right(hit === null ? '–' : `${hit}%`, 4)}
-                </Text>
-                <Text dimColor> hit · out {short(s.output)}</Text>
-              </Text>
-            )
-          })}
-          <Text>
-            <Text color="success">█</Text>
-            <Text dimColor> read from cache  </Text>
-            <Text color="warning">█</Text>
-            <Text dimColor> written to cache  </Text>
-            <Text color="error">█</Text>
-            <Text dimColor> new (uncached)</Text>
-          </Text>
-        </Box>
-
-        <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="column">
-          <Text color="claude" bold>
-            Session
-          </Text>
-          <Text>
-            <Text dimColor>{'Main       '}</Text>
-            {usageLine(totals.main)}
-            <Text dimColor> · {totals.mainSteps} requests</Text>
-          </Text>
-          {totals.subSteps > 0 && (
-            <Text>
-              <Text dimColor>{'Subagents  '}</Text>
-              {usageLine(totals.sub)}
-              <Text dimColor> · {totals.subSteps} requests</Text>
-            </Text>
-          )}
-          <Text>
-            <Text dimColor>{'Cost       '}</Text>
-            <Text bold>{measure?.usd == null ? '–' : `$${measure.usd.toFixed(2)}`}</Text>
-            <Text dimColor> (as /cost, list price)</Text>
-          </Text>
-          {colds.length === 0 ? (
-            <Text>
-              <Text dimColor>{'Cold       '}</Text>
-              <Text color="success">None – the cache was warm for every request.</Text>
-            </Text>
-          ) : (
-            <Box flexDirection="column">
-              <Text>
-                <Text dimColor>{'Cold       '}</Text>
-                <Text color="warning" bold>
-                  Total {totals.coldCount}× · {short(totals.coldWritten)} tokens
-                </Text>
-                <Text dimColor>
-                  {colds.some(c => c.cause === 'pause') ? ' · /keepwarm before a break prevents this' : ''}
-                  {totals.coldCount > 3 ? ' · showing the last 3' : ''}
-                </Text>
-              </Text>
-              {colds.slice(-3).map(c => (
-                <Text>
-                  <Text dimColor>{'           '}{hhmm(c.at)} </Text>
-                  <Text color="warning">{short(c.written)}</Text>
-                  <Text dimColor>
-                    {' '}re-written
-                    {c.cause === 'model'
-                      ? ' (after a model switch)'
-                      : c.cause === 'resume'
-                        ? ` (after resume${c.idleMs === null ? '' : `, ${duration(c.idleMs)} idle`})`
-                        : ` after ${duration(c.idleMs ?? 0)} idle`}
-                  </Text>
-                </Text>
-              ))}
-            </Box>
-          )}
-          <Text color="claude" bold>
-            Plan limits
-          </Text>
-          {limits.length === 0 && <Text dimColor>No reading (no subscription, or no answer yet).</Text>}
-          {limits.map(l => {
-            const width = Math.max(10, Math.min(30, inner - 34))
-            const used = Math.max(0, Math.min(width, Math.round((l.percentUsed / 100) * width)))
-
-            return (
-              <Text>
-                <Text dimColor>{limitName(l.kind).padEnd(11)}</Text>
-                <Text color={l.percentUsed >= 90 ? 'error' : l.percentUsed >= 70 ? 'warning' : 'success'}>{'█'.repeat(used)}</Text>
-                <Text color="inactive">{'░'.repeat(width - used)}</Text>
-                <Text bold> {right(`${l.percentUsed}%`, 4)}</Text>
-                <Text dimColor>{l.resetsAt ? ` · resets ${resetLabel(l.resetsAt)}` : ''}</Text>
-              </Text>
-            )
-          })}
-        </Box>
-
+        ) : (
+          <Box flexDirection="column">
+            {cacheCard}
+            {keepCard}
+            {contextCard}
+            {sessionCard}
+          </Box>
+        )}
+        {requestsCard}
         <Box flexDirection="row" justifyContent="space-between">
-          <Text dimColor>Hit rate = read ÷ (new + read + written) · cross-check: /usage</Text>
+          <Text dimColor wrap="truncate-end">
+            {tier === 'narrow'
+              ? 'keys: ctrl+x tab'
+              : `keys after ctrl+x tab: ${isKeeping ? 's stop · ' : canKeep ? 'w keep warm · ' : ''}c compact · Esc back`}
+          </Text>
           <Button key="pane-compact" plain hotkey="c" onPress={() => compactNow($)}>
             Compact
           </Button>
         </Box>
-        <Text dimColor>
-          Keys work while the pane has focus (ctrl+x tab): {isKeeping ? 's stop keepwarm' : canKeep ? 'w keep warm 2h' : ''}
-          {isKeeping || canKeep ? ' · ' : ''}c compact · Esc back to the prompt
-        </Text>
       </Box>
     )
   })
@@ -895,7 +968,7 @@ function resetLabel(iso: string): string {
 }
 
 function usageLine(u: Usage4) {
-  return `read ${short(u.read)} · written ${short(u.write)} · new ${short(u.input)} · output ${short(u.output)}`
+  return `read ${short(u.read)} · written ${short(u.write)} · new ${short(u.input)} · out ${short(u.output)}`
 }
 
 /** Green from 80 %, yellow from 50 %, red below; plain while unknown. */
