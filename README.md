@@ -14,7 +14,7 @@ Claude Code re-sends your entire conversation with every message. The prompt cac
 
 > **What a break costs:** on Claude Opus 5.5, re-writing a 150k-token conversation after the cache expired costs about **$1.20** at API prices – keeping it warm with one `/keepwarm` ping about **$0.03** ([pricing › prompt caching](https://platform.claude.com/docs/en/about-claude/pricing#prompt-caching)). On a subscription it is plan usage instead of dollars, at the same ratio.
 
-**Cache Meter puts the cache on screen and keeps it warm while you are away.**
+**Cache Meter puts the cache on screen, keeps it warm while you are away – and tells you what breaks it, what fills your context and what every answer costs.**
 
 <table>
 <tr>
@@ -22,25 +22,27 @@ Claude Code re-sends your entire conversation with every message. The prompt cac
 
 ### ⏱️ See it
 
-A live countdown above the prompt: minutes until the cache expires, the last request's hit rate, how full the context is – and what the session would cost on an API key. Under each answer, what that answer cost.
+A live countdown above the prompt: minutes until the cache expires, the last request's hit rate, how full the context is and what the session would cost on an API key. **Under every answer, what that answer cost** – and a heads-up *before* a model or effort switch re-writes the cache.
 
 </td>
 <td width="33%" valign="top">
 
 ### ☕ Keep it
 
-Type **`/keepwarm`** before lunch or a meeting. Shortly before expiry one tiny ping keeps the cache alive – about **1/20 of a re-write**, with hard limits so it never runs away.
+Type **`/keepwarm`** before lunch or a meeting. Shortly before expiry one tiny ping keeps the cache alive – about **1/20 of a re-write**, with hard limits so it never runs away. Forgot? An optional **desktop notification** reminds you ten minutes before the cache expires.
 
 </td>
 <td width="33%" valign="top">
 
 ### 📊 Understand it
 
-**`/tokens`** opens a dashboard: every request's cache hits and misses, what caching saved, which CLAUDE.md files and MCP servers fill your context (and which servers you never call), when you hit your plan limit at this pace, API errors and cost per hour.
+**`/tokens`** opens a dashboard: **why a warm cache broke**, what caching saved, **which tool results and files fill your context** (and which MCP servers you never call), when auto-compact and your plan limit hit at this pace, what each subagent used, API errors and cost per hour. **`/tokens report`** copies it all as Markdown.
 
 </td>
 </tr>
 </table>
+
+**New in 0.6–0.8:** cost under every answer · a warning before a switch re-writes the cache · the cause of every warm miss · what tool results fill your context · auto-compact forecast · per-subagent use · expiry notification · `/tokens report` for sharing. See the [changelog](CHANGELOG.md).
 
 **Install** – in your shell, then start a new Claude Code session:
 
@@ -59,10 +61,11 @@ It runs the same command (Claude Code may ask you to approve it); start a new se
 **Try it** in the new session:
 
 1. Ask anything – under the answer a line shows what it cost; the band above the prompt shows the countdown, hit rate and context.
-2. `/tokens` – the dashboard; `/tokens context` shows which files and servers fill your context.
+2. `/tokens` – the dashboard; `/tokens context` shows which tool results, files and servers fill your context.
 3. `/keepwarm` before your next break – then check after the break that the next answer reads from the cache (hit rate in the band).
+4. `/tokens report` – the whole session as Markdown on your clipboard, ready to paste into an issue or a note.
 
-Safe by design: it never changes your prompts, answers or tool calls and writes nothing to disk. It sends nothing on its own – only the `/keepwarm` pings and, if you press **Count exactly**, the token counts `/context` would make. Free and MIT-licensed.
+Safe by design: it never changes your prompts, answers or tool calls, never keeps their text and writes nothing to disk. It sends nothing on its own – only the `/keepwarm` pings and, if you press **Count exactly**, the token counts `/context` would make. Free and MIT-licensed.
 
 ### What you see
 
@@ -116,9 +119,10 @@ It runs only in interactive sessions, never drops a message, and after an expens
 
 | Tab | What it answers | Open with |
 |---|---|---|
-| **Overview** | How long is the cache still warm? Did the last requests hit it? What did caching save? How close are my plan limits – and when are they full at this pace? | `/tokens` |
-| **Context** | What fills my context – which CLAUDE.md files, MCP servers (and how often this session called each), skills, agents? | `/tokens context` |
+| **Overview** | How long is the cache still warm? Did the last requests hit it? What did caching save? How many prompts until auto-compact? How close are my plan limits – and when are they full at this pace? | `/tokens` |
+| **Context** | What fills my context – which tool results (by tool, and the largest single ones), CLAUDE.md files, MCP servers (and how often this session called each), skills, agents? | `/tokens context` |
 | **Health** | Did requests fail or get cut off? How long does the advisor take? What does the session cost per hour and per prompt? Was a warm cache re-written anyway – and why? What did each subagent use? | `/tokens health` |
+| **Report** | Everything above as Markdown on the clipboard – to share, file or compare | `/tokens report` |
 
 <p>
 <img src="https://raw.githubusercontent.com/florian101010/cache-meter/assets/screenshots/context.png" width="49%" alt="The Context tab: where the context goes by category, the heaviest memory files, MCP servers, skills listed of total and agents">
@@ -127,9 +131,9 @@ It runs only in interactive sessions, never drops a message, and after an expens
 
 **Where it shows.** In Claude Code's classic renderer the pane sits above the prompt, and your next prompt closes it so the conversation keeps its room. In the fullscreen renderer (`/tui fullscreen`) it docks beside the chat as a sidebar, opens there by itself at session start (option [`autoSidebar`](#configuration)) and stays open while you work.
 
-**Switching tabs.** `/tokens context` or `/tokens health` – a prefix is enough; after `/tokens ` Claude Code shows the three tab names as a hint. Or click a tab (fullscreen renderer), or press ctrl+x, Tab, then `1`–`3`.
+**Switching tabs.** `/tokens context` or `/tokens health` – a prefix is enough; after `/tokens ` Claude Code shows the tab names and `report` as a hint. Or click a tab (fullscreen renderer), or press ctrl+x, Tab, then `1`–`3`.
 
-**Where the numbers come from.** Everything is what Claude Code reports to mods – token counts per request, context breakdown, cost, plan limits, stop reasons, errors. Nothing is sent anywhere; only **Count exactly** in the Context tab asks the API to count tokens, once, when you press it.
+**Where the numbers come from.** Everything is what Claude Code reports to mods – token counts per request, context breakdown, cost, plan limits, stop reasons, errors. Tool-result sizes are estimates (characters ÷ 4 of the text the model reads), shown beside Claude Code's own total for all messages. Nothing is sent anywhere; only **Count exactly** in the Context tab asks the API to count tokens, once, when you press it.
 
 ## Contents
 
@@ -163,7 +167,7 @@ It runs only in interactive sessions, never drops a message, and after an expens
 | `· cold: good time to` | Before `[ Compact ]` when the cache has expired and the context is half full or more: the next prompt re-writes everything anyway, so compacting now loses no warm cache (it still reads the context once) |
 | `[ Compact ]` | Runs `/compact`; hidden while a turn is running |
 
-Two more places, only when there is something to say:
+Four more places, only when there is something to say:
 
 | Where | What |
 |---|---|
@@ -172,7 +176,7 @@ Two more places, only when there is something to say:
 | When a request splits the cache | While the cache is warm, a request that changes what the cache is keyed on – the model for one turn (a skill or command that names its own, `opusplan`), or the effort level on a model where that splits it – gets a note the moment it goes out: *This request re-writes 148.0k tokens to the cache: effort high → medium.* Effort changes keep the cache on Opus 5.5, Sonnet 5.5, Haiku 5.5 and Fable 5.1 with an API key or a subscription, so there is no note there ([prompt-caching › Changing effort level](https://code.claude.com/docs/en/prompt-caching#changing-effort-level)). Fast mode is not observable for a mod |
 | Before the cache expires (option [`expiryNotice`](#configuration), off by default) | One native notification per cache window, about 10 minutes before a one-hour cache expires, while keepwarm is off: *Prompt cache expires in 10m – the next prompt would re-write 148.0k tokens. Type /keepwarm to keep it.* It goes through your own notification channel (Claude Code's `preferredNotifChannel` setting) and your `Notification` settings hooks |
 
-**Pane `/tokens`** – the dashboard with its Overview, Context and Health tabs; see [above](#see-everything-with-tokens). The Overview's request chart draws one column per request: its height is the share not read from the cache, so a cold re-write stands out as a tall red column, a first write of the cache in blue.
+**Pane `/tokens`** – the dashboard with its Overview, Context and Health tabs, and `/tokens report` for a Markdown copy; see [above](#see-everything-with-tokens). The Context tab's *What the conversation holds* lists the tool results of the main conversation since the start or the last compact – by tool and the five largest, labelled with the file path or, for Bash, only the program name. The Overview's request chart draws one column per request: its height is the share not read from the cache, so a cold re-write stands out as a tall red column, a first write of the cache in blue.
 
 **`/keepwarm [10m … 8h | off]`** – shortly before the cache would expire, sends one tiny request over your conversation (`$.model.fork`) so the cache stays warm while you are away. Stops by itself on a miss, at the end of the window, after 12 pings, or when the TTL is 5 minutes.
 
@@ -223,6 +227,7 @@ To load the clone in every session, add its **absolute** path to `CLAUDE_CODE_PL
 | Open a tab directly | `/tokens context`, `/tokens health`, `/tokens overview` (a prefix is enough: `/tokens h`) – switches an open pane instead of closing it |
 | Switch tabs | `/tokens health` etc.; or press ctrl+x, then Tab (the pane gets the keys), then `1`–`3` – Esc hands the keys back; clicking a tab works only in Claude Code's fullscreen renderer, which captures the mouse |
 | Count the context exactly | `x` or **Count exactly** in the Context tab – one API request per tool and memory file, as `/context` |
+| Copy a session report | `/tokens report` – Markdown on the clipboard; the pane stays as it is. Paste it to check: some terminals drop clipboard writes without saying so |
 | Pane beside the chat | `/tui fullscreen` (Claude Code's fullscreen renderer): from 110 columns the pane docks as a sidebar and stays open while you chat; `/tui default` switches back |
 | Keep the cache warm | `/keepwarm` (2 h), `/keepwarm 30m` … `/keepwarm 8h`, also `/keepwarm 120m` – interactive sessions only |
 | Stop keeping it warm | `/keepwarm off` (or `0`) – reports pings and tokens read |
@@ -244,11 +249,11 @@ With `auto`, Cache Meter follows Claude Code's own TTL controls and your plan st
 ## Privacy, cost and permissions
 
 > [!NOTE]
-> **Local and read-only.** Cache Meter never changes your prompts, answers or tool calls, never reads their text, writes nothing to disk and sends nothing on its own. Full details: [PRIVACY.md](PRIVACY.md) · [SECURITY.md](SECURITY.md).
+> **Local and read-only.** Cache Meter never changes your prompts, answers or tool calls and never reads or keeps the text of your prompts or Claude's answers. Of a tool call it reads the tool's name, a short label (the file path, or a Bash command's program name – never its arguments) and the length of the result, to show what fills your context; the result's text is not kept. It writes nothing to disk and sends nothing on its own. Full details: [PRIVACY.md](PRIVACY.md) · [SECURITY.md](SECURITY.md).
 
 | | | Source |
 |---|---|---|
-| **Reads** | What Claude Code reports to mods: token counts, model, stop reason and server-side tool calls of each request; context fill and its breakdown (Claude Code's free local estimate, including the paths of your CLAUDE.md files and the names of MCP servers, skills and agents); cost as `/cost` shows it; plan-limit percentages; number of prompts and the session's start time; API errors; the names of the MCP tools Claude calls (to count calls per server – not their inputs or results); the type and task description of each subagent, as `$.agent.list()` gives them; Claude Code's own verdict on the cache and its re-write estimate at model switches and resumes; whether the session is fullscreen. Plus the TTL controls `FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL`, `ENABLE_PROMPT_CACHING_1H` and the `promptCacheTtl` setting | The code ([`hooks/register.tsx`](hooks/register.tsx)); `claude plugin validate .` lists every event it hooks and every call it makes. Data sources: [events › Follow a turn](https://code.claude.com/docs/en/plugins/mods/events#follow-a-turn), [reference › Mods API methods](https://code.claude.com/docs/en/plugins/mods/reference#mods-api-methods) (`$.session.usage`, `$.session.turns`), [events › Handle the settings hook events](https://code.claude.com/docs/en/plugins/mods/events#hook-the-settings-hook-events) |
+| **Reads** | What Claude Code reports to mods: token counts, model, stop reason and server-side tool calls of each request; context fill and its breakdown (Claude Code's free local estimate, including the paths of your CLAUDE.md files and the names of MCP servers, skills and agents); cost as `/cost` shows it; plan-limit percentages; number of prompts and the session's start time; API errors; of each tool call: the tool's name, a short label (file path, or a Bash command's program name) and the length of the result as the model reads it – for MCP tools also counted per server; the type and task description of each subagent, as `$.agent.list()` gives them; Claude Code's own verdict on the cache and its re-write estimate at model switches and resumes; whether the session is fullscreen. Plus the TTL controls `FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL`, `ENABLE_PROMPT_CACHING_1H` and the `promptCacheTtl` setting | The code ([`hooks/register.tsx`](hooks/register.tsx)); `claude plugin validate .` lists every event it hooks and every call it makes. Data sources: [events › Follow a turn](https://code.claude.com/docs/en/plugins/mods/events#follow-a-turn), [reference › Mods API methods](https://code.claude.com/docs/en/plugins/mods/reference#mods-api-methods) (`$.session.usage`, `$.session.turns`), [events › Handle the settings hook events](https://code.claude.com/docs/en/plugins/mods/events#hook-the-settings-hook-events) |
 | **Keeps** | Everything in memory for the session only – gone when it ends and after `/clear`, `/resume` or `/branch`. Nothing on disk | [interface › Keep state](https://code.claude.com/docs/en/plugins/mods/interface#keep-state) (`$.state` lasts until the session ends or `/clear`, `/resume`, `/branch`); no `$.fs` or `$.store` call in the code – check with `claude plugin validate .` |
 | **Sends** | Nothing on its own. Only when you ask: `/keepwarm` pings and **Count exactly** in the Context tab – through Claude Code, with your credentials, to the provider your session already uses. With `expiryNotice` on, a notification through your own notification channel – no server of the mod's | [api › Call a model](https://code.claude.com/docs/en/plugins/mods/api#call-a-model) (`$.model.fork` uses the session's credentials); `$.session.usage({ breakdown: 'full' })` sends token-count requests (type declaration `SessionUsageArgs`); no `$.http` or `$.process` call in the code; `$.ui.notify` goes through “the person's own notification channel, the one their `preferredNotifChannel` names” (type declaration) |
 | **Costs** | Nothing, except `/keepwarm`: each ping reads your whole context at the model's cache-read price – billed like any request on an API key, counted against your limits on a plan. How cache reads count towards the 5-hour and weekly limits is **not documented**; watch them in the pane. **Count exactly** uses token counting, which is free on the API; whether Claude Code counts it against plan limits is **not documented** | [pricing › Prompt caching](https://platform.claude.com/docs/en/about-claude/pricing#prompt-caching) (cache read 0.1×, 0.05× or 0.025× of the input price); [api › Call a model](https://code.claude.com/docs/en/plugins/mods/api#call-a-model) (“bill to the user's plan, API key, or cloud provider”); [token counting › Pricing and rate limits](https://platform.claude.com/docs/en/build-with-claude/token-counting#pricing-and-rate-limits) (“free to use”) |
@@ -264,12 +269,12 @@ With `auto`, Cache Meter follows Claude Code's own TTL controls and your plan st
 | `classic.StopFailure` | Counts the kind of API error a turn ended on | Nothing |
 | `turn.start` | Notes the session cost when a turn starts, for the line under its answer | Nothing |
 | `turn.complete` | Notes that no main request is running (so `/keepwarm` never pings during one); returns the line shown under the answer (option `turnLine`) | The answer itself is not changed – the line is shown beneath it ([reference › Turns](https://code.claude.com/docs/en/plugins/mods/reference#turns)) |
-| `tool.call` (MCP tools only, `mcp__…`) | After the call ran, counts it by tool name | Nothing – the call, its input and its result pass through unchanged; it never denies or answers a call |
+| `tool.call` | After the call ran: counts MCP calls per server, and for the main conversation estimates the result's size (characters ÷ 4 of the text the model reads) under a short label – file path, or a Bash command's program name. The text itself is not kept | Nothing – the call, its input and its result pass through unchanged; it never denies or answers a call |
 | `session.measure` | Reads context fill, plan limits, cost and the context breakdown | Nothing |
-| `session.compact` | After a real compaction, resets the countdown, since the next request writes a fresh cache. The same name is the call `$.session.compact` that the **Compact** button makes; the hook sees every compaction, whoever starts it | Nothing – it never skips or alters a compaction |
+| `session.compact` | After a real compaction, resets the countdown, since the next request writes a fresh cache, and the tool-result tally, since the summary replaced those results. The same name is the call `$.session.compact` that the **Compact** button makes; the hook sees every compaction, whoever starts it | Nothing – it never skips or alters a compaction |
 | `classic.PreModelSwitch` | While the cache is warm, shows a note with Claude Code's re-write estimate and the time the cache has left | Nothing – it returns no decision, so Claude Code's own confirmation and your settings hooks decide as without it |
 | `classic.PostModelSwitch` | Records the cache TTL, the re-write estimate and Claude Code's verdict on the cache | Nothing |
-| `command.run` (`/tokens`, `/keepwarm` only) | Answers its own two commands | Other commands are not matched |
+| `command.run` (`/tokens`, `/keepwarm` only) | Answers its own two commands; `/tokens report` puts a Markdown report on the clipboard (`$.ui.copy`) and prints only a confirmation | Other commands are not matched |
 | `prompt.submit` | Closes its own pane above the prompt when you send a prompt | Nothing – the prompt is not read, changed or dropped |
 | `ui.close` | Notes that you closed its pane, so it doesn't reopen | Nothing – it never keeps a pane open |
 | `ui.render` (band, its own pane) | Draws the band – keeping what other mods draw below it – and the `/tokens` pane | Only its own drawing |
@@ -302,6 +307,12 @@ A cache read keeps the entry for the duration of its original write – one hour
 ### Using it
 
 <details>
+<summary><b>How do I share what a session cost?</b></summary>
+
+`/tokens report` puts a Markdown summary on your clipboard: cost, hit rate, cold re-writes and warm misses with their cause, context fill and the auto-compact forecast, the heaviest files, servers and tool results, subagents and plan limits. Paths are shortened to `~` and Bash commands appear only by program name; still, review it before you post it publicly.
+</details>
+
+<details>
 <summary><b>Isn't this what <code>/usage</code> shows?</b></summary>
 
 `/usage` reports the session's hit ratio and whether the cache is warm, when you ask. Cache Meter shows how long it stays warm, all the time, per request, with history – and can keep it warm.
@@ -316,7 +327,7 @@ Claude Code places it, not the mod: beside the chat only in its fullscreen rende
 <details>
 <summary><b>Does it read or change my prompts?</b></summary>
 
-No. It hooks model requests only to read their token counts, stop reasons and server-side tool calls, notes that you sent a prompt without reading it, and counts MCP tool calls by name. The line under an answer is shown beneath it; the answer is not changed. See [PRIVACY.md](PRIVACY.md) and [SECURITY.md](SECURITY.md) for everything it can reach.
+No. It hooks model requests only to read their token counts, stop reasons and server-side tool calls, and notes that you sent a prompt without reading it. Of tool calls it reads the name, a short label and the result's length – not to keep the content, but to show what fills your context. The line under an answer is shown beneath it; the answer is not changed. See [PRIVACY.md](PRIVACY.md) and [SECURITY.md](SECURITY.md) for everything it can reach.
 </details>
 
 ### Setup

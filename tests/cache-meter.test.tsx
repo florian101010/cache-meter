@@ -13,6 +13,7 @@ import {
   forecast,
   agentLabel,
   breakCause,
+  compactForecast,
   effortKeepsCache,
   hitPct,
   isUnexpectedWrite,
@@ -30,6 +31,7 @@ import {
   switchNote,
   tall,
   toolDiff,
+  toolLabel,
   turnLine,
   writeMultiplier,
 } from '../hooks/lib'
@@ -111,6 +113,11 @@ function world(on: On, opts: { env?: Record<string, string>; forkRead?: number; 
     usd: 1.5,
     // The loaded MCP tools the context estimate reports; a test changes them to stage a tool-set change.
     tools: null as { name: string; serverName: string; tokens: number; isLoaded: boolean }[] | null,
+    // The text core reports for the next tool result; null = none (another mod's own answer).
+    toolText: null as string | null,
+    // What $.ui.copy answers, and what it was given.
+    copy: { isCopied: true } as Record<string, unknown>,
+    copied: [] as string[],
     // What $.ui.notify answers.
     notify: { isSent: true, channel: 'terminal' } as Record<string, unknown>,
     server: [] as { id: string; name: string; input: unknown; startedAt: number; endedAt?: number }[],
@@ -149,12 +156,17 @@ function world(on: On, opts: { env?: Record<string, string>; forkRead?: number; 
     return { value: { ...v.value, context, cost: { usd: next.usd } } } as never
   })
   on('turn.start', ($, e) => ({ turnId: e.turnId }))
-  on('tool.call', () => ({ result: 'ok' }))
+  // As core answers: `text` is the result as the model reads it (types: ToolCallResult).
+  on('tool.call', () => ({ result: 'ok', ...(next.toolText === null ? {} : { text: next.toolText }) }) as never)
   on('classic.PreModelSwitch', () => ({}))
   const notifies: string[] = []
   on('ui.notify', ($, e) => {
     notifies.push((e as { text: string }).text)
     return { value: next.notify } as never
+  })
+  on('ui.copy', ($, e) => {
+    next.copied.push((e as { text: string }).text)
+    return { value: next.copy } as never
   })
   on('agent.list', () => ({
     value: [{ id: 'agent-1', type: 'Explore', description: 'find the tests', status: 'completed' }],
@@ -873,7 +885,7 @@ test('/tokens <tab> opens on that tab and switches an open pane instead of closi
   ui = await $.ui.mount({ surface: 'terminal', ...PANE })
   expect(await ui.find({ type: 'Text', text: 'Where it goes' })).toBeDefined()
   await ui.unmount()
-  expect((await run($, 'tokens', 'nope')).text).toBe('Usage: /tokens [overview | context | health]')
+  expect((await run($, 'tokens', 'nope')).text).toBe('Usage: /tokens [overview | context | health | report]')
   expect(pane.isOpen).toBe(true)
   // Without a tab /tokens still toggles.
   expect((await run($, 'tokens', '')).text).toMatch(/^Closed/)
@@ -1230,4 +1242,85 @@ test('warm miss after an effort change on a model that keeps the cache: named wi
   await clock.advance(60_000)
   await stepWith($, 'claude-opus-5-5', 'low')
   expect(await healthText($, /effort high → low – keeps the cache on this model only with an API key or a subscription$/)).toBeDefined()
+})
+
+async function contextText($: Engine, pattern: RegExp) {
+  const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  await ui.press({ key: 'tab-context' })
+  const found = await ui.find({ type: 'Text', text: pattern })
+  await ui.unmount()
+
+  return found
+}
+
+test('tool labels: path or program name, never arguments', async () => {
+  expect(toolLabel('Read', { file_path: '/Users/u/project/a.ts' })).toBe('Read ~/project/a.ts')
+  expect(toolLabel('NotebookEdit', { notebook_path: '/home/u/n.ipynb' })).toBe('NotebookEdit ~/n.ipynb')
+  expect(toolLabel('Bash', { command: 'TOKEN=abc API_KEY=x /usr/bin/curl -H "Authorization: secret"' })).toBe('Bash curl')
+  expect(toolLabel('Bash', { command: '   ' })).toBe('Bash')
+  expect(toolLabel('Grep', { pattern: 'password' })).toBe('Grep')
+  expect(toolLabel('mcp__github__get_file', { path: 'x' })).toBe('mcp__github__get_file')
+})
+
+test('what the conversation holds: tool results of the main conversation, reset by a compaction', async ($, on) => {
+  const { next } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  next.toolText = 'x'.repeat(4_000)
+  await $.tool.call({ tool: 'Read', file_path: '/Users/u/project/a.ts' } as never)
+  next.toolText = 'y'.repeat(40_000)
+  await $.tool.call({ tool: 'Bash', command: 'SECRET=1 npm test --silent' } as never)
+  // A subagent's result stays in its own context.
+  await $.tool.call({ tool: 'Read', file_path: '/Users/u/other.ts', agentId: 'agent-1' } as never)
+  // Another mod answered without core's text: nothing to measure.
+  next.toolText = null
+  await $.tool.call({ tool: 'Read', file_path: '/Users/u/third.ts' } as never)
+  expect(await contextText($, /all messages 80\.0k$/)).toBeDefined()
+  for (const name of ['Bash', 'Read', 'Bash npm', 'Read ~/project/a.ts']) expect(await contextText($, new RegExp(`^${name}$`))).toBeDefined()
+  expect(await contextText($, /^ +10\.0k$/)).toBeDefined()
+  expect(await contextText($, /^ +1\.0k$/)).toBeDefined()
+  expect(await contextText($, /^ · 1×$/)).toBeDefined()
+  expect(await contextText($, /other\.ts|third\.ts|SECRET/)).toBeUndefined()
+  await $.session.compact({ trigger: 'manual', messages: SUMMARY })
+  expect(await contextText($, /^no tool results yet$/)).toBeDefined()
+  expect(await contextText($, /^since the compact at \d\d:\d\d$/)).toBeDefined()
+})
+
+test('auto-compact forecast: pace since the last compaction', async () => {
+  expect(compactForecast([100, 120, 140], 50, 1_000)).toBe(18)
+  // A drop (compaction) starts the pace again: not the slope from before it.
+  expect(compactForecast([100, 300, 50, 70, 90], 50, 1_000)).toBe(21)
+  expect(compactForecast([100, 300, 50, 70], 50, 1_000)).toBeNull()
+  expect(compactForecast([100, 120, 140], null, 1_000)).toBeNull()
+  expect(compactForecast([140, 140, 140], 50, 1_000)).toBeNull()
+  expect(compactForecast([400, 480, 520], 50, 1_000)).toBe(0)
+})
+
+test('auto-compact forecast drawn in the overview', async ($, on) => {
+  world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  for (const tokens of [100_000, 200_000, 300_000]) {
+    await $.session.measure({ context: { tokens, window: 1_000_000, percent: tokens / 10_000 }, rateLimits: [], changed: ['context'] })
+  }
+  const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  expect(await ui.find({ type: 'Text', text: ' · in ≈ 7 prompts at this pace' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('/tokens report: Markdown on the clipboard, the pane untouched, nothing in the transcript', async ($, on) => {
+  const { next, pane } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  await step($, 'agent-1')
+  next.toolText = 'x'.repeat(8_000)
+  await $.tool.call({ tool: 'Read', file_path: '/Users/u/project/a.ts' } as never)
+  const answer = await run($, 'tokens', 'report')
+  expect(answer.text).toMatch(/^Copied the session report \(\d+ lines of Markdown\) to the clipboard – paste it to check/)
+  expect(answer.text).not.toMatch(/# Cache Meter/)
+  expect(pane.opened.length).toBe(0)
+  const report = next.copied[0] ?? ''
+  for (const part of ['# Cache Meter – session report', '## Cost and cache', '## Context', '## Subagents', 'Explore: find the tests', 'Read ~/project/a.ts 2.0k', 'Cache hit rate: 93%']) {
+    expect(report).toContain(part)
+  }
+  next.copy = { isCopied: false, reason: 'no-clipboard' }
+  expect((await run($, 'tokens', 'report')).text).toBe('Could not copy the session report (no-clipboard).')
 })

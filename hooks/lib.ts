@@ -592,3 +592,128 @@ export function agentLabel(entry: { type?: string; description?: string } | unde
 
   return what === '' ? entry.type ?? id.slice(0, 12) : `${entry.type ?? 'agent'}: ${what}`
 }
+
+/** A size in tokens, estimated from characters (÷ 4) – an estimate, labelled as one wherever it is drawn. */
+export function estimateTokens(text: string): number {
+  return Math.ceil(text.length / 4)
+}
+
+/** A home directory as `~`, so paths stay short and screenshots show no user name. */
+export function homePath(path: string): string {
+  return path.replace(/^\/(Users|home)\/[^/]+(?=\/|$)/, '~')
+}
+
+/**
+ * A tool call's label: the tool, plus for file tools the home-shortened path and for Bash only the
+ * program name (the first word that is not a VAR=value assignment) – a command's arguments can hold secrets.
+ */
+export function toolLabel(tool: string, input: Readonly<Record<string, unknown>>): string {
+  const path = typeof input.file_path === 'string' ? input.file_path : typeof input.notebook_path === 'string' ? input.notebook_path : null
+  if (path !== null) return `${tool} ${homePath(path)}`
+  if (tool === 'Bash' && typeof input.command === 'string') {
+    const program = input.command
+      .trim()
+      .split(/\s+/)
+      .find(word => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(word))
+    return program === undefined || program === '' ? tool : `${tool} ${program.split('/').pop()}`
+  }
+
+  return tool
+}
+
+/** Adds one tool result to the tally: per tool, and the five largest single results. */
+export function addToolResult(
+  prev: { byTool: Readonly<Record<string, { count: number; tokens: number }>>; largest: readonly { label: string; tokens: number; at: number }[]; since: number | null },
+  tool: string,
+  label: string,
+  tokens: number,
+  at: number,
+) {
+  const sum = prev.byTool[tool] ?? { count: 0, tokens: 0 }
+
+  return {
+    byTool: { ...prev.byTool, [tool]: { count: sum.count + 1, tokens: sum.tokens + tokens } },
+    largest: [...prev.largest, { label, tokens, at }].sort((a, b) => b.tokens - a.tokens).slice(0, 5),
+    since: prev.since,
+  }
+}
+
+/**
+ * Prompts until auto-compact at the pace of the last turns: the context sizes after each turn since the
+ * last drop (a compaction), at least two rises. Null when auto-compact is off or unknown, or no pace.
+ */
+export function compactForecast(history: readonly number[], autoCompactPct: number | null, window: number): number | null {
+  if (autoCompactPct === null || window <= 0 || history.length < 3) return null
+  let start = 0
+  history.forEach((size, i) => {
+    if (i > 0 && size < (history[i - 1] ?? size)) start = i
+  })
+  const run = history.slice(start)
+  const first = run[0]
+  const last = run.at(-1)
+  if (run.length < 3 || first === undefined || last === undefined) return null
+  const pace = (last - first) / (run.length - 1)
+  const left = (autoCompactPct / 100) * window - last
+  if (pace <= 0) return null
+  if (left <= 0) return 0
+
+  return Math.ceil(left / pace)
+}
+
+/** Everything the session report needs, gathered from state; dollar figures only as Claude Code gave them. */
+export type ReportData = {
+  at: number
+  ageMs: number | null
+  prompts: number | null
+  requests: number
+  model: string | null
+  usd: number | null
+  isPlan: boolean
+  hit: number | null
+  saving: number | null
+  cold: { count: number; written: number }
+  warmMiss: { count: number; cause: string | null }
+  context: { percent: number | null; tokens: number | null; autoCompactPct: number | null; promptsLeft: number | null }
+  limits: { name: string; percentUsed: number }[]
+  memoryFiles: { name: string; tokens: number }[]
+  mcpServers: { name: string; tokens: number; calls: number }[]
+  toolsByTool: { tool: string; count: number; tokens: number }[]
+  largest: { label: string; tokens: number }[]
+  agents: { label: string; steps: number; tokens: number; hit: number | null }[]
+  keepwarm: { pings: number; readTokens: number }
+}
+
+/** The session report `/tokens report` copies: Markdown, the same figures and labels as the pane. */
+export function reportMarkdown(r: ReportData): string {
+  const lines: string[] = []
+  const usd = r.usd === null ? '–' : `${r.isPlan ? '≈ ' : ''}$${r.usd.toFixed(2)}${r.isPlan ? ' API value (subscription: a comparison, not a charge)' : ' spent'}`
+  lines.push(`# Cache Meter – session report`, '')
+  lines.push(`${new Date(r.at).toISOString().slice(0, 16).replace('T', ' ')} UTC${r.ageMs === null ? '' : ` · session ${duration(r.ageMs)}`}${r.model === null ? '' : ` · ${r.model}`}`, '')
+  lines.push('## Cost and cache', '')
+  lines.push(`- Cost: ${usd}${r.prompts ? ` · ${r.prompts} prompts · ${r.requests} requests` : ` · ${r.requests} requests`}`)
+  lines.push(`- Cache hit rate: ${r.hit === null ? '–' : `${r.hit}%`}${r.saving === null ? '' : ` · cache saved ${r.saving}% of input cost`}`)
+  lines.push(`- Cold re-writes: ${r.cold.count}${r.cold.count > 0 ? ` (${short(r.cold.written)} tokens)` : ''}`)
+  lines.push(`- Warm misses: ${r.warmMiss.count}${r.warmMiss.cause === null ? '' : ` – last: ${r.warmMiss.cause}`}`)
+  if (r.keepwarm.pings > 0) lines.push(`- Keepwarm: ${r.keepwarm.pings} pings, ${short(r.keepwarm.readTokens)} tokens read`)
+  lines.push('', '## Context', '')
+  lines.push(
+    `- Fill: ${r.context.percent === null ? '–' : `${r.context.percent}%`}${r.context.tokens === null ? '' : ` (${short(r.context.tokens)} tokens)`}${r.context.autoCompactPct === null ? '' : ` · auto-compact at ${r.context.autoCompactPct}%`}${r.context.promptsLeft === null ? '' : ` · in ≈ ${r.context.promptsLeft} prompts at this pace`}`,
+  )
+  if (r.memoryFiles.length > 0) lines.push(`- Memory files: ${r.memoryFiles.map(f => `${f.name} ${short(f.tokens)}`).join(', ')}`)
+  if (r.mcpServers.length > 0) lines.push(`- MCP servers: ${r.mcpServers.map(m => `${m.name} ${short(m.tokens)} (${m.calls} calls)`).join(', ')}`)
+  if (r.toolsByTool.length > 0) {
+    lines.push(`- Tool results (≈ tokens, characters ÷ 4): ${r.toolsByTool.map(t => `${t.tool} ${short(t.tokens)} in ${t.count}`).join(', ')}`)
+    lines.push(`- Largest: ${r.largest.map(l => `${l.label} ${short(l.tokens)}`).join(', ')}`)
+  }
+  if (r.agents.length > 0) {
+    lines.push('', '## Subagents', '')
+    for (const a of r.agents) lines.push(`- ${a.label}: ${short(a.tokens)} tokens, ${a.steps} requests, ${a.hit === null ? '–' : `${a.hit}%`} hit`)
+  }
+  if (r.limits.length > 0) {
+    lines.push('', '## Plan limits', '')
+    for (const l of r.limits) lines.push(`- ${l.name}: ${l.percentUsed}%`)
+  }
+  lines.push('', '_Made with [Cache Meter](https://github.com/florian101010/cache-meter)._')
+
+  return lines.join('\n')
+}
