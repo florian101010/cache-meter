@@ -5,7 +5,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { FIVE_MIN, HOUR, forecast, hitPct, litCells, parseKeepWarm, remainingLabel, resolveTtl } from '../hooks/lib'
+import { FIVE_MIN, HOUR, PALETTE, forecast, hitPct, litCells, meter, parseKeepWarm, rasterCells, remainingLabel, resolveTtl, tall } from '../hooks/lib'
 
 const T0 = Date.parse('2026-10-12T10:00:00Z')
 const SUMMARY = [{ role: 'user' as const, text: 'Summary', toolUses: [] }]
@@ -311,8 +311,11 @@ test('pane draws with requests and limits on every surface', async ($, on) => {
   })
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ surface, ...PANE })
-    expect(await ui.find({ type: 'Text', text: /warm · 60m left/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: 'WARM' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: ' · min left' })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /5 hours/ })).toBeDefined()
+    // Colored cells in the terminal, a text bar in the Desktop app (reference › Elements).
+    expect((await ui.find({ type: 'Raster' })) !== undefined).toBe(surface === 'terminal')
     expect(await ui.find({ type: 'Text', text: /\$2\.50/ })).toBeDefined()
     expect(await ui.find({ type: 'Button', key: 'pane-compact' })).toBeDefined()
     await ui.unmount()
@@ -476,4 +479,29 @@ test('/keepwarm pings again after an aborted turn', async ($, on) => {
   expect(forks).toHaveLength(1)
   await clock.advance(15 * 60_000)
   await hanging
+})
+
+test('drawing helpers: tall digits, raster cells, meter', async () => {
+  expect(tall('58')).toEqual(['█▀▀ █▀█', '▀▀█ █▀█', '▀▀▀ ▀▀▀'])
+  // Reference values computed independently: base64 of little-endian u32 triplets.
+  expect(rasterCells([[0x2588, 0xff8800, 0x01000000]])).toBe('iCUAAACI/wAAAAAB')
+  expect(rasterCells([[0x2588, 0x00ff00, 0x01000000], [0x2591, 0x585b70, 0x01000000]])).toBe('iCUAAAD/AAAAAAABkSUAAHBbWAAAAAAB')
+  const cells = meter(10, 4, PALETTE.context, 7)
+  expect(cells.filter(c => c[0] === 0x2588)).toHaveLength(4)
+  expect(cells[7]?.[0]).toBe(0x2503)
+  expect(cells.filter(c => c[0] === 0x2591)).toHaveLength(5)
+})
+
+test('pane: the keepwarm button starts and stops keepwarm', async ($, on) => {
+  const { toasts } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  await ui.press({ key: 'keepwarm-start' })
+  expect(toasts.some(t => t.startsWith('Keepwarm until'))).toBe(true)
+  expect(await ui.find({ type: 'Text', text: '↻ Keepwarm on' })).toBeDefined()
+  await ui.press({ key: 'keepwarm-stop' })
+  expect(toasts.some(t => t.startsWith('Keepwarm off'))).toBe(true)
+  expect(await ui.find({ type: 'Button', key: 'keepwarm-start' })).toBeDefined()
+  await ui.unmount()
 })

@@ -167,3 +167,109 @@ export const ZERO: Usage4 = { input: 0, read: 0, write: 0, output: 0 }
 export function add(a: Usage4, b: Usage4): Usage4 {
   return { input: a.input + b.input, read: a.read + b.read, write: a.write + b.write, output: a.output + b.output }
 }
+
+// ---------------------------------------------------------------------------------------------
+// Drawing helpers for the pane: tall digits and colored cells for a Raster (reference › Elements:
+// "Raster … cells"; types: RasterProps.cells = base64 of little-endian u32 triplets
+// [codePoint, foreground, background], 0x01000000 = the terminal's default color).
+
+/** Three-row block digits for the countdown, three columns each. */
+const TALL: Readonly<Record<string, readonly [string, string, string]>> = {
+  '0': ['█▀█', '█ █', '▀▀▀'],
+  '1': ['▀█ ', ' █ ', '▀▀▀'],
+  '2': ['▀▀█', '█▀▀', '▀▀▀'],
+  '3': ['▀▀█', ' ▀█', '▀▀▀'],
+  '4': ['█ █', '▀▀█', '  ▀'],
+  '5': ['█▀▀', '▀▀█', '▀▀▀'],
+  '6': ['█▀▀', '█▀█', '▀▀▀'],
+  '7': ['▀▀█', '  █', '  ▀'],
+  '8': ['█▀█', '█▀█', '▀▀▀'],
+  '9': ['█▀█', '▀▀█', '▀▀▀'],
+  '-': ['   ', '━━━', '   '],
+}
+
+/** `tall('58')` → three rows that draw 58 in block digits; unknown characters are skipped. */
+export function tall(text: string): [string, string, string] {
+  const glyphs = [...text].map(c => TALL[c]).filter((g): g is readonly [string, string, string] => g !== undefined)
+  const row = (i: 0 | 1 | 2) => glyphs.map(g => g[i]).join(' ')
+
+  return [row(0), row(1), row(2)]
+}
+
+export const DEFAULT_COLOR = 0x01000000
+
+const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+
+/** Standard padded base64, without relying on a global the environment may not have. */
+export function base64(bytes: Uint8Array): string {
+  let out = ''
+  for (let i = 0; i < bytes.length; i += 3) {
+    const a = bytes[i] ?? 0
+    const b = bytes[i + 1] ?? 0
+    const c = bytes[i + 2] ?? 0
+    const n = (a << 16) | (b << 8) | c
+    out += B64[(n >> 18) & 63]! + B64[(n >> 12) & 63]!
+    out += i + 1 < bytes.length ? B64[(n >> 6) & 63]! : '='
+    out += i + 2 < bytes.length ? B64[n & 63]! : '='
+  }
+
+  return out
+}
+
+export type Cell = readonly [codePoint: number, fg: number, bg: number]
+
+/** Packs cells as a Raster's `cells` string. */
+export function rasterCells(cells: readonly Cell[]): string {
+  const words = new Uint32Array(cells.length * 3)
+  cells.forEach(([cp, fg, bg], i) => {
+    words[i * 3] = cp
+    words[i * 3 + 1] = fg
+    words[i * 3 + 2] = bg
+  })
+  const bytes = new Uint8Array(words.length * 4)
+  words.forEach((w, i) => {
+    bytes[i * 4] = w & 255
+    bytes[i * 4 + 1] = (w >>> 8) & 255
+    bytes[i * 4 + 2] = (w >>> 16) & 255
+    bytes[i * 4 + 3] = (w >>> 24) & 255
+  })
+
+  return base64(bytes)
+}
+
+/** Linear mix of two 0xRRGGBB colors, t in 0…1. */
+export function mix(a: number, b: number, t: number): number {
+  const k = Math.max(0, Math.min(1, t))
+  const ch = (shift: number) => Math.round(((a >> shift) & 255) * (1 - k) + ((b >> shift) & 255) * k)
+
+  return (ch(16) << 16) | (ch(8) << 8) | ch(0)
+}
+
+export type Palette = { from: number; to: number }
+
+export const PALETTE = {
+  warm: { from: 0x1f8a4c, to: 0x7fe0a0 },
+  low: { from: 0xb86e00, to: 0xffd166 },
+  cold: { from: 0x8a1c2b, to: 0xff6b81 },
+  context: { from: 0x3a56d4, to: 0xb4befe },
+} as const satisfies Record<string, Palette>
+
+const TRACK = 0x45475a
+const MARKER = 0xff6b81
+
+/**
+ * A one-row meter: `lit` of `width` cells filled with a gradient along the bar, the rest a dim
+ * track; an optional marker cell (e.g. the auto-compact point) drawn as a bright bar.
+ */
+export function meter(width: number, lit: number, palette: Palette, markerAt: number | null = null): Cell[] {
+  return Array.from({ length: width }, (_, i): Cell => {
+    if (markerAt !== null && i === markerAt) return [0x2503, MARKER, DEFAULT_COLOR] // ┃
+    if (i < lit) return [0x2588, mix(palette.from, palette.to, width > 1 ? i / (width - 1) : 1), DEFAULT_COLOR] // █
+    return [0x2591, TRACK, DEFAULT_COLOR] // ░
+  })
+}
+
+/** Right-aligns `text` in `width` columns. */
+export function right(text: string, width: number): string {
+  return text.length >= width ? text : ' '.repeat(width - text.length) + text
+}

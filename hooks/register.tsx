@@ -34,13 +34,19 @@ import {
   hhmm,
   hitPct,
   litCells,
+  meter,
+  PALETTE,
   parseKeepWarm,
+  rasterCells,
   remainingLabel,
   resolveTtl,
+  right,
   short,
   sparkline,
   stack,
+  tall,
 } from './lib'
+import type { Palette } from './lib'
 
 const PANE = 'cache-meter'
 const TICK_MS = 15_000
@@ -204,6 +210,37 @@ async function compactNow($: EngineInterface) {
   } catch (error) {
     $.ui.toast(`Compact is not possible right now: ${error instanceof Error ? error.message : String(error)}`)
   }
+}
+
+// Starts keepwarm for `ms`; the answer text explains what happens or why it did not start.
+async function startKeepWarm($: EngineInterface, ms: number): Promise<string> {
+  if (!isInteractive) return 'Keepwarm only works in an interactive session (no timer runs here). Not started.'
+  const now = await $.clock.now()
+  const ttl = await ttlNow($)
+  if (ttl.ms < HOUR) {
+    return `With a ${ttl.label} TTL (${ttl.source}) keepwarm is not worth it: a ping every few minutes. Not started.`
+  }
+  if (cacheStatus(await read($, cacheA), now, ttl.ms).kind !== 'warm') {
+    return 'No warm cache – start keepwarm after the next answer.'
+  }
+  await update($, keepA, () => ({ until: now + ms, pings: 0, readTokens: 0, lastPingAt: null }))
+
+  return (
+    `Keepwarm until ${hhmm(now + ms)}, at most ${MAX_PINGS} pings: one whenever at most ` +
+    `${Math.round((ttl.ms * PING_SHARE) / 60_000)} min of the TTL is left (TTL ${ttl.label}, ${ttl.source}). Each ping ` +
+    `reads the whole context from the cache. If a ping misses the cache, keepwarm switches itself off.`
+  )
+}
+
+async function stopKeepWarm($: EngineInterface): Promise<string> {
+  const keep = await read($, keepA)
+  await update($, keepA, k => ({ ...k, until: null }))
+
+  return `Keepwarm off (${keep.pings} pings, ${short(keep.readTokens)} tokens read from the cache).`
+}
+
+async function pressKeepWarm($: EngineInterface, ms: number | null) {
+  $.ui.toast(ms === null ? await stopKeepWarm($) : await startKeepWarm($, ms), { timeoutMs: 8_000 })
 }
 
 export const register: Register = (on, options) => {
@@ -401,7 +438,8 @@ export const register: Register = (on, options) => {
   })
 
   on('command.run', { command: 'tokens' }, async $ => {
-    await $.ui.open({ id: PANE, title: 'Tokens & Cache' })
+    // rows: the height to ask for when the pane sits above the prompt; default a third (types: PaneOpenArgs.rows).
+    await $.ui.open({ id: PANE, title: 'Tokens & Cache', rows: 44 })
 
     return { text: 'Opened the "Tokens & Cache" pane.' }
   })
@@ -409,33 +447,8 @@ export const register: Register = (on, options) => {
   on('command.run', { command: 'keepwarm' }, async ($, e) => {
     const ms = parseKeepWarm(e.args)
     if (ms === undefined) return { text: 'Usage: /keepwarm [10m … 8h | off] – 2h when left out.' }
-    if (ms === null) {
-      const keep = await read($, keepA)
-      await update($, keepA, k => ({ ...k, until: null }))
 
-      return { text: `Keepwarm off (${keep.pings} pings, ${short(keep.readTokens)} tokens read from the cache).` }
-    }
-    if (!isInteractive) {
-      return { text: 'Keepwarm only works in an interactive session (no timer runs here). Not started.' }
-    }
-    const now = await $.clock.now()
-    const ttl = await ttlNow($)
-    if (ttl.ms < HOUR) {
-      return {
-        text: `With a ${ttl.label} TTL (${ttl.source}) keepwarm is not worth it: a ping every few minutes. Not started.`,
-      }
-    }
-    if (cacheStatus(await read($, cacheA), now, ttl.ms).kind !== 'warm') {
-      return { text: 'No warm cache – start keepwarm after the next answer.' }
-    }
-    await update($, keepA, () => ({ until: now + ms, pings: 0, readTokens: 0, lastPingAt: null }))
-
-    return {
-      text:
-        `Keepwarm until ${hhmm(now + ms)}, at most ${MAX_PINGS} pings: one whenever at most ` +
-        `${Math.round((ttl.ms * PING_SHARE) / 60_000)} min of the TTL is left (TTL ${ttl.label}, ${ttl.source}). Each ping ` +
-        `reads the whole context from the cache. If a ping misses the cache, keepwarm switches itself off.`,
-    }
+    return { text: ms === null ? await stopKeepWarm($) : await startKeepWarm($, ms) }
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
@@ -467,7 +480,9 @@ export const register: Register = (on, options) => {
     const rewriteText =
       status.kind === 'expired' && cache !== null && rewriteTokens > 0
         ? ` · rewrite ${cache.rewriteUsd !== null ? `≈ $${cache.rewriteUsd.toFixed(2)}` : `≈ ${short(rewriteTokens)} tok`}`
-        : ''
+        : isLow && !isKeeping && isInteractive
+          ? ' · /keepwarm?'
+          : ''
     const base =
       '● cache '.length +
       label.length +
@@ -498,14 +513,16 @@ export const register: Register = (on, options) => {
         {cells > 0 && <Text color={isLow ? 'warning' : 'success'}>{'■'.repeat(lit)}</Text>}
         {cells > 0 && <Text color="inactive">{'■'.repeat(cells - lit)}</Text>}
         {cells > 0 && <Text> </Text>}
-        <Text bold>{hit}</Text>
+        <Text bold color={hitColor(cache?.hitPct ?? null)}>
+          {hit}
+        </Text>
         <Text dimColor> hit · </Text>
         {sky && <Text color={sky.color}>{sky.icon} </Text>}
         <Text dimColor>context </Text>
         <Text bold>{pct}</Text>
         {showAuto && <Text dimColor>{autoText}</Text>}
         {showRewrite && (
-          <Text color="warning" wrap="truncate-end">
+          <Text color={status.kind === 'expired' ? 'warning' : 'claude'} wrap="truncate-end">
             {rewriteText}
           </Text>
         )}
@@ -524,6 +541,8 @@ export const register: Register = (on, options) => {
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Button, Text } = $.ui.resolve(e)
+    // Raster (colored cells) is drawn by the terminal only (reference › Elements); elsewhere text bars.
+    const Raster = e.surface === 'terminal' ? $.ui.resolve(e).Raster : null
     const steps = await read($, stepsA)
     const totals: Totals = await read($, totalsA)
     const measure = await read($, measureA)
@@ -533,154 +552,284 @@ export const register: Register = (on, options) => {
     const ttl = await ttlNow($)
     const now = await $.clock.now()
     const status = cacheStatus(cache, now, ttl.ms)
-    const cols = e.props.bodyColumns
+    // Cards have a round border and one column of padding on each side: 4 columns of chrome.
+    const inner = Math.max(20, e.props.bodyColumns - 4)
     const rows = e.props.scroll.bodyRows
 
-    // Rows the other sections take (about 32, cold rewrites up to 7 of them) plus one per limit.
-    const shown = steps.slice(-Math.max(3, rows - 32 - (measure?.limits.length ?? 0)))
-    const barWidth = Math.max(10, cols - 34)
-    const top = Math.max(1, ...shown.map(s => s.input + s.read + s.write))
+    // A one-row meter: gradient cells in the terminal, a text bar elsewhere.
+    const gauge = (key: string, lit: number, palette: Palette, color: string, markerAt: number | null = null) =>
+      Raster ? (
+        <Raster key={key} columns={inner} rows={1} cells={rasterCells(meter(inner, lit, palette, markerAt))} />
+      ) : (
+        <Text>
+          <Text color={color}>{'█'.repeat(Math.min(lit, inner))}</Text>
+          <Text color="inactive">
+            {[...'░'.repeat(Math.max(0, inner - lit))].map((c, k) => (markerAt !== null && k + lit === markerAt ? '┃' : c)).join('')}
+          </Text>
+        </Text>
+      )
+
+    // --- cache card ---------------------------------------------------------------------------
+    const isLow = status.kind === 'warm' && status.remaining <= ttl.ms * PING_SHARE
+    const stateColor = status.kind === 'warm' ? (isLow ? 'warning' : 'success') : 'error'
+    const palette = status.kind === 'warm' ? (isLow ? PALETTE.low : PALETTE.warm) : PALETTE.cold
+    const minutes = status.kind === 'warm' ? Math.ceil(status.remaining / 60_000) : 0
+    const digits = status.kind === 'warm' ? tall(status.remaining >= 60_000 ? String(minutes) : String(Math.ceil(status.remaining / 1000))) : tall('--')
+    const unit = status.kind === 'warm' ? (status.remaining >= 60_000 ? 'min left' : 's left') : ''
+    const stateWord = status.kind === 'warm' ? 'WARM' : status.kind === 'empty' ? 'EMPTY' : 'EXPIRED'
+    const rewriteTokens = measure?.tokens ?? cache?.contextTokens ?? 0
+    const sub =
+      status.kind === 'warm'
+        ? ` · ${unit}`
+        : status.kind === 'empty'
+          ? ' · no answer yet'
+          : rewriteTokens > 0
+            ? ` · next message re-writes ≈ ${cache?.rewriteUsd != null ? `$${cache.rewriteUsd.toFixed(2)}` : `${short(rewriteTokens)} tokens`}`
+            : ''
     const sessionHit = hitPct(totals.main)
+    const lit = status.kind === 'warm' ? litCells(status.remaining, ttl.ms, inner) : 0
+
+    // --- keepwarm card ------------------------------------------------------------------------
+    const isKeeping = keep.until !== null && keep.until > now
+    const pingIn = status.kind === 'warm' ? Math.max(0, status.remaining - ttl.ms * PING_SHARE) : 0
+    const canKeep = isInteractive && status.kind === 'warm' && ttl.ms >= HOUR
+
+    // --- context card -------------------------------------------------------------------------
+    const percent = measure?.percent ?? null
+    const auto = measure?.autoCompactPct ?? null
+    const ctxLit = percent === null ? 0 : Math.round((percent / 100) * inner)
+    const marker = auto === null ? null : Math.min(inner - 1, Math.round((auto / 100) * inner))
+
+    // --- requests card ------------------------------------------------------------------------
     const limits = measure?.limits ?? []
+    const coldLines = Math.min(3, colds.length)
+    const shown = steps.slice(-Math.max(3, rows - 36 - limits.length - coldLines))
+    const barWidth = Math.max(8, inner - 34)
+    const top = Math.max(1, ...shown.map(s => s.input + s.read + s.write))
 
     return (
       <Box flexDirection="column">
-        <Text bold>Cache</Text>
-        <Text>
-          {status.kind === 'warm' ? (
-            <Text color="success">warm · {remainingLabel(status.remaining)} left</Text>
-          ) : (
-            <Text color="error">{status.kind === 'empty' ? 'empty – no answer yet' : 'expired'}</Text>
-          )}
-          <Text dimColor>
-            {'  '}TTL {ttl.label} ({ttl.source}) · hit rate last request{' '}
-            {cache?.hitPct == null ? '–' : `${cache.hitPct}%`} · session {sessionHit === null ? '–' : `${sessionHit}%`}
+        <Box flexDirection="row" justifyContent="space-between">
+          <Text color="claude" bold>
+            ◉ Cache Meter
           </Text>
-        </Text>
-        <Text dimColor>
-          Keepwarm:{' '}
-          {keep.until !== null && keep.until > now
-            ? `on until ${hhmm(keep.until)} · ${keep.pings}/${MAX_PINGS} pings · ${short(keep.readTokens)} tok read`
-            : `off (/keepwarm 2h)${keep.pings > 0 ? ` · last run ${keep.pings} pings` : ''}`}
-        </Text>
-        <Text> </Text>
+          <Text dimColor>prompt cache · tokens · Claude Code mod</Text>
+        </Box>
 
-        <Text bold>Context</Text>
-        <Text>
-          {measure?.percent == null ? '–' : `${measure.percent}%`}
+        <Box borderStyle="round" borderColor={stateColor} paddingX={1} flexDirection="column">
+          <Box flexDirection="row">
+            <Box flexDirection="column">
+              {digits.map(line => (
+                <Text color={stateColor} bold>
+                  {line}
+                </Text>
+              ))}
+            </Box>
+            <Box flexDirection="column" marginLeft={2}>
+              <Text>
+                <Text color={stateColor} bold>
+                  {stateWord}
+                </Text>
+                <Text dimColor>{sub}</Text>
+              </Text>
+              <Text>
+                <Text dimColor>hit </Text>
+                <Text bold color={hitColor(cache?.hitPct ?? null)}>
+                  {cache?.hitPct == null ? '–' : `${cache.hitPct}%`}
+                </Text>
+                <Text dimColor> last request · </Text>
+                <Text bold color={hitColor(sessionHit)}>
+                  {sessionHit === null ? '–' : `${sessionHit}%`}
+                </Text>
+                <Text dimColor> session</Text>
+              </Text>
+              <Text dimColor>
+                TTL {ttl.label} · {ttl.source}
+              </Text>
+            </Box>
+          </Box>
+          {gauge('countdown', lit, palette, stateColor)}
+        </Box>
+
+        <Box borderStyle="round" borderColor="claude" borderDimColor={!isKeeping} paddingX={1} flexDirection="column">
+          {isKeeping && keep.until !== null ? (
+            <Box flexDirection="column">
+              <Text>
+                <Text color="claude" bold>
+                  ↻ Keepwarm on
+                </Text>
+                <Text dimColor> until {hhmm(keep.until)}</Text>
+              </Text>
+              <Text dimColor>
+                {keep.pings}/{MAX_PINGS} pings · {short(keep.readTokens)} tokens read · next ping in ~{remainingLabel(pingIn)}
+              </Text>
+              <Box flexDirection="row">
+                <Button key="keepwarm-stop" label="Stop keepwarm" onPress={() => pressKeepWarm($, null)} />
+              </Box>
+            </Box>
+          ) : (
+            <Box flexDirection="column">
+              <Text>
+                <Text color="claude" bold>
+                  ↻ Keepwarm
+                </Text>
+                <Text dimColor> off{keep.pings > 0 ? ` · last run ${keep.pings} pings` : ''}</Text>
+              </Text>
+              <Text dimColor>Stepping away? Keep this cache warm – a ping costs about 1/20 of a re-write.</Text>
+              {canKeep ? (
+                <Box flexDirection="row" columnGap={2}>
+                  <Button key="keepwarm-start" label="Keep warm 2h" variant="primary" onPress={() => pressKeepWarm($, 2 * HOUR)} />
+                  <Text dimColor>or /keepwarm 30m … 8h</Text>
+                </Box>
+              ) : (
+                <Text dimColor>
+                  {!isInteractive
+                    ? 'Interactive sessions only.'
+                    : ttl.ms < HOUR
+                      ? `Not worth it at a ${ttl.label} TTL.`
+                      : 'Available once the cache is warm (after the next answer).'}
+                </Text>
+              )}
+            </Box>
+          )}
+        </Box>
+
+        <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="column">
+          <Text>
+            <Text color="claude" bold>
+              Context{' '}
+            </Text>
+            <Text bold>{percent === null ? '–' : `${percent}%`}</Text>
+            <Text dimColor>{measure?.tokens == null ? '' : `  ${short(measure.tokens)} / ${short(measure.window)}`}</Text>
+          </Text>
+          {gauge('context', ctxLit, PALETTE.context, 'suggestion', marker)}
           <Text dimColor>
-            {'  '}
-            {measure?.tokens == null ? '' : `${short(measure.tokens)} / ${short(measure.window)} · `}
             {measure?.isAutoCompactOff
               ? 'auto-compact off'
-              : measure?.autoCompactPct == null
+              : auto === null
                 ? 'auto-compact unknown'
-                : `auto-compact at ${measure.autoCompactPct}%`}
+                : `┃ auto-compact at ${auto}%`}
+            {measure !== null && measure.history.length > 2 ? `   trend ${sparkline(measure.history)}` : ''}
           </Text>
-          {measure !== null && measure.history.length > 1 && (
-            <Text color="suggestion">
-              {'  '}
-              {sparkline(measure.history)}
+        </Box>
+
+        <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="column">
+          <Text>
+            <Text color="claude" bold>
+              Requests{' '}
+            </Text>
+            <Text dimColor>main conversation · newest last</Text>
+          </Text>
+          {shown.length === 0 && <Text dimColor>No request measured yet.</Text>}
+          {shown.map(s => {
+            const seg = stack(s, top, barWidth)
+            const used = Math.min(barWidth, seg.read + seg.write + seg.input)
+            const hit = hitPct(s)
+
+            return (
+              <Text>
+                <Text dimColor>{hhmm(s.at)} </Text>
+                <Text color="success">{'█'.repeat(Math.min(seg.read, barWidth))}</Text>
+                <Text color="warning">{'█'.repeat(Math.max(0, Math.min(seg.write, barWidth - seg.read)))}</Text>
+                <Text color="error">{'█'.repeat(Math.max(0, Math.min(seg.input, barWidth - seg.read - seg.write)))}</Text>
+                <Text color="inactive">{'·'.repeat(barWidth - used)}</Text>
+                <Text> {right(short(s.input + s.read + s.write), 6)} </Text>
+                <Text bold color={hitColor(hit)}>
+                  {right(hit === null ? '–' : `${hit}%`, 4)}
+                </Text>
+                <Text dimColor> hit · out {short(s.output)}</Text>
+              </Text>
+            )
+          })}
+          <Text>
+            <Text color="success">█</Text>
+            <Text dimColor> read from cache  </Text>
+            <Text color="warning">█</Text>
+            <Text dimColor> written to cache  </Text>
+            <Text color="error">█</Text>
+            <Text dimColor> new (uncached)</Text>
+          </Text>
+        </Box>
+
+        <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="column">
+          <Text color="claude" bold>
+            Session
+          </Text>
+          <Text>
+            <Text dimColor>{'Main       '}</Text>
+            {usageLine(totals.main)}
+            <Text dimColor> · {totals.mainSteps} requests</Text>
+          </Text>
+          {totals.subSteps > 0 && (
+            <Text>
+              <Text dimColor>{'Subagents  '}</Text>
+              {usageLine(totals.sub)}
+              <Text dimColor> · {totals.subSteps} requests</Text>
             </Text>
           )}
-        </Text>
-        <Text> </Text>
-
-        <Text bold>Main-conversation requests (newest last)</Text>
-        {shown.length === 0 && <Text dimColor>No request measured yet.</Text>}
-        {shown.map(s => {
-          const seg = stack(s, top, barWidth)
-          const hit = hitPct(s)
-
-          return (
-            <Text>
-              <Text dimColor>{hhmm(s.at)} </Text>
-              <Text color="success">{'█'.repeat(seg.read)}</Text>
-              <Text color="warning">{'█'.repeat(seg.write)}</Text>
-              <Text color="error">{'█'.repeat(seg.input)}</Text>
-              <Text dimColor>
-                {' '}
-                {short(s.input + s.read + s.write)} · {hit === null ? '–' : `${hit}%`} · out {short(s.output)}
-              </Text>
-            </Text>
-          )
-        })}
-        <Text>
-          <Text color="success">█</Text>
-          <Text dimColor> read from cache  </Text>
-          <Text color="warning">█</Text>
-          <Text dimColor> written to cache  </Text>
-          <Text color="error">█</Text>
-          <Text dimColor> new (uncached)</Text>
-        </Text>
-        <Text> </Text>
-
-        <Text bold>Session totals</Text>
-        <Text>
-          <Text dimColor>Main         </Text>
-          {usageLine(totals.main)}
-          <Text dimColor> · {totals.mainSteps} requests</Text>
-        </Text>
-        <Text>
-          <Text dimColor>Subagents    </Text>
-          {usageLine(totals.sub)}
-          <Text dimColor> · {totals.subSteps} requests</Text>
-        </Text>
-        <Text>
-          <Text dimColor>Cost         </Text>
-          {measure?.usd == null ? '–' : `$${measure.usd.toFixed(2)}`}
-          <Text dimColor> (as /cost, list price)</Text>
-        </Text>
-        <Text> </Text>
-
-        <Text bold>Cold rewrites this session</Text>
-        {colds.length === 0 && <Text dimColor>None – the cache was warm for every request.</Text>}
-        {colds.slice(-5).map(c => (
           <Text>
-            <Text dimColor>{hhmm(c.at)} </Text>
-            <Text color="warning">{short(c.written)}</Text>
-            <Text dimColor>
-              {' '}re-written
-              {c.cause === 'model'
-                ? ' (after a model switch)'
-                : c.cause === 'resume'
-                  ? ` (after resume${c.idleMs === null ? '' : `, ${duration(c.idleMs)} idle`})`
-                  : ` after ${duration(c.idleMs ?? 0)} idle`}
-            </Text>
+            <Text dimColor>{'Cost       '}</Text>
+            <Text bold>{measure?.usd == null ? '–' : `$${measure.usd.toFixed(2)}`}</Text>
+            <Text dimColor> (as /cost, list price)</Text>
           </Text>
-        ))}
-        {totals.coldCount > 0 && (
-          <Text dimColor>
-            Total {totals.coldCount}× · {short(totals.coldWritten)} tokens
-            {colds.some(c => c.cause === 'pause') ? ' · /keepwarm before a break prevents this' : ''}
-            {totals.coldCount > 5 ? ' · showing the last 5' : ''}
-          </Text>
-        )}
-        <Text> </Text>
-
-        <Text bold>Plan limits</Text>
-        {limits.length === 0 && <Text dimColor>No reading (no subscription, or no answer yet).</Text>}
-        {limits.map(l => {
-          const lit = Math.max(0, Math.min(20, Math.round((l.percentUsed / 100) * 20)))
-
-          return (
+          {colds.length === 0 ? (
             <Text>
-              <Text dimColor>{limitName(l.kind).padEnd(12)} </Text>
-              <Text color={l.percentUsed >= 90 ? 'error' : l.percentUsed >= 70 ? 'warning' : 'success'}>
-                {'■'.repeat(lit)}
-              </Text>
-              <Text color="inactive">{'■'.repeat(20 - lit)}</Text>
-              <Text> {l.percentUsed}%</Text>
-              <Text dimColor>{l.resetsAt ? ` · resets ${resetLabel(l.resetsAt)}` : ''}</Text>
+              <Text dimColor>{'Cold       '}</Text>
+              <Text color="success">None – the cache was warm for every request.</Text>
             </Text>
-          )
-        })}
-        <Text> </Text>
-        <Text dimColor>
-          Hit rate = read ÷ (new + read + written) per request. No mod interface reports the TTL per request; the
-          rule it came from is shown above. Cross-check: /usage → "Prompt cache (main)".
-        </Text>
-        <Box flexDirection="row">
+          ) : (
+            <Box flexDirection="column">
+              <Text>
+                <Text dimColor>{'Cold       '}</Text>
+                <Text color="warning" bold>
+                  Total {totals.coldCount}× · {short(totals.coldWritten)} tokens
+                </Text>
+                <Text dimColor>
+                  {colds.some(c => c.cause === 'pause') ? ' · /keepwarm before a break prevents this' : ''}
+                  {totals.coldCount > 3 ? ' · showing the last 3' : ''}
+                </Text>
+              </Text>
+              {colds.slice(-3).map(c => (
+                <Text>
+                  <Text dimColor>{'           '}{hhmm(c.at)} </Text>
+                  <Text color="warning">{short(c.written)}</Text>
+                  <Text dimColor>
+                    {' '}re-written
+                    {c.cause === 'model'
+                      ? ' (after a model switch)'
+                      : c.cause === 'resume'
+                        ? ` (after resume${c.idleMs === null ? '' : `, ${duration(c.idleMs)} idle`})`
+                        : ` after ${duration(c.idleMs ?? 0)} idle`}
+                  </Text>
+                </Text>
+              ))}
+            </Box>
+          )}
+        </Box>
+
+        <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="column">
+          <Text color="claude" bold>
+            Plan limits
+          </Text>
+          {limits.length === 0 && <Text dimColor>No reading (no subscription, or no answer yet).</Text>}
+          {limits.map(l => {
+            const width = Math.max(10, Math.min(30, inner - 34))
+            const used = Math.max(0, Math.min(width, Math.round((l.percentUsed / 100) * width)))
+
+            return (
+              <Text>
+                <Text dimColor>{limitName(l.kind).padEnd(11)}</Text>
+                <Text color={l.percentUsed >= 90 ? 'error' : l.percentUsed >= 70 ? 'warning' : 'success'}>{'█'.repeat(used)}</Text>
+                <Text color="inactive">{'░'.repeat(width - used)}</Text>
+                <Text bold> {right(`${l.percentUsed}%`, 4)}</Text>
+                <Text dimColor>{l.resetsAt ? ` · resets ${resetLabel(l.resetsAt)}` : ''}</Text>
+              </Text>
+            )
+          })}
+        </Box>
+
+        <Box flexDirection="row" justifyContent="space-between">
+          <Text dimColor>Hit rate = read ÷ (new + read + written) · cross-check: /usage</Text>
           <Button key="pane-compact" label="Compact" onPress={() => compactNow($)} />
         </Box>
       </Box>
@@ -717,4 +866,13 @@ function resetLabel(iso: string): string {
 
 function usageLine(u: Usage4) {
   return `read ${short(u.read)} · written ${short(u.write)} · new ${short(u.input)} · output ${short(u.output)}`
+}
+
+/** Green from 80 %, yellow from 50 %, red below; plain while unknown. */
+function hitColor(pct: number | null): string | undefined {
+  if (pct === null) return undefined
+  if (pct >= 80) return 'success'
+  if (pct >= 50) return 'warning'
+
+  return 'error'
 }
