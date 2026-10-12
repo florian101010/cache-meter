@@ -242,7 +242,7 @@ With `auto`, Cache Meter follows Claude Code's own TTL controls and your plan st
 | **Costs** | Nothing, except `/keepwarm`: each ping reads your whole context at the model's cache-read price – billed like any request on an API key, counted against your limits on a plan. How cache reads count towards the 5-hour and weekly limits is **not documented**; watch them in the pane. **Count exactly** uses token counting, which is free on the API; whether Claude Code counts it against plan limits is **not documented** | [pricing › Prompt caching](https://platform.claude.com/docs/en/about-claude/pricing#prompt-caching) (cache read 0.1×, 0.05× or 0.025× of the input price); [api › Call a model](https://code.claude.com/docs/en/plugins/mods/api#call-a-model) (“bill to the user's plan, API key, or cloud provider”); [token counting › Pricing and rate limits](https://platform.claude.com/docs/en/build-with-claude/token-counting#pricing-and-rate-limits) (“free to use”) |
 
 <details>
-<summary><b>Every hook and what it does</b> – all pass the event on unchanged</summary>
+<summary><b>Every hook and what it does</b> – it answers only its own commands and draws only its own band and pane; everything else passes on unchanged</summary>
 
 | Event | What Cache Meter does there | What it changes |
 |---|---|---|
