@@ -13,7 +13,9 @@ import {
   forecast,
   agentLabel,
   breakCause,
+  compactForecast,
   effortKeepsCache,
+  contextMapOf,
   hhmm,
   hitPct,
   isUnexpectedWrite,
@@ -31,6 +33,7 @@ import {
   switchNote,
   tall,
   toolDiff,
+  toolLabel,
   turnLine,
   writeMultiplier,
 } from '../hooks/lib'
@@ -112,6 +115,12 @@ function world(on: On, opts: { env?: Record<string, string>; forkRead?: number; 
     usd: 1.5,
     // The loaded MCP tools the context estimate reports; a test changes them to stage a tool-set change.
     tools: null as { name: string; serverName: string; tokens: number; isLoaded: boolean }[] | null,
+    // The text core reports for the next tool result; null = none (another mod's own answer).
+    toolText: null as string | null,
+    // What $.ui.copy answers, and what it was given.
+    copy: { isCopied: true } as Record<string, unknown>,
+    copied: [] as string[],
+    copyDeny: null as string | null,
     // A deny $.ui.notify answers with instead (a Notification hook refusing), and failed name lookups to come.
     notifyDeny: null as string | null,
     agentListFails: 0,
@@ -157,12 +166,17 @@ function world(on: On, opts: { env?: Record<string, string>; forkRead?: number; 
     return { value: { ...v.value, context, cost: { usd: next.usd } } } as never
   })
   on('turn.start', ($, e) => ({ turnId: e.turnId }))
-  on('tool.call', () => (next.deny ? { deny: 'refused' } : { result: 'ok' }) as never)
+  // As core answers: `text` is the result as the model reads it (types: ToolCallResult); or a deny from beneath.
+  on('tool.call', () => (next.deny ? { deny: 'refused' } : { result: 'ok', ...(next.toolText === null ? {} : { text: next.toolText }) }) as never)
   on('classic.PreModelSwitch', () => ({}))
   const notifies: string[] = []
   on('ui.notify', ($, e) => {
     notifies.push((e as { text: string }).text)
     return (next.notifyDeny === null ? { value: next.notify } : { deny: next.notifyDeny }) as never
+  })
+  on('ui.copy', ($, e) => {
+    next.copied.push((e as { text: string }).text)
+    return (next.copyDeny === null ? { value: next.copy } : { deny: next.copyDeny }) as never
   })
   on('agent.list', () => {
     if (next.agentListFails > 0) {
@@ -885,7 +899,7 @@ test('/tokens <tab> opens on that tab and switches an open pane instead of closi
   ui = await $.ui.mount({ surface: 'terminal', ...PANE })
   expect(await ui.find({ type: 'Text', text: 'Where it goes' })).toBeDefined()
   await ui.unmount()
-  expect((await run($, 'tokens', 'nope')).text).toBe('Usage: /tokens [overview | context | health]')
+  expect((await run($, 'tokens', 'nope')).text).toBe('Usage: /tokens [overview | context | health | report]')
   expect(pane.isOpen).toBe(true)
   // Without a tab /tokens still toggles.
   expect((await run($, 'tokens', '')).text).toMatch(/^Closed/)
@@ -1117,6 +1131,7 @@ test('MCP servers: unused only after three prompts since the start or a /resume'
 
 test('line under the answer: a line another mod put there is kept', async ($, on) => {
   const { next } = world(on, { turnText: 'other mod: summary' })
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   await $.turn.start({ turnId: 't', text: 'hi' } as never)
   await step($)
   next.usd = 1.6
@@ -1270,8 +1285,130 @@ test('warm miss after an effort change on a model that keeps the cache: named wi
   expect(await healthText($, /effort high → low – keeps the cache on this model only with an API key or a subscription$/)).toBeDefined()
 })
 
+async function contextText($: Engine, pattern: RegExp) {
+  const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  await ui.press({ key: 'tab-context' })
+  const found = await ui.find({ type: 'Text', text: pattern })
+  await ui.unmount()
+
+  return found
+}
+
+test('tool labels: path or program name, never arguments', async () => {
+  expect(toolLabel('Read', { file_path: '/Users/u/project/a.ts' })).toBe('Read ~/project/a.ts')
+  expect(toolLabel('NotebookEdit', { notebook_path: '/home/u/n.ipynb' })).toBe('NotebookEdit ~/n.ipynb')
+  expect(toolLabel('Bash', { command: 'TOKEN=abc API_KEY=x /usr/bin/curl -H "Authorization: secret"' })).toBe('Bash curl')
+  expect(toolLabel('Bash', { command: '   ' })).toBe('Bash')
+  // Quoted values with spaces: no piece of them may become the label.
+  expect(toolLabel('Bash', { command: 'TOKEN="abc def" curl x' })).toBe('Bash curl')
+  expect(toolLabel('Bash', { command: "TOKEN='abc def' API=x npm test" })).toBe('Bash npm')
+  expect(toolLabel('Bash', { command: 'TOKEN="abc def ghi' })).toBe('Bash')
+  expect(toolLabel('Bash', { command: '$SECRET_CMD --flag' })).toBe('Bash')
+  // From the privacy audit: substitutions, separators and options never reach the label.
+  for (const command of [
+    'X=$(cat notes.txt) make',
+    'A=$(echo ARGWORD | base64 -d) curl https://x',
+    'T=$(security find-generic-password -w -s gh) gh pr list',
+    'X=1;echo ARGWORD',
+    'A=1|mysql -pARGWORD',
+    'Y=s&&psql -U admin',
+    'X=a(b c) d',
+    'TOKEN="$(cat key)" curl x',
+    '-pARGWORD',
+    '`cat secret` run',
+    '$(cat key)/npm test',
+  ]) {
+    expect(toolLabel('Bash', { command })).toBe('Bash')
+  }
+  expect(toolLabel('Bash', { command: 'NODE_ENV=test PORT=8080 /usr/local/bin/npm run e2e' })).toBe('Bash npm')
+  expect(toolLabel('Read', { file_path: 'C:\\Users\\carol\\notes.md' })).toBe('Read ~\\notes.md')
+  expect(toolLabel('Read', { file_path: '/root/.bashrc' })).toBe('Read ~/.bashrc')
+  expect(toolLabel('Grep', { pattern: 'password' })).toBe('Grep')
+  expect(toolLabel('mcp__github__get_file', { path: 'x' })).toBe('mcp__github__get_file')
+})
+
+test('what the conversation holds: tool results of the main conversation, reset by a compaction', async ($, on) => {
+  const { next } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  next.toolText = 'x'.repeat(4_000)
+  await $.tool.call({ tool: 'Read', file_path: '/Users/u/project/a.ts' } as never)
+  next.toolText = 'y'.repeat(40_000)
+  await $.tool.call({ tool: 'Bash', command: 'SECRET=1 npm test --silent' } as never)
+  // A subagent's result stays in its own context.
+  await $.tool.call({ tool: 'Read', file_path: '/Users/u/other.ts', agentId: 'agent-1' } as never)
+  // Another mod answered without core's text: nothing to measure.
+  next.toolText = null
+  await $.tool.call({ tool: 'Read', file_path: '/Users/u/third.ts' } as never)
+  expect(await contextText($, /all messages 80\.0k$/)).toBeDefined()
+  for (const name of ['Bash', 'Read', 'Bash npm', 'Read ~/project/a.ts']) expect(await contextText($, new RegExp(`^${name}$`))).toBeDefined()
+  expect(await contextText($, /^ +10\.0k$/)).toBeDefined()
+  expect(await contextText($, /^ +1\.0k$/)).toBeDefined()
+  expect(await contextText($, /^ · 1×$/)).toBeDefined()
+  expect(await contextText($, /other\.ts|third\.ts|SECRET/)).toBeUndefined()
+  await $.session.compact({ trigger: 'manual', messages: SUMMARY })
+  expect(await contextText($, /^no tool results yet$/)).toBeDefined()
+  expect(await contextText($, /^since the compact at \d\d:\d\d$/)).toBeDefined()
+})
+
+test('auto-compact forecast: pace since the last compaction', async () => {
+  expect(compactForecast([100, 120, 140], 50, 1_000)).toBe(18)
+  // A drop (compaction) starts the pace again: not the slope from before it.
+  expect(compactForecast([100, 300, 50, 70, 90], 50, 1_000)).toBe(21)
+  expect(compactForecast([100, 300, 50, 70], 50, 1_000)).toBeNull()
+  expect(compactForecast([100, 120, 140], null, 1_000)).toBeNull()
+  expect(compactForecast([140, 140, 140], 50, 1_000)).toBeNull()
+  expect(compactForecast([400, 480, 520], 50, 1_000)).toBe(0)
+})
+
+test('auto-compact forecast drawn in the overview', async ($, on) => {
+  world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  for (const tokens of [100_000, 200_000, 300_000]) {
+    await $.session.measure({ context: { tokens, window: 1_000_000, percent: tokens / 10_000 }, rateLimits: [], changed: ['context'] })
+  }
+  const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  expect(await ui.find({ type: 'Text', text: ' · in ≈ 7 prompts at this pace' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('/tokens report: Markdown on the clipboard, the pane untouched, nothing in the transcript', async ($, on) => {
+  const { next, pane } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  await step($, 'agent-1')
+  next.toolText = 'x'.repeat(8_000)
+  await $.tool.call({ tool: 'Read', file_path: '/Users/u/project/a.ts' } as never)
+  next.toolText = 'y'.repeat(40_000)
+  await $.tool.call({ tool: 'Bash', command: 'SECRET="a b" npm test --token=xyz' } as never)
+  await $.tool.call({ tool: 'Read', file_path: '/Users/u/other.ts', agentId: 'agent-1' } as never)
+  const answer = await run($, 'tokens', 'report')
+  expect(answer.text).toMatch(/^Copied the session report \(\d+ lines of Markdown\) to the clipboard – paste it to check/)
+  expect(answer.text).not.toMatch(/# Cache Meter/)
+  expect(pane.opened.length).toBe(0)
+  const report = next.copied[0] ?? ''
+  // What the pane shows, nothing more: no command arguments, no subagent's file, no full home path.
+  expect(report).not.toMatch(/SECRET|other\.ts|\/Users\//)
+  for (const part of [
+    '# Cache Meter – session report',
+    '## Cost and cache',
+    '## Context',
+    '## Subagents',
+    '`Explore: find the tests`',
+    'Cache hit rate: 93%',
+    '- Tool results (≈ tokens, characters ÷ 4): Bash 10.0k in 1, Read 2.0k in 1',
+    '- Largest: `Bash npm` 10.0k, `Read ~/project/a.ts` 2.0k',
+  ]) {
+    expect(report).toContain(part)
+  }
+  next.copy = { isCopied: false, reason: 'no-clipboard' }
+  expect((await run($, 'tokens', 'report')).text).toBe('Could not copy the session report (no-clipboard).')
+  next.copyDeny = 'a ui.copy hook said no'
+  expect((await run($, 'tokens', 'report')).text).toBe('Could not copy the session report (rejected by a hook or the terminal).')
+})
+
 test('line under the answer: when the core text is the answer itself, only the line', async ($, on) => {
   const { next } = world(on, { turnText: 'ok' })
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   await $.turn.start({ turnId: 't', text: 'hi' } as never)
   await step($)
   next.usd = 1.6
@@ -1369,4 +1506,69 @@ test('subagents: a failed name lookup is tried again', async ($, on) => {
   expect(await healthText($, / agent-1$/)).toBeDefined()
   await step($, 'agent-1')
   expect(await healthText($, /Explore: find the tests$/)).toBeDefined()
+})
+
+test('context map: memory-file paths are stored home-shortened (other mods can read the state)', async () => {
+  const map = contextMapOf(
+    {
+      categories: [],
+      memoryFiles: [
+        { path: '/Users/carol/.claude/CLAUDE.md', type: 'User', tokens: 9_000 },
+        { path: 'C:\\Users\\carol\\CLAUDE.md', type: 'Project', tokens: 4_000 },
+      ],
+      mcpTools: [],
+      agents: [],
+    } as never,
+    'summary',
+    0,
+  )
+  expect(map.memoryFiles.map(f => f.name)).toEqual(['~/.claude/CLAUDE.md', '~\\CLAUDE.md'])
+})
+
+test('privacy round 2: Unicode spaces, token-like names, home dirs and URLs never reach a label', async () => {
+  const S = 'ghp_SECRET123'
+  for (const space of ['\u00a0', '\u2003', '\u000b', '\u000c', '\u000d', '\u2028', '\ufeff', '\u3000', '\u1680']) {
+    expect(toolLabel('Bash', { command: `TOKEN=a${space}${S} curl x` })).toBe('Bash')
+    expect(toolLabel('Bash', { command: `${space}${S}` })).toBe('Bash')
+  }
+  for (const command of [`/tmp/${S}`, `./sk-ant-api03-abcdef run`, S, 'xoxb-1234 go', '/home/florian', '/Users/carol', 'run20261012000000', 'a'.repeat(40)]) {
+    expect(toolLabel('Bash', { command })).toBe('Bash')
+  }
+  // A secret that looks like an ordinary word: only the bash-only word split keeps it out.
+  for (const space of ['\u00a0', '\u2003', '\u3000']) {
+    expect(toolLabel('Bash', { command: `PASSWORD=a${space}hunter2pass mysql -u root` })).toBe('Bash')
+  }
+  expect(toolLabel('Bash', { command: 'TOKEN=a\tnpm test' })).toBe('Bash npm')
+  expect(toolLabel('Bash', { command: './scripts/deploy.sh --prod' })).toBe('Bash deploy.sh')
+  // file_path only for the file tools, never a URL, no query or fragment
+  expect(toolLabel('mcp__x__upload', { file_path: 'https://h/up?sig=SECRET' })).toBe('mcp__x__upload')
+  expect(toolLabel('mcp__x__upload', { file_path: '/Users/carol/contract-mueller.pdf' })).toBe('mcp__x__upload')
+  expect(toolLabel('Read', { file_path: 'https://h/up?sig=SECRET' })).toBe('Read')
+  expect(toolLabel('Read', { file_path: '/Users/carol/a.md?token=SECRET#x' })).toBe('Read ~/a.md')
+  expect(toolLabel('Read', { file_path: '/tmp/ghp_SECRET123.txt' })).toBe('Read /tmp/…')
+  expect(toolLabel('Edit', { file_path: 'C:\\keys\\sk-ant-api03-x\\a.md' })).toBe('Edit C:\\keys\\…\\a.md')
+  // home directories in more layouts
+  for (const [path, want] of [
+    ['c:\\users\\carol\\a.md', 'Read ~\\a.md'],
+    ['C:/Users/carol/a.md', 'Read ~/a.md'],
+    ['/var/home/carol/a.md', 'Read ~/a.md'],
+    ['/volume1/homes/florian/a.md', 'Read ~/a.md'],
+    ['/volume1/@home/florian/a.md', 'Read ~/a.md'],
+    ['/Users//carol/a.md', 'Read ~/a.md'],
+  ]) {
+    expect(toolLabel('Read', { file_path: path })).toBe(want)
+  }
+  // one line, at most 80 characters
+  const long = toolLabel('Read', { file_path: `/srv/${'x'.repeat(100)}\nINJECTED` })
+  expect(long).not.toMatch(/\n/)
+  expect(long.length).toBeLessThanOrEqual(80)
+})
+
+test('privacy round 2: no line under the answer without a screen (-p, SDK)', async ($, on) => {
+  const { next } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
+  await $.turn.start({ turnId: 't', text: 'hi' } as never)
+  await step($)
+  next.usd = 1.9
+  expect((await complete($)).text).toBe('')
 })

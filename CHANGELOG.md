@@ -2,6 +2,19 @@
 
 All notable changes to Cache Meter, a Claude Code mod. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] – 2026-10-12
+
+Context under control: what fills the conversation, when it compacts, and a report to share.
+
+### Added
+- **What the conversation holds** (Context tab): the main conversation's tool results since the start or the last compact, by tool and the five largest – labelled with the file path or a Bash command's program name, sized as an estimate (characters ÷ 4) beside Claude Code's own total for all messages.
+- **Auto-compact forecast** (Overview): how many prompts until auto-compact at the pace since the last compaction.
+- **`/tokens report`**: the session as Markdown on the clipboard – cost, cache, warm misses with their cause, context, heaviest files, servers and tool results, subagents, plan limits.
+
+### Changed
+- Privacy: Cache Meter now reads the name, a short label and the result length of each tool call (not the result's text, not a command's arguments). README, PRIVACY.md and SECURITY.md say so.
+- Plugin description names what each answer costs and what broke the cache.
+
 ## [0.7.0] – 2026-10-12
 
 Why and when: what broke the cache, and a word before it happens.
@@ -153,6 +166,7 @@ Changes for Anthropic's plugin directory, whose validation blocked 0.5.1.
 - Pane `/tokens`: per-request token history, totals, plan limits, cost.
 - `/keepwarm`.
 
+[0.8.0]: https://github.com/florian101010/cache-meter/compare/899ec58...e830ded
 [0.7.0]: https://github.com/florian101010/cache-meter/compare/b0b9980...899ec58
 [0.6.0]: https://github.com/florian101010/cache-meter/compare/92aef39...b0b9980
 [0.5.4]: https://github.com/florian101010/cache-meter/compare/9175da5...92aef39

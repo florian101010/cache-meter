@@ -1,6 +1,6 @@
 // Pure helpers of cache-meter: no `$`, so the tests call them directly.
 
-import type { CacheInfo, ContextMap, Limit, LimitStart, Usage4 } from '../types'
+import type { CacheInfo, ContextMap, Limit, LimitStart, ToolResults, Usage4 } from '../types'
 
 export const HOUR = 3_600_000
 export const FIVE_MIN = 300_000
@@ -396,7 +396,8 @@ export function contextMapOf(b: BreakdownLike, detail: ContextMap['detail'], at:
     detail,
     at,
     categories: heaviest(b.categories.filter(c => c.kind === 'used')).map(c => ({ name: c.name, tokens: c.tokens })),
-    memoryFiles: heaviest(b.memoryFiles).map(f => ({ name: f.path, tokens: f.tokens })),
+    // Kept home-shortened: other loaded mods can read this state (types: $.state).
+    memoryFiles: heaviest(b.memoryFiles).map(f => ({ name: homePath(f.path), tokens: f.tokens })),
     mcpServers: heaviest(Object.entries(servers).map(([name, sum]) => ({ name, ...sum }))),
     deferredMcpTools: b.mcpTools.filter(t => !t.isLoaded).length,
     agents: heaviest(b.agents).map(a => ({ name: a.agentType, tokens: a.tokens })),
@@ -590,8 +591,167 @@ export function expiryText(remainingMs: number, tokens: number): string {
 
 /** A subagent's name in the Health tab: its type and task, else its id. */
 export function agentLabel(entry: { type?: string; description?: string } | undefined, id: string): string {
-  if (entry === undefined) return id.slice(0, 12)
+  if (entry === undefined) return cleanLabel(id.slice(0, 12))
   const what = entry.description?.trim() ?? ''
 
-  return what === '' ? entry.type ?? id.slice(0, 12) : `${entry.type ?? 'agent'}: ${what}`
+  return cleanLabel(what === '' ? entry.type ?? id.slice(0, 12) : `${entry.type ?? 'agent'}: ${what}`)
+}
+
+/** A size in tokens, estimated from characters (÷ 4) – an estimate, labelled as one wherever it is drawn. */
+export function estimateTokens(text: string): number {
+  return Math.ceil(text.length / 4)
+}
+
+/** A home directory as `~`, so paths stay short and screenshots show no user name. */
+export function homePath(path: string): string {
+  return path
+    .replace(/^\/(?:Users|home|var\/home|export\/home)\/+[^/]+(?=\/|$)/, '~')
+    .replace(/^\/volume\d+\/(?:homes|@home)\/[^/]+(?=\/|$)/, '~')
+    .replace(/^\/root(?=\/|$)/, '~')
+    .replace(/^\/mnt\/[a-z]\/Users\/[^/]+(?=\/|$)/i, '~')
+    .replace(/^[A-Za-z]:[\\/]Users[\\/][^\\/]+(?=[\\/]|$)/i, '~')
+}
+
+/** The tools whose `file_path` / `notebook_path` is a file on disk (types: claude-code-tools). */
+const FILE_TOOLS = new Set(['Read', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit'])
+
+/** Words that look like a credential, never shown as a program name. */
+const SECRET_LIKE = /^(gh[poursa]_|github_pat_|sk-|sk_|xox[abprs]-|akia|asia|aiza|glpat-|hf_|npm_|pypi-|dop_v1_|shpat_)/i
+
+/** A label as it is stored and shown: one line, no control characters, at most 80 characters (the end kept). */
+export function cleanLabel(label: string): string {
+  const one = label.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, ' ')
+
+  return one.length > 80 ? `…${one.slice(-79)}` : one
+}
+
+/**
+ * A tool call's label: the tool, plus for the file tools the home-shortened path and for Bash only the
+ * program name – a command's arguments, a URL or a token never become part of it.
+ */
+export function toolLabel(tool: string, input: Readonly<Record<string, unknown>>): string {
+  const path = typeof input.file_path === 'string' ? input.file_path : typeof input.notebook_path === 'string' ? input.notebook_path : null
+  if (path !== null && FILE_TOOLS.has(tool)) {
+    // A path, not a URL: anything with a scheme gives just the tool; a query or fragment is cut off.
+    if (/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(path)) return tool
+
+    // A path segment that looks like a credential (a file named after a token) is shown as "…".
+    const shown = homePath(path.split(/[?#]/)[0] ?? '')
+      .split(/([\\/])/)
+      .map(part => (SECRET_LIKE.test(part) ? '…' : part))
+      .join('')
+
+    return cleanLabel(`${tool} ${shown}`)
+  }
+  if (tool === 'Bash' && typeof input.command === 'string') {
+    // Words are split where bash splits them – space, tab, newline – not on every Unicode space: a
+    // no-break space inside an assignment's value must not end the value. Plain VAR=value prefixes go;
+    // the first word left must look like a program name, else just "Bash": never a guess.
+    const rest = input.command.replace(/^[ \t\n]+/, '').replace(/^(?:[A-Za-z_][A-Za-z0-9_]*=(?:"[^"$`\\]*"|'[^']*'|[A-Za-z0-9_.,:/@%+=-]*)[ \t\n]+)*/, '')
+    const program = rest.split(/[ \t\n]+/)[0] ?? ''
+    // A home directory itself is no program name (it would show the user name).
+    if (homePath(program) === '~') return tool
+    const name = program.split('/').pop() ?? ''
+    const isProgram = /^[A-Za-z0-9_.+][A-Za-z0-9_.+-]*$/.test(name) && name.length <= 32 && !SECRET_LIKE.test(name) && !/\d{8}/.test(name)
+
+    return isProgram ? `${tool} ${name}` : tool
+  }
+
+  return tool
+}
+
+/** Adds one tool result to the tally: per tool, and the five largest single results. */
+export function addToolResult(prev: ToolResults, tool: string, label: string, tokens: number, at: number): ToolResults {
+  const sum = prev.byTool[tool] ?? { count: 0, tokens: 0 }
+
+  return {
+    byTool: { ...prev.byTool, [tool]: { count: sum.count + 1, tokens: sum.tokens + tokens } },
+    largest: [...prev.largest, { label, tokens, at }].sort((a, b) => b.tokens - a.tokens).slice(0, 5),
+    since: prev.since,
+  }
+}
+
+/**
+ * Prompts until auto-compact at the pace of the last turns: the context sizes after each turn since the
+ * last drop (a compaction), at least two rises. Null when auto-compact is off or unknown, or no pace.
+ */
+export function compactForecast(history: readonly number[], autoCompactPct: number | null, window: number): number | null {
+  if (autoCompactPct === null || window <= 0 || history.length < 3) return null
+  let start = 0
+  history.forEach((size, i) => {
+    if (i > 0 && size < (history[i - 1] ?? size)) start = i
+  })
+  const run = history.slice(start)
+  const first = run[0]
+  const last = run.at(-1)
+  if (run.length < 3 || first === undefined || last === undefined) return null
+  const pace = (last - first) / (run.length - 1)
+  const left = (autoCompactPct / 100) * window - last
+  if (pace <= 0) return null
+  if (left <= 0) return 0
+
+  return Math.ceil(left / pace)
+}
+
+/** Everything the session report needs, gathered from state; dollar figures only as Claude Code gave them. */
+export type ReportData = {
+  at: number
+  ageMs: number | null
+  prompts: number | null
+  requests: number
+  model: string | null
+  usd: number | null
+  isPlan: boolean
+  hit: number | null
+  saving: number | null
+  cold: { count: number; written: number }
+  warmMiss: { count: number; cause: string | null }
+  context: { percent: number | null; tokens: number | null; autoCompactPct: number | null; promptsLeft: number | null }
+  limits: { name: string; percentUsed: number }[]
+  memoryFiles: { name: string; tokens: number }[]
+  mcpServers: { name: string; tokens: number; calls: number }[]
+  toolsByTool: { tool: string; count: number; tokens: number }[]
+  largest: { label: string; tokens: number }[]
+  agents: { label: string; steps: number; tokens: number; hit: number | null }[]
+  keepwarm: { pings: number; readTokens: number }
+}
+
+/** A label as inline code in the report, so a crafted path or task cannot add Markdown. */
+function code(text: string): string {
+  return `\`${cleanLabel(text).replace(/`/g, "'")}\``
+}
+
+/** The session report `/tokens report` copies: Markdown, the same figures and labels as the pane. */
+export function reportMarkdown(r: ReportData): string {
+  const lines: string[] = []
+  const usd = r.usd === null ? '–' : `${r.isPlan ? '≈ ' : ''}$${r.usd.toFixed(2)}${r.isPlan ? ' API value (subscription: a comparison, not a charge)' : ' spent'}`
+  lines.push(`# Cache Meter – session report`, '')
+  lines.push(`${new Date(r.at).toISOString().slice(0, 16).replace('T', ' ')} UTC${r.ageMs === null ? '' : ` · session ${duration(r.ageMs)}`}${r.model === null ? '' : ` · ${r.model}`}`, '')
+  lines.push('## Cost and cache', '')
+  lines.push(`- Cost: ${usd}${r.prompts ? ` · ${r.prompts} prompts · ${r.requests} requests` : ` · ${r.requests} requests`}`)
+  lines.push(`- Cache hit rate: ${r.hit === null ? '–' : `${r.hit}%`}${r.saving === null ? '' : ` · cache saved ${r.saving}% of input cost`}`)
+  lines.push(`- Cold re-writes: ${r.cold.count}${r.cold.count > 0 ? ` (${short(r.cold.written)} tokens)` : ''}`)
+  lines.push(`- Warm misses: ${r.warmMiss.count}${r.warmMiss.cause === null ? '' : ` – last: ${r.warmMiss.cause}`}`)
+  if (r.keepwarm.pings > 0) lines.push(`- Keepwarm: ${r.keepwarm.pings} pings, ${short(r.keepwarm.readTokens)} tokens read`)
+  lines.push('', '## Context', '')
+  lines.push(
+    `- Fill: ${r.context.percent === null ? '–' : `${r.context.percent}%`}${r.context.tokens === null ? '' : ` (${short(r.context.tokens)} tokens)`}${r.context.autoCompactPct === null ? '' : ` · auto-compact at ${r.context.autoCompactPct}%`}${r.context.promptsLeft === null ? '' : ` · in ≈ ${r.context.promptsLeft} prompts at this pace`}`,
+  )
+  if (r.memoryFiles.length > 0) lines.push(`- Memory files: ${r.memoryFiles.map(f => `${code(f.name)} ${short(f.tokens)}`).join(', ')}`)
+  if (r.mcpServers.length > 0) lines.push(`- MCP servers: ${r.mcpServers.map(m => `${code(m.name)} ${short(m.tokens)} (${m.calls} calls)`).join(', ')}`)
+  if (r.toolsByTool.length > 0) {
+    lines.push(`- Tool results (≈ tokens, characters ÷ 4): ${r.toolsByTool.map(t => `${t.tool} ${short(t.tokens)} in ${t.count}`).join(', ')}`)
+    lines.push(`- Largest: ${r.largest.map(l => `${code(l.label)} ${short(l.tokens)}`).join(', ')}`)
+  }
+  if (r.agents.length > 0) {
+    lines.push('', '## Subagents', '')
+    for (const a of r.agents) lines.push(`- ${code(a.label)}: ${short(a.tokens)} tokens, ${a.steps} requests, ${a.hit === null ? '–' : `${a.hit}%`} hit`)
+  }
+  if (r.limits.length > 0) {
+    lines.push('', '## Plan limits', '')
+    for (const l of r.limits) lines.push(`- ${l.name}: ${l.percentUsed}%`)
+  }
+  lines.push('', '_Made with [Cache Meter](https://github.com/florian101010/cache-meter)._')
+
+  return lines.join('\n')
 }

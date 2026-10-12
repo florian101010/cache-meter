@@ -18,7 +18,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { AgentUse, CacheInfo, ContextMap, ColdWrite, Health, KeepWarm, Measure, ServerToolCall, Totals, TtlConfig, Usage4 } from '../types'
+import type { AgentUse, CacheInfo, ColdWrite, ContextMap, Health, KeepWarm, Measure, ServerToolCall, Step, ToolResults, Totals, TtlConfig, Usage4 } from '../types'
 import {
   COLD_MIN,
   FIVE_MIN,
@@ -29,6 +29,13 @@ import {
   PING_WRITE_SHARE,
   ZERO,
   add,
+  addToolResult,
+  cleanLabel,
+  compactForecast,
+  estimateTokens,
+  homePath,
+  reportMarkdown,
+  toolLabel,
   agentLabel,
   breakCause,
   effortKeepsCache,
@@ -100,6 +107,8 @@ const keepA = atom({ plugin: 'cache-meter', key: 'keepWarm' } as const, {
 })
 const coldA = atom({ plugin: 'cache-meter', key: 'coldWrites' } as const, [])
 const agentsA = atom({ plugin: 'cache-meter', key: 'agents' } as const, {} as Record<string, AgentUse>)
+const NO_RESULTS: ToolResults = { byTool: {}, largest: [], since: null }
+const toolResultsA = atom({ plugin: 'cache-meter', key: 'toolResults' } as const, NO_RESULTS)
 const contextMapA = atom({ plugin: 'cache-meter', key: 'contextMap' } as const, null)
 const healthA = atom({ plugin: 'cache-meter', key: 'health' } as const, {
   stops: {},
@@ -406,13 +415,77 @@ async function maybeNotify($: EngineInterface) {
     reason = sent.isSent ? null : sent.reason
   } catch (error) {
     // Rejected by a Notification hook's deny or a failed write (types: $.ui.notify): its own words.
-    reason = error instanceof Error ? error.message : String(error)
+    // Stored (other mods can read the state) and drawn: one line, cut to 80 characters.
+    reason = cleanLabel(error instanceof Error ? error.message : String(error))
   }
   await update($, healthA, health => {
     const n = health.notice ?? { sent: 0, lastReason: null }
 
     return { ...health, notice: reason === null ? { sent: n.sent + 1, lastReason: null } : { ...n, lastReason: reason } }
   })
+}
+
+// /tokens report: gathers what the pane shows into Markdown and puts it on the clipboard ($.ui.copy).
+async function copyReport($: EngineInterface): Promise<string> {
+  const [measure, totals, steps, health, map, agents, results, keep] = [
+    await read($, measureA),
+    await read($, totalsA),
+    await read($, stepsA),
+    await read($, healthA),
+    await read($, contextMapA),
+    await read($, agentsA),
+    (await read($, toolResultsA)) ?? NO_RESULTS,
+    await read($, keepA),
+  ]
+  const now = await $.clock.now()
+  const ttl = await ttlNow($)
+  const calls = health.toolCalls ?? {}
+  const text = reportMarkdown({
+    at: now,
+    ageMs: measure?.startedAt == null ? null : Math.max(0, now - measure.startedAt),
+    prompts: measure?.prompts ?? null,
+    requests: totals.mainSteps,
+    model: steps.at(-1)?.model ?? null,
+    usd: measure?.usd ?? null,
+    isPlan: isPlan(measure),
+    hit: hitPct(totals.main),
+    saving: cacheSaving(totals.main, readMultiplier(steps.at(-1)?.model ?? ''), writeMultiplier(ttl.ms)),
+    cold: { count: totals.coldCount, written: totals.coldWritten },
+    warmMiss: { count: health.unexpected?.count ?? 0, cause: health.unexpected?.lastCause ?? null },
+    context: {
+      percent: measure?.percent ?? null,
+      tokens: measure?.tokens ?? null,
+      autoCompactPct: measure?.isAutoCompactOff ? null : measure?.autoCompactPct ?? null,
+      promptsLeft: measure === null || measure.isAutoCompactOff ? null : compactForecast(measure.history, measure.autoCompactPct, measure.window),
+    },
+    limits: (measure?.limits ?? []).map(l => ({ name: limitName(l.kind), percentUsed: l.percentUsed })),
+    memoryFiles: (map?.memoryFiles ?? []).slice(0, 3).map(f => ({ name: homeShort(f.name), tokens: f.tokens })),
+    mcpServers: (map?.mcpServers ?? []).slice(0, 5).map(m => ({ name: m.name, tokens: m.tokens, calls: serverCalls(m.toolNames ?? [], calls) })),
+    toolsByTool: Object.entries(results.byTool)
+      .map(([tool, v]) => ({ tool, ...v }))
+      .sort((a, b) => b.tokens - a.tokens)
+      .slice(0, 5),
+    largest: results.largest,
+    agents: Object.values(agents)
+      .sort((a, b) => b.input + b.read + b.write + b.output - (a.input + a.read + a.write + a.output))
+      .slice(0, 5)
+      .map(a => ({ label: a.label, steps: a.steps, tokens: a.input + a.read + a.write + a.output, hit: hitPct(a) })),
+    keepwarm: { pings: keep.pings, readTokens: keep.readTokens },
+  })
+  let copied: { isCopied: boolean; reason?: string }
+  try {
+    copied = await $.ui.copy({ text })
+  } catch {
+    // A ui.copy hook's deny or a failed write. Fixed words, not the error's own: Claude reads a command's
+    // text (api › Add a command), and an error from another hook could carry anything.
+    copied = { isCopied: false, reason: 'rejected by a hook or the terminal' }
+  }
+  const lines = text.split('\n').length
+
+  // OSC 52 does not report back (types: UiCopyResult): "copied" can still mean nothing arrived.
+  return copied.isCopied
+    ? `Copied the session report (${lines} lines of Markdown) to the clipboard – paste it to check; some terminals drop clipboard writes silently.`
+    : `Could not copy the session report (${copied.reason ?? 'unknown'}).`
 }
 
 async function turnsNow($: EngineInterface): Promise<number> {
@@ -515,8 +588,8 @@ export const register: Register = (on, options) => {
     try {
       await $.command.register({
         name: 'tokens',
-        description: 'Prompt-cache and token dashboard – tabs: overview, context (what fills it), health (errors, cost rate)',
-        argumentHint: '[overview | context | health]',
+        description: 'Prompt-cache and token dashboard – tabs: overview, context (what fills it), health (errors, cost rate); report copies a session summary',
+        argumentHint: '[overview | context | health | report]',
       })
       await $.command.register({
         name: 'keepwarm',
@@ -715,7 +788,8 @@ export const register: Register = (on, options) => {
     const { [e.turnId]: _done, ...rest } = openTurns
     openTurns = rest
     const result = await next(e)
-    if (!isMain || !showTurnLine || e.isAborted || !e.usage || open === undefined || open.requests === 0) return result
+    // Only where a person reads it: under -p and the SDK nothing of Cache Meter's is drawn (README › Requirements).
+    if (!isMain || !showTurnLine || !isInteractive || e.isAborted || !e.usage || open === undefined || open.requests === 0) return result
     let usd: number | null = null
     try {
       const now = (await $.session.usage()).cost?.usd ?? null
@@ -737,11 +811,20 @@ export const register: Register = (on, options) => {
     return { ...result, text: `${theirs}${line}` }
   })
 
-  // Calls to MCP tools by wire name, so the context tab can tell servers in use from idle ones.
-  // Counted after the call ran; the call and its result pass through unchanged.
-  on('tool.call', { tool: /^mcp__/ }, async ($, e, next) => {
+  // After each tool call, with its result passed back unchanged: MCP calls by wire name (any loop), and
+  // for the main conversation the size of the result as the model reads it (core's `text`, ToolCallResult)
+  // under a short label. Only its length is kept, never the text; a deny or another mod's own answer
+  // (no `text`) is skipped. Subagents' results stay in their own context, not the main one.
+  on('tool.call', async ($, e, next) => {
     const result = await next(e)
-    if (!('deny' in result && result.deny)) await update($, healthA, health => ({ ...health, toolCalls: bump(health.toolCalls ?? {}, e.tool) }))
+    if ('deny' in result && result.deny) return result
+    if (e.tool.startsWith('mcp__')) await update($, healthA, health => ({ ...health, toolCalls: bump(health.toolCalls ?? {}, e.tool) }))
+    if (e.agentId === undefined && typeof result.text === 'string') {
+      const tokens = estimateTokens(result.text)
+      const label = toolLabel(e.tool, e as unknown as Record<string, unknown>)
+      const at = await $.clock.now()
+      await update($, toolResultsA, prev => addToolResult(prev ?? NO_RESULTS, e.tool, label, tokens, at))
+    }
 
     return result
   })
@@ -813,6 +896,9 @@ export const register: Register = (on, options) => {
     const result = await next(e)
     if (e.trigger !== 'precompute' && e.agentId === undefined && !('skip' in result && result.skip)) {
       await resetCache($)
+      // The summary replaces the tool results: the tally starts again.
+      const at = await $.clock.now()
+      await update($, toolResultsA, () => ({ ...NO_RESULTS, since: at }))
     }
 
     return result
@@ -844,8 +930,11 @@ export const register: Register = (on, options) => {
   on('command.run', { command: 'tokens' }, async ($, e) => {
     // /tokens <tab> opens on that tab, or switches to it when the pane is open: no focus chord needed.
     const asked = (e.args ?? '').trim().toLowerCase()
+    // /tokens report: the session as Markdown on the clipboard; the pane is left as it is, and the
+    // report never goes into the transcript (CommandRunResult.text is a transcript line).
+    if (asked === 'report') return { text: await copyReport($) }
     const wanted = TABS.find(t => t === asked || (asked.length > 0 && t.startsWith(asked)))
-    if (asked !== '' && wanted === undefined) return { text: 'Usage: /tokens [overview | context | health]' }
+    if (asked !== '' && wanted === undefined) return { text: 'Usage: /tokens [overview | context | health | report]' }
     const isOpen = (await $.ui.panes()).some(p => p.id === PANE)
     if (wanted !== undefined) {
       tab = wanted
@@ -1022,6 +1111,7 @@ export const register: Register = (on, options) => {
     const map = await read($, contextMapA)
     const health: Health = await read($, healthA)
     const agents = await read($, agentsA)
+    const results: ToolResults = (await read($, toolResultsA)) ?? NO_RESULTS
     const ttl = await ttlNow($)
     const now = await $.clock.now()
     const status = cacheStatus(cache, now, ttl.ms)
@@ -1175,6 +1265,7 @@ export const register: Register = (on, options) => {
     const percent = measure?.percent ?? null
     const auto = measure?.autoCompactPct ?? null
     const autoMarks: Mark[] = auto === null ? [] : [{ at: markAt(auto / 100, rightIn), color: 0xff6b81, theme: 'error' }]
+    const promptsLeft = measure === null || measure.isAutoCompactOff ? null : compactForecast(measure.history, auto, measure.window)
     const contextCard = (
       <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="column">
         <Box flexDirection="row" justifyContent="space-between">
@@ -1193,6 +1284,11 @@ export const register: Register = (on, options) => {
             <Text dimColor>
               {measure?.isAutoCompactOff ? 'auto-compact off' : auto === null ? 'auto-compact unknown' : ` auto-compact ${auto}%`}
             </Text>
+            {promptsLeft !== null && (
+              <Text color={promptsLeft <= 3 ? 'warning' : undefined} dimColor={promptsLeft > 3}>
+                {promptsLeft === 0 ? ' · at the next prompt' : ` · in ≈ ${promptsLeft} prompt${promptsLeft === 1 ? '' : 's'} at this pace`}
+              </Text>
+            )}
           </Text>
           <Text dimColor>{tier !== 'narrow' && measure !== null && measure.history.length > 2 ? `trend ${sparkline(measure.history)}` : ''}</Text>
         </Box>
@@ -1392,6 +1488,13 @@ export const register: Register = (on, options) => {
     const topCat = map?.categories[0]?.tokens ?? 0
     const topFile = map?.memoryFiles[0]?.tokens ?? 0
     const topServer = map?.mcpServers[0]?.tokens ?? 0
+    const resultTools = Object.entries(results.byTool)
+      .sort((a, b) => b[1].tokens - a[1].tokens)
+      .slice(0, 5)
+    const topResult = resultTools[0]?.[1].tokens ?? 0
+    const topLargest = results.largest[0]?.tokens ?? 0
+    // Claude Code's own estimate of the conversation, as /context names the category.
+    const messagesTokens = map?.categories.find(c => c.name === 'Messages')?.tokens ?? null
     const contextView = (
       <Box flexDirection="column">
         {contextCard}
@@ -1424,6 +1527,28 @@ export const register: Register = (on, options) => {
               )}
             </Box>
           </Box>
+        </Box>
+        <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="column">
+          <Box flexDirection="row" justifyContent="space-between">
+            <Text color="claude" bold>
+              What the conversation holds
+            </Text>
+            <Text dimColor wrap="truncate-start">
+              {results.since === null ? 'since the start' : `since the compact at ${hhmm(results.since)}`}
+            </Text>
+          </Box>
+          {resultTools.length === 0 ? (
+            <Text dimColor>no tool results yet</Text>
+          ) : (
+            <Box flexDirection="column">
+              <Text dimColor wrap="truncate-end">
+                Tool results by tool, ≈ tokens (characters ÷ 4){messagesTokens === null ? '' : ` · all messages ${short(messagesTokens)}`}
+              </Text>
+              {resultTools.map(([tool, v]) => itemRow(tool, v.tokens, topResult, nameW, ` · ${v.count}×`))}
+              <Text dimColor>Largest single results</Text>
+              {results.largest.map(l => itemRow(l.label, l.tokens, topLargest, nameW))}
+            </Box>
+          )}
         </Box>
         {map !== null && (
           <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="column">
@@ -1739,7 +1864,7 @@ function hitColor(pct: number | null): string | undefined {
 
 /** A home directory as `~`, so paths stay short and screenshots show no user name. */
 function homeShort(path: string): string {
-  return path.replace(/^\/(Users|home)\/[^/]+(?=\/|$)/, '~')
+  return homePath(path)
 }
 
 /**

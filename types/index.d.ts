@@ -102,6 +102,17 @@ export type Health = {
   checks: { agreed: number; differed: number; last: { at: number; engineWarm: boolean; ourWarm: boolean; source: 'model' | 'resume' } | null }
 }
 
+/**
+ * What tool results added to the main conversation since the start or the last compaction, by tool and
+ * the largest single ones. Sizes are estimates (characters ÷ 4) of the text the model reads; the label
+ * is the tool and, for file tools, the home-shortened path or, for Bash, the program name – never content.
+ */
+export type ToolResults = {
+  byTool: Record<string, { count: number; tokens: number }>
+  largest: { label: string; tokens: number; at: number }[]
+  since: number | null
+}
+
 /** One subagent's requests, summed: what it read from and wrote to its own cache. */
 /** `model` is the last one seen; `isNamed` false while the type and task could not be looked up yet. */
 export type AgentUse = Usage4 & { steps: number; label: string; model: string; isNamed?: boolean }
@@ -123,6 +134,7 @@ declare module 'claude-code' {
       contextMap: ContextMap | null
       health: Health
       agents: Record<string, AgentUse>
+      toolResults: ToolResults
     }
   }
 }
