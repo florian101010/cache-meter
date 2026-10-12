@@ -3,7 +3,8 @@
 // Band above the prompt:  ● cache 42m ■■■■■■■■■■ 93% hit · ☀ context 9% (auto-compact 97%) [Compact]
 // Pane /tokens:           every main-thread request as a column (its share not read from the cache),
 //                         session sums, subagents, rate limits, cost, keepwarm; Context and Health tabs.
-// /keepwarm [2h|off]:     pings the cache through $.model.fork shortly before it lapses.
+// /keepwarm [2h|auto|off]: pings the cache through $.model.fork shortly before it lapses; auto = every
+//                         break of the session (also /keepwarm-auto).
 //
 // Single source of truth for every API fact below: the official Claude Code mods documentation and
 // its pages (links in CONTRIBUTING.md) and the type declaration of the running build
@@ -881,6 +882,10 @@ async function pressKeepWarm($: EngineInterface, ms: number | null) {
   $.ui.toast(short, { timeoutMs: 8_000 })
 }
 
+function notRegistered($: EngineInterface, name: string, error: unknown) {
+  $.ui.log(`/${name} not registered: ${cleanLabel(error instanceof Error ? error.message : String(error))}`, { to: 'debug' })
+}
+
 // Keepwarm sends requests that cost, so it starts only on the person's own word: typed at the terminal
 // (composer) or sent from their phone or browser (bridge) – not another mod's $.command.run, a schedule
 // or a peer session (types: PromptOrigin). Stopping it is open to anyone.
@@ -888,24 +893,6 @@ const NOT_YOURS = 'Keepwarm starts only when you type the command yourself. Not 
 function isPersonsCommand(e: { origin?: { kind: string } }): boolean {
   return e.origin?.kind === 'composer' || e.origin?.kind === 'bridge'
 }
-
-const COMMANDS = [
-  {
-    name: 'tokens',
-    description: 'Prompt-cache and token dashboard – tabs: overview, context (what fills it), health (errors, cost rate); report copies a session summary',
-    argumentHint: '[overview | context | health | report]',
-  },
-  {
-    name: 'keepwarm',
-    description: 'Keep the cache warm through a break – auto: every break (a ping costs one cache read)',
-    argumentHint: '[2h | 30m | auto | off]  (10m … 8h)',
-  },
-  {
-    name: 'keepwarm-auto',
-    description: 'Keep the cache warm through every break, pinging by itself (each ping one cache read) – /keepwarm off stops it',
-    argumentHint: '[2h]  longest break covered (10m … 8h)',
-  },
-]
 
 export const register: Register = (on, options) => {
   setting = typeof options.cacheTtl === 'string' ? options.cacheTtl : 'auto'
@@ -990,14 +977,35 @@ export const register: Register = (on, options) => {
       // Soon after start, once the band has been drawn and said whether the session is fullscreen.
       $.clock.after(2_000, () => maybeAutoOpen($))
     }
-    // Each command on its own: a name another plugin took fails only that one (api › Add a command), and
-    // the debug log says which. Without the commands the band still works.
-    for (const command of COMMANDS) {
-      try {
-        await $.command.register(command)
-      } catch (error) {
-        $.ui.log(`/${command.name} not registered: ${cleanLabel(error instanceof Error ? error.message : String(error))}`, { to: 'debug' })
-      }
+    // Each command on its own, written out so `claude plugin validate` names them as the mod's own: one
+    // that Claude Code refuses (a built-in's name, api › Add a command) fails only that one, and the debug
+    // log says which. Without the commands the band still works.
+    try {
+      await $.command.register({
+        name: 'tokens',
+        description: 'Prompt-cache and token dashboard – tabs: overview, context (what fills it), health (errors, cost rate); report copies a session summary',
+        argumentHint: '[overview | context | health | report]',
+      })
+    } catch (error) {
+      notRegistered($, 'tokens', error)
+    }
+    try {
+      await $.command.register({
+        name: 'keepwarm',
+        description: 'Keep the cache warm through a break – auto: every break (a ping costs one cache read)',
+        argumentHint: '[2h | 30m | auto | off]  (10m … 8h)',
+      })
+    } catch (error) {
+      notRegistered($, 'keepwarm', error)
+    }
+    try {
+      await $.command.register({
+        name: 'keepwarm-auto',
+        description: 'Keep the cache warm through every break, pinging by itself (each ping one cache read) – /keepwarm off stops it',
+        argumentHint: '[2h]  longest break covered (10m … 8h)',
+      })
+    } catch (error) {
+      notRegistered($, 'keepwarm-auto', error)
     }
 
     return result
