@@ -251,6 +251,8 @@ export const register: Register = (on, options) => {
         hitPct: null,
         contextTokens: e.context_tokens ?? 0,
         rewriteUsd: e.estimated_cache_write_usd ?? null,
+        coldReason: e.prompt_cache_likely_expired === true ? 'resume' : null,
+        idleBeforeMs: e.seconds_since_last_response * 1000,
       }
       await update($, cacheA, () => cache)
     }
@@ -259,17 +261,22 @@ export const register: Register = (on, options) => {
   })
 
   // Each model request: the four token counts as the API reported them (events § Follow a turn).
-  // A keepwarm fork never reaches this hook: no hook runs beneath a call of its own (types,
-  // HookError kind 're-entry'), so no request is filtered out here.
+  // Whether a keepwarm fork raises turn.step is undocumented ('re-entry' covers a hook's own call,
+  // and the ping comes from a timer). Worst case it shows as one row in the history; no real request
+  // is filtered out here, because a filter would drop requests that end during a ping.
   on('turn.step', async function* ($, e, next) {
-    const startedAt = await $.clock.now()
     const isMain = e.agentId === undefined
-    // Was the main cache already expired when this request started? (read before the request)
-    const before = isMain ? await read($, cacheA) : null
-    const wasCold = before !== null && cacheStatus(before, startedAt, (await ttlNow($)).ms).kind === 'expired'
+    // Counted before the first await, so a turn.complete that follows cannot be overtaken.
     if (isMain) mainRequests += 1
     let result
+    let startedAt = 0
+    let before: CacheInfo | null = null
+    let wasCold = false
     try {
+      startedAt = await $.clock.now()
+      // Was the main cache already expired when this request started? (read before the request)
+      before = isMain ? await read($, cacheA) : null
+      wasCold = before !== null && cacheStatus(before, startedAt, (await ttlNow($)).ms).kind === 'expired'
       result = yield* next(e)
     } finally {
       if (isMain) mainRequests = Math.max(0, mainRequests - 1)
@@ -292,18 +299,21 @@ export const register: Register = (on, options) => {
           hitPct: hitPct(u),
           contextTokens: u.input + u.read + u.write + u.output,
           rewriteUsd: null,
+          coldReason: null,
+          idleBeforeMs: null,
         }))
         // Cold by the clock AND by the counts (more written than read), so a wrong TTL assumption
         // cannot turn a warm request into a "cold" one.
         if (wasCold && before !== null && u.write >= COLD_MIN && u.read < u.write) {
-          const idleMs = before.lastAt > 0 ? startedAt - before.lastAt : null
-          const cold: ColdWrite = { at: startedAt, written: u.write, idleMs }
+          const cause: ColdWrite['cause'] = before.lastAt > 0 ? 'pause' : before.coldReason ?? 'model'
+          const idleMs = cause === 'pause' ? startedAt - before.lastAt : before.idleBeforeMs
+          const cold: ColdWrite = { at: startedAt, written: u.write, cause, idleMs }
           await update($, coldA, list => [...list, cold].slice(-20))
           await update($, totalsA, t => ({ ...t, coldCount: t.coldCount + 1, coldWritten: t.coldWritten + u.write }))
           const keep = await read($, keepA)
           // A hint, not an action (cache-tax arms keepwarm by itself here, which spends quota unasked).
-          // Not after a model switch (idleMs null): keepwarm would not have helped there.
-          if (idleMs !== null && isInteractive && !(keep.until !== null && keep.until > startedAt)) {
+          // Only after a pause in this session: after a model switch or a resume, keepwarm could not have helped.
+          if (cause === 'pause' && isInteractive && !(keep.until !== null && keep.until > startedAt)) {
             $.ui.toast(`Cache war kalt: ${short(u.write)} Tokens neu geschrieben – vor der nächsten Pause /keepwarm?`, {
               timeoutMs: 10_000,
             })
@@ -313,6 +323,15 @@ export const register: Register = (on, options) => {
     }
 
     return result
+  })
+
+  // A main turn has ended, also when aborted (events § Follow a turn; TurnCompleteInput.isAborted):
+  // no main request runs any more. Resets the counter even if an aborted stream never reached its
+  // finally above, so /keepwarm cannot stall silently.
+  on('turn.complete', async ($, e, next) => {
+    if (e.agentId === undefined) mainRequests = 0
+
+    return next(e)
   })
 
   // After each main-thread turn: context fill, rate limits, cost.
@@ -371,6 +390,8 @@ export const register: Register = (on, options) => {
         hitPct: null,
         contextTokens: e.context_tokens,
         rewriteUsd: e.estimated_cache_write_usd,
+        coldReason: 'model',
+        idleBeforeMs: null,
       }
       await update($, cacheA, () => cold)
       await update($, measureA, m => (m === null ? m : { ...m, autoCompactWindow: 0 }))
@@ -411,8 +432,8 @@ export const register: Register = (on, options) => {
 
     return {
       text:
-        `Warmhalten bis ${hhmm(now + ms)}, höchstens ${MAX_PINGS} Pings: einer, sobald weniger als ` +
-        `${remainingLabel(ttl.ms * PING_SHARE)} TTL übrig sind (TTL ${ttl.label}, ${ttl.source}). Jeder Ping ` +
+        `Warmhalten bis ${hhmm(now + ms)}, höchstens ${MAX_PINGS} Pings: einer, sobald noch höchstens ` +
+        `${Math.round((ttl.ms * PING_SHARE) / 60_000)} min TTL übrig sind (TTL ${ttl.label}, ${ttl.source}). Jeder Ping ` +
         `liest den ganzen Kontext aus dem Cache. Trifft ein Ping den Cache nicht, schaltet es sich ab.`,
     }
   })
@@ -618,13 +639,20 @@ export const register: Register = (on, options) => {
           <Text>
             <Text dimColor>{hhmm(c.at)} </Text>
             <Text color="warning">{short(c.written)}</Text>
-            <Text dimColor> neu geschrieben{c.idleMs === null ? ' (nach Modellwechsel)' : ` nach ${duration(c.idleMs)} Pause`}</Text>
+            <Text dimColor>
+              {' '}neu geschrieben
+              {c.cause === 'model'
+                ? ' (nach Modellwechsel)'
+                : c.cause === 'resume'
+                  ? ` (nach Resume${c.idleMs === null ? '' : `, ${duration(c.idleMs)} Pause`})`
+                  : ` nach ${duration(c.idleMs ?? 0)} Pause`}
+            </Text>
           </Text>
         ))}
         {totals.coldCount > 0 && (
           <Text dimColor>
             Zusammen {totals.coldCount}× · {short(totals.coldWritten)} Tokens
-            {colds.some(c => c.idleMs !== null) ? ' · /keepwarm vor Pausen verhindert das' : ''}
+            {colds.some(c => c.cause === 'pause') ? ' · /keepwarm vor Pausen verhindert das' : ''}
             {totals.coldCount > 5 ? ' · gezeigt: die letzten 5' : ''}
           </Text>
         )}

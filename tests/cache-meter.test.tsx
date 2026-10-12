@@ -71,6 +71,7 @@ function world(on: On, opts: { env?: Record<string, string>; forkRead?: number; 
   on('classic.PostModelSwitch', () => ({}))
   on('session.measure', ($, e) => ({ changed: e.changed }))
   on('session.compact', () => ({ messages: SUMMARY }))
+  on('turn.complete', () => ({ text: '' }))
   on('model.fork', ($, e) => {
     forks.push(e.prompt)
     return opts.forkAnswer === false
@@ -420,10 +421,12 @@ test('Resume mit "wahrscheinlich abgelaufen": Band kalt, erste Anfrage zählt', 
   next.write = 150_000
   next.read = 0
   await step($)
-  // Claude Code said cold, the clock is unknown (lastAt 0): counted, no keepwarm hint.
+  // Claude Code said cold: counted as a resume with the reported pause, no keepwarm hint.
   expect(toasts.some(t => t.startsWith('Cache war kalt'))).toBe(false)
   const pane = await $.ui.mount({ surface: 'terminal', ...PANE })
   expect(await pane.find({ type: 'Text', text: /Zusammen 1×/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: / \(nach Resume, 20m Pause\)/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /Modellwechsel/ })).toBeUndefined()
   await pane.unmount()
 })
 
@@ -455,4 +458,22 @@ test('/keepwarm pingt nicht, solange eine Hauptanfrage läuft', async ($, on) =>
   await clock.advance(10 * 60_000)
   await running
   expect(forks).toHaveLength(0)
+})
+
+test('/keepwarm pingt wieder, nachdem ein Turn abgebrochen wurde', async ($, on) => {
+  const { clock, forks, next } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  await run($, 'keepwarm', '2h')
+  // A request starts at minute 1 and hangs; the person presses Esc and the turn ends aborted.
+  await clock.advance(60_000)
+  next.slowMs = 60 * 60_000
+  const hanging = step($)
+  await clock.advance(1_000)
+  await $.turn.complete({ turnId: 't', answer: '', durationMs: 1_000, isAborted: true, reason: 'aborted' } as never)
+  await clock.advance(50 * 60_000)
+  await clock.settle()
+  expect(forks).toHaveLength(1)
+  await clock.advance(15 * 60_000)
+  await hanging
 })

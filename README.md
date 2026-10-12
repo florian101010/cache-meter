@@ -46,14 +46,14 @@ Eine Zeile. Was andere Mods im Band zeichnen (z. B. die Hinweise von `you-should
 - **Kontext:** Füllung, Tokens/Fenster, Auto-Compact-Punkt, Verlauf der letzten 12 Turns als Sparkline.
 - **Anfragen im Hauptgespräch:** je Anfrage ein gestapelter Balken – grün aus dem Cache gelesen, gelb in den Cache geschrieben, rot neu (ungecacht) – mit Summe, Trefferquote und Ausgabe-Tokens.
 - **Summen:** Hauptgespräch und Subagenten getrennt, Kosten wie `/cost` (Listenpreis; im Abo ein Richtwert, nicht die Rechnung).
-- **Kalte Neuschreibungen dieser Session:** die letzten 5 mit Uhrzeit, neu geschriebenen Tokens und Pausenlänge, dazu Anzahl und Summe der ganzen Session. Gezählt wird eine Hauptanfrage, die bei ihrem Start einen abgelaufenen Cache fand, mindestens 10k Tokens geschrieben **und** mehr geschrieben als gelesen hat (so macht eine falsche TTL-Annahme aus einer warmen Anfrage keine kalte). Nicht gezählt: die erste Anfrage einer neuen Session und die erste nach `/compact` oder `/clear` (dort wird ohnehin neu aufgebaut) sowie warme Anfragen mit viel neuem Kontext. Gezählt wird dagegen die erste Anfrage nach `--resume` mit abgelaufenem Cache (Claude Codes eigene Einschätzung `prompt_cache_likely_expired` hat dabei Vorrang vor der Uhr) und nach einem Modellwechsel (angezeigt als „nach Modellwechsel“).
+- **Kalte Neuschreibungen dieser Session:** die letzten 5 mit Uhrzeit, neu geschriebenen Tokens und Pausenlänge, dazu Anzahl und Summe der ganzen Session. Gezählt wird eine Hauptanfrage, die bei ihrem Start einen abgelaufenen Cache fand, mindestens 10k Tokens geschrieben **und** mehr geschrieben als gelesen hat (so macht eine falsche TTL-Annahme aus einer warmen Anfrage keine kalte). Nicht gezählt: die erste Anfrage einer neuen Session und die erste nach `/compact` oder `/clear` (dort wird ohnehin neu aufgebaut) sowie warme Anfragen mit viel neuem Kontext. Gezählt wird dagegen die erste Anfrage nach `--resume` mit abgelaufenem Cache (Claude Codes eigene Einschätzung `prompt_cache_likely_expired` hat dabei Vorrang vor der Uhr) und nach einem Modellwechsel. Die Liste nennt den Grund: „nach 1h10m Pause“, „(nach Resume, 20m Pause)“ oder „(nach Modellwechsel)“.
 - **Limits:** 5 Stunden, 7 Tage (und ggf. Ausgabelimit) als Balken mit Reset-Zeit.
 
-Nach einer kalten Neuschreibung nach einer Pause erscheint für 10 s ein Hinweis „Cache war kalt: 150k Tokens neu geschrieben – vor der nächsten Pause /keepwarm?“ – nicht, wenn `/keepwarm` schon läuft, nicht nach Modellwechsel oder Resume ohne bekannte Pause (da hätte Warmhalten nicht geholfen), nicht unter `claude -p`. Der Mod schaltet dabei **nichts** selbst ein.
+Nach einer kalten Neuschreibung nach einer Pause erscheint für 10 s ein Hinweis „Cache war kalt: 150k Tokens neu geschrieben – vor der nächsten Pause /keepwarm?“ – nur nach einer Pause in dieser Session: nicht, wenn `/keepwarm` schon läuft, nicht nach Modellwechsel oder Resume (da hätte Warmhalten in dieser Session nicht geholfen), nicht unter `claude -p`. Der Mod schaltet dabei **nichts** selbst ein.
 
 ## `/keepwarm`
 
-Sobald 17 % der TTL oder weniger übrig sind (bei 60m ≈ 10 min), schickt der Mod eine Mini-Anfrage über das Gespräch (`$.model.fork`, Antwort „warm“) – nicht, solange gerade eine Hauptanfrage läuft (die frischt den Cache ohnehin auf). Ein Treffer setzt die Lebensdauer des Caches zurück.
+Sobald 17 % der TTL oder weniger übrig sind (bei 60m ≈ 10 min), schickt der Mod eine Mini-Anfrage über das Gespräch (`$.model.fork`, Antwort „warm“) – nicht, solange gerade eine Hauptanfrage läuft (die frischt den Cache ohnehin auf). Am Ende jedes Turns, auch nach Abbruch mit Esc, setzt der Mod diesen Zähler zurück (`turn.complete`), damit Warmhalten nicht still hängen bleibt. Ein Treffer setzt die Lebensdauer des Caches zurück.
 
 - **Kosten:** jeder Ping liest den ganzen Kontext zum Cache-Lesepreis des Modells (<https://platform.claude.com/docs/en/about-claude/pricing>) und zählt aufs Abo-Kontingent. Wie Cache-Lesungen auf das 5-Stunden- und 7-Tage-Limit angerechnet werden, ist nicht dokumentiert – im Pane die Limits beobachten.
 - **Bremsen** – der Mod stoppt das Warmhalten mit einem Hinweis, wenn
@@ -87,7 +87,7 @@ Option setzen: `/config` → Zeile `cache-meter.cacheTtl`, oder in `~/.claude/se
 |---|---|
 | TTL | hergeleitet (Abschnitt oben); Quelle steht im Pane |
 | Verlängert ein `/keepwarm`-Ping den 1h-Cache um eine Stunde? | **Offiziell nicht dokumentiert, aber beobachtet.** Forks bekommen laut Doku selbst das 5m-TTL (*prompt-caching › Which TTL each request gets*); der gemischte Fall steht nirgends. `karanb192/cache-tax` hat es mit demselben Mechanismus in einem Lauf beobachtet (Fable 5.1, Abo, 2026-09-19): Ping in Minute 50 las 157k, Claude Codes Countdown sprang auf 58 min, die Nachricht in Minute 62 las 156.886 Tokens aus dem Cache. Eigene Gegenprobe: nach einem Ping 6–50 min warten, dann `/usage` |
-| Erreicht ein `/keepwarm`-Ping den eigenen `turn.step`-Hook? | nein: kein Hook läuft unter einem eigenen Aufruf (Typdeklaration, HookError `re-entry`). Der Ping erscheint deshalb nicht im Verlauf, nur in der Keepwarm-Bilanz |
+| Erreicht ein `/keepwarm`-Ping den `turn.step`-Hook? | **unbelegt.** `re-entry` (Typdeklaration) deckt nur Ereignisse unter dem *eigenen* Aufruf eines Hooks; der Ping kommt aus einem Timer. Falls ja, erscheint er als eine Zeile im Verlauf und in den Summen, der Countdown bleibt richtig. Nachmessen: nach dem ersten Ping `/tokens` ansehen. Bewusst kein Filter: er würde echte Anfragen verwerfen, die während eines Pings enden |
 | Resume | `seconds_since_last_response` zählt ab dem Ende der letzten Antwort – der Countdown nach `--resume` ist um deren Dauer zu optimistisch; sagt Claude Code `prompt_cache_likely_expired`, gilt der Cache als kalt |
 | Dollarbeträge | nur Claude Codes eigene Schätzung (Resume, Modellwechsel) und `/cost`-Summe; keine eigene Preistabelle (wäre bei jedem neuen Modell nachzupflegen) |
 | Countdown nach Pausen ohne Anfrage | rechnet mit der Uhr; ändert sich der Prefix anders (Modell, MCP-Server, Plugin) wird der Cache auch vor Ablauf ungültig (*prompt-caching › Actions that invalidate the cache*) – erkennbar an niedriger Trefferquote |
@@ -119,17 +119,17 @@ CLAUDE.md                    Regeln für Claude in diesem Repo (Quelle der Wahrh
 
 ```bash
 claude plugin validate .     # Manifest, Hooks, State-Vertrag. Erwartete Warnung: CLAUDE.md wird nicht als Mod-Kontext ausgeliefert (gewollt, gilt nur fürs Repo)
-claude plugin test .         # 22 Tests, Stubs nach docs › mods › test
+claude plugin test .         # 23 Tests, Stubs nach docs › mods › test
 tsc -p .                     # Typen liegen nach dem ersten Laden in .claude-plugin/types/ (gitignored)
 # Rauchtest ohne Oberfläche: jeder Hook muss "settled" melden
 D=$(mktemp -d); claude -p "Antworte nur: ok" --plugin-dir . --debug-file "$D/debug.log"; grep cache-meter "$D/debug.log"; rm -f "$D/debug.log" "$D/latest"; rmdir "$D"
 ```
 
-Tests decken ab: TTL-Reihenfolge, Hauptanfrage vs. Subagent, Countdown ab Anfragebeginn, Resume, `/clear`, Modellwechsel, Compact (Hook, precompute, Knopf), schmales Band, Komposition mit anderen Mods, `/keepwarm` (Treffer, Fehltreffer, Teil-Fehltreffer, ohne Antwort, kein Ping während einer Anfrage, 5m-TTL, ohne Bildschirm), kalte Neuschreibungen (Zählung, Hinweis, kein Hinweis bei laufendem Warmhalten, Grenzen: unter 10k, mehr gelesen als geschrieben, nach `/compact`, Subagent, Modellwechsel, Resume mit „wahrscheinlich abgelaufen“), Pane mit Limits auf Terminal und Desktop. Jeder Test für eine Schutzfunktion ist per eingebautem Fehler gegengeprüft (wird rot).
+Tests decken ab: TTL-Reihenfolge, Hauptanfrage vs. Subagent, Countdown ab Anfragebeginn, Resume, `/clear`, Modellwechsel, Compact (Hook, precompute, Knopf), schmales Band, Komposition mit anderen Mods, `/keepwarm` (Treffer, Fehltreffer, Teil-Fehltreffer, ohne Antwort, kein Ping während einer Anfrage, wieder Ping nach abgebrochenem Turn, 5m-TTL, ohne Bildschirm), kalte Neuschreibungen (Zählung, Hinweis, kein Hinweis bei laufendem Warmhalten, Grenzen: unter 10k, mehr gelesen als geschrieben, nach `/compact`, Subagent, Modellwechsel, Resume mit „wahrscheinlich abgelaufen“ samt Beschriftung), Pane mit Limits auf Terminal und Desktop. Jeder Test für eine Schutzfunktion ist per eingebautem Fehler gegengeprüft (wird rot).
 
 ## Herkunft
 
 - Idee und Optik nach Florians Screenshot-Vorlage (2026-10-12).
 - Wettersymbole und Sparkline nach Anthropics Beispiel-Mod `token-weather`.
 - Von `karanb192/cache-tax` übernommen: Resume-Felder, „Neuschreiben kostet“, `/keepwarm`, Stopp bei Schreibanteil ≥ 10 %, Zählung kalter Neuschreibungen. Bewusst nicht übernommen: Guard (verwirft auf 2.1.296 Agent-Meldungen, Issue #17), Auto-Warmhalten nach kaltem Senden, Preistabelle. cache-tax ist nicht installiert.
-- Zwei Reviews gegen die offizielle Doku am 2026-10-12: 19 Befunde (Commit `3217bf4`) und 15 Befunde nach den cache-tax-Ideen (Commit nach `5a1357a`); Einzelheiten in den Commit-Nachrichten.
+- Reviews gegen die offizielle Doku am 2026-10-12: 19 Befunde (behoben in `3217bf4`), 15 Befunde nach den cache-tax-Ideen (behoben in `3d525fa`), Bestätigungs-Review mit 3 weiteren (behoben im Commit danach); Einzelheiten in den Commit-Nachrichten.

@@ -12,6 +12,10 @@ export type CacheInfo = {
   contextTokens: number
   /** What re-caching would cost, when the engine estimated it (resume, model switch). */
   rewriteUsd: number | null
+  /** Why the cache is known cold although the clock cannot say (lastAt 0): a model switch or a resume. */
+  coldReason: 'model' | 'resume' | null
+  /** On a cold resume: how long the session had been idle, as Claude Code reported it. */
+  idleBeforeMs: number | null
 }
 
 export type Limit = { kind: string; percentUsed: number; resetsAt?: string }
@@ -37,8 +41,8 @@ export type Totals = { main: Usage4; sub: Usage4; mainSteps: number; subSteps: n
 
 export type KeepWarm = { until: number | null; pings: number; readTokens: number; lastPingAt: number | null }
 
-/** A main request that found the cache expired and wrote it anew. `idleMs` null when the last touch is unknown (model switch). */
-export type ColdWrite = { at: number; written: number; idleMs: number | null }
+/** A main request that found the cache expired and wrote it anew: after a pause, a model switch, or a resume. */
+export type ColdWrite = { at: number; written: number; cause: 'pause' | 'model' | 'resume'; idleMs: number | null }
 
 /** The TTL controls Claude Code documents (prompt-caching § Choose the TTL yourself), read at start. */
 export type TtlConfig = { force5m: boolean; envTtl: string | null; settingTtl: string | null; enable1h: boolean }
