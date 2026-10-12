@@ -91,7 +91,7 @@ function usageValue(tokens: number | undefined, window: number, threshold: numbe
 }
 
 /** Every stub a session-start-to-turn test needs; registered before the first call on $. */
-function world(on: On, opts: { env?: Record<string, string>; forkRead?: number; forkWrite?: number; forkAnswer?: boolean } = {}) {
+function world(on: On, opts: { env?: Record<string, string>; forkRead?: number; forkWrite?: number; forkAnswer?: boolean; turnText?: string } = {}) {
   const clock = mock.clock(on, { now: T0 })
   mock.env(on, opts.env ?? {})
   const toasts: string[] = []
@@ -148,7 +148,7 @@ function world(on: On, opts: { env?: Record<string, string>; forkRead?: number; 
   on('classic.PostModelSwitch', () => ({}))
   on('session.measure', ($, e) => ({ changed: e.changed }))
   on('session.compact', () => ({ messages: SUMMARY }))
-  on('turn.complete', () => ({ text: '' }))
+  on('turn.complete', () => ({ text: opts.turnText ?? '' }))
   on('model.fork', ($, e) => {
     forks.push(e.prompt)
     return opts.forkAnswer === false
@@ -945,7 +945,7 @@ test('turnLine: API value on a plan, no cost under half a cent', async () => {
 test('limit forecast: pace since the first reading, renewed after a reset', async () => {
   const t0 = T0
   const start = { at: t0, pct: 20, resetsAt: '2026-10-12T15:00:00Z' }
-  // 20 % → 40 % in one hour: 100 % three hours later, before the reset at 15:00? No: 13:00 + … = 14:00.
+  // 20 % → 40 % in one hour: the remaining 60 % take three more hours, so full at T0 + 4 h.
   expect(limitForecast(start, 40, t0 + HOUR, '2026-10-12T15:00:00Z')).toBe(t0 + 4 * HOUR)
   // After the reset the limit is free again before it would fill: no forecast.
   expect(limitForecast(start, 40, t0 + HOUR, '2026-10-12T12:00:00Z')).toBeNull()
@@ -1022,7 +1022,7 @@ test('warm miss: a warm cache re-written anyway is counted, a cold one is not', 
   await step($)
   let ui = await $.ui.mount({ surface: 'terminal', ...PANE })
   await ui.press({ key: 'tab-health' })
-  expect(await ui.find({ type: 'Text', text: /1× re-written while warm · 60.0k tokens/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /1× re-written while warm · 60.0k tokens · last \d\d:\d\d after 5m idle/ })).toBeDefined()
   await ui.unmount()
   // After the TTL the same re-write is an expiry, not a warm miss.
   await clock.advance(2 * HOUR)
@@ -1059,4 +1059,12 @@ test('MCP servers: a server with no call after a few prompts is marked unused', 
   await ui.press({ key: 'tab-context' })
   expect(await ui.find({ type: 'Text', text: / · 2 tools · 0 calls – unused so far$/ })).toBeDefined()
   await ui.unmount()
+})
+
+test('line under the answer: a line another mod put there is kept', async ($, on) => {
+  const { next } = world(on, { turnText: 'other mod: summary' })
+  await $.turn.start({ turnId: 't', text: 'hi' } as never)
+  await step($)
+  next.usd = 1.6
+  expect((await complete($)).text).toBe('other mod: summary\n◉ Cache Meter · $0.10 spent · 1 request · 93% from cache · 6.0k written to cache')
 })

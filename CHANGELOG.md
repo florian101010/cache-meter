@@ -7,11 +7,11 @@ All notable changes to Cache Meter, a Claude Code mod. The format follows [Keep 
 Saves money: each feature points at a cost before or while it happens.
 
 ### Added
-- **Line under each answer:** what the answer cost (API value on a plan, spend on an API key; subagents it started included), its requests, the share read from the cache and what was written to it. Option `turnLine` (`on`/`off`).
+- **Line under each answer:** what the answer cost (API value on a plan, spend on an API key; subagents it started included), its requests, the share read from the cache and what was written to it. A line another mod already put under the answer is kept. Option `turnLine` (`on`/`off`).
 - **Model switch note:** while the cache is warm, a note with Claude Code's own re-write estimate and the minutes the cache has left. It never blocks or approves a switch (`ask` would refuse switches from `/config` and the SDK).
 - **Limit forecast:** in the overview, when a plan limit is full at the pace since its first reading in this window, if before its reset. The pace starts again after a reset.
 - **MCP calls per server** in the Context tab; a server with no call after three prompts is marked *unused so far*.
-- **Warm miss** in the Health tab: how often a warm cache was re-written anyway – something early in the prompt changed (CLAUDE.md, MCP tools, settings).
+- **Warm miss** in the Health tab: how often a warm cache was re-written anyway, with the pause before the last one – after seconds something early in the prompt changed (CLAUDE.md, MCP tools, settings), after minutes the cache lives shorter than the TTL assumed.
 - **Compact hint** in the band: when the cache has expired and the context is half full or more, `cold: good time to [ Compact ]`.
 
 ## [0.5.4] – 2026-10-12

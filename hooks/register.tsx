@@ -101,7 +101,7 @@ const healthA = atom({ plugin: 'cache-meter', key: 'health' } as const, {
   lastServerTools: null,
   checks: { agreed: 0, differed: 0, last: null },
   toolCalls: {},
-  unexpected: { count: 0, written: 0, lastAt: null },
+  unexpected: { count: 0, written: 0, lastAt: null, lastIdleMs: null },
 })
 const ttlConfigA = atom({ plugin: 'cache-meter', key: 'ttlConfig' } as const, {
   force5m: false,
@@ -473,9 +473,12 @@ export const register: Register = (on, options) => {
         // because the prompt sections are not compared (a prompt.compose hook would run on every render).
         if (isUnexpectedWrite(wasCold, before !== null && before.lastAt > 0, u)) {
           await update($, healthA, h => {
-            const prev = h.unexpected ?? { count: 0, written: 0, lastAt: null }
+            const prev = h.unexpected ?? { count: 0, written: 0, lastAt: null, lastIdleMs: null }
+            // The pause before it tells the two causes apart: seconds point at the prompt, minutes
+            // at a cache that lives shorter than the TTL assumed (API key without promptCacheTtl).
+            const lastIdleMs = before === null ? null : Math.max(0, startedAt - before.lastAt)
 
-            return { ...h, unexpected: { count: prev.count + 1, written: prev.written + u.write, lastAt: startedAt } }
+            return { ...h, unexpected: { count: prev.count + 1, written: prev.written + u.write, lastAt: startedAt, lastIdleMs } }
           })
         }
         await update($, cacheA, () => ({
@@ -585,7 +588,11 @@ export const register: Register = (on, options) => {
       output: e.usage.output_tokens,
     }
 
-    return { ...result, text: turnLine(u, open.requests, usd, isPlan(await read($, measureA))) }
+    const line = turnLine(u, open.requests, usd, isPlan(await read($, measureA)))
+    // A mod earlier in the chain may already have put its own line there: keep it, add this one.
+    const theirs = result.text === e.answer || result.text === '' ? '' : `${result.text}\n`
+
+    return { ...result, text: `${theirs}${line}` }
   })
 
   // Calls to MCP tools by wire name, so the context tab can tell servers in use from idle ones.
@@ -600,7 +607,7 @@ export const register: Register = (on, options) => {
   // Before a model switch Claude Code asks for confirmation while the cache is warm (prompt-caching ›
   // Switching models). A note with its own estimate and the time the cache has left; never a decision:
   // "ask" counts as a refusal on /config and SDK switches (hooks › PreModelSwitch decision control),
-  // and a slow hook here blocks the switch, so only two state reads.
+  // and a slow hook should not delay it, so only state reads and the clock.
   on('classic.PreModelSwitch', async ($, e, next) => {
     if (isInteractive && e.prompt_cache_warm && e.from_model !== e.to_model && e.context_tokens >= COLD_MIN) {
       const status = cacheStatus(await read($, cacheA), await $.clock.now(), (await ttlNow($)).ms)
@@ -1322,7 +1329,7 @@ export const register: Register = (on, options) => {
     const subErrors = tally(health.subErrors, errorLabel)
     const serverNames = Object.entries(health.serverTools).sort((a, b) => b[1].ms - a[1].ms)
     const lastCheck = health.checks.last
-    const unexpected = health.unexpected ?? { count: 0, written: 0, lastAt: null }
+    const unexpected = health.unexpected ?? { count: 0, written: 0, lastAt: null, lastIdleMs: null }
     const healthView = (
       <Box flexDirection="column">
         <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="column">
@@ -1416,12 +1423,13 @@ export const register: Register = (on, options) => {
               <Text color="warning">
                 {unexpected.count}× re-written while warm · {short(unexpected.written)} tokens
                 {unexpected.lastAt === null ? '' : ` · last ${hhmm(unexpected.lastAt)}`}
+                {unexpected.lastIdleMs == null ? '' : ` after ${duration(unexpected.lastIdleMs)} idle`}
               </Text>
             )}
           </Text>
           {unexpected.count > 0 && (
             <Text dimColor wrap="truncate-end">
-              {''.padEnd(10)}something early in the prompt changed: CLAUDE.md, MCP tools or settings
+              {''.padEnd(10)}after seconds: something early in the prompt changed (CLAUDE.md, MCP tools, settings); after minutes: the cache lives shorter than assumed (option cacheTtl)
             </Text>
           )}
         </Box>
