@@ -2,6 +2,16 @@
 
 All notable changes to Cache Meter, a Claude Code mod. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] – 2026-10-12
+
+Alive: the band moves when it matters, and a budget keeps a session in check.
+
+### Added
+- **Last stretch:** in the last 17 % of the TTL the band redraws every second – the dot pulses, the last minute counts in seconds. The one-second timer runs only then.
+- **Keepwarm heartbeat:** after each ping the band shows `· ping ok · <tokens> read` and a bold `↻` for five seconds.
+- **Request details on hover** (fullscreen renderer): point at a column of the request chart for its time, tokens, hit rate, writes and output.
+- **Session budget** (option `sessionBudget`, dollars, off by default): the band shows `of $X`, yellow from 80 %, red from 100 %, with a toast at each; the Health tab shows the share.
+
 ## [0.8.0] – 2026-10-12
 
 Context under control: what fills the conversation, when it compacts, and a report to share.
@@ -165,7 +175,8 @@ Changes for Anthropic's plugin directory, whose validation blocked 0.5.1.
 - Pane `/tokens`: per-request token history, totals, plan limits, cost.
 - `/keepwarm`.
 
-[0.8.0]: https://github.com/florian101010/cache-meter/compare/feat/v0.7-why-and-when...HEAD
+[0.9.0]: https://github.com/florian101010/cache-meter/compare/feat/v0.8-context...HEAD
+[0.8.0]: https://github.com/florian101010/cache-meter/compare/feat/v0.7-why-and-when...feat/v0.8-context
 [0.7.0]: https://github.com/florian101010/cache-meter/compare/feat/v0.6-saves-money...feat/v0.7-why-and-when
 [0.6.0]: https://github.com/florian101010/cache-meter/compare/92aef39...feat/v0.6-saves-money
 [0.5.4]: https://github.com/florian101010/cache-meter/compare/9175da5...92aef39

@@ -18,7 +18,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { AgentUse, ToolResults, CacheInfo, ColdWrite, Health, KeepWarm, Measure, ServerToolCall, Totals, TtlConfig, Usage4 } from '../types'
+import type { AgentUse, ToolResults, Step, CacheInfo, ColdWrite, Health, KeepWarm, Measure, ServerToolCall, Totals, TtlConfig, Usage4 } from '../types'
 import {
   COLD_MIN,
   FIVE_MIN,
@@ -141,6 +141,14 @@ let lastMain: { model: string; effort?: string | number } | null = null
 // Option expiryNotice, and the cache window it already notified for (cache.lastAt), so it fires once.
 let expiryNotice = false
 let notifiedFor: number | null = null
+// The last stretch before expiry redraws every second (seconds in the last minute, the pulsing dot);
+// the timer runs only then. A keepwarm ping flashes the band for a few seconds (heartbeat).
+let fastTimer: { cancel: () => void } | null = null
+let heartbeat: { until: number; read: number } | null = null
+const HEARTBEAT_MS = 5_000
+// Option sessionBudget ($, 0 = off) and the highest warning already shown (80 or 100 %).
+let budget = 0
+let budgetWarned = 0
 let openTurns: Record<string, { usd: number | null; requests: number }> = {}
 // Where the surface last seated the pane: beside a fullscreen transcript (dock) or above the prompt (inline).
 let seat: 'dock' | 'inline' | null = null
@@ -267,6 +275,7 @@ async function tick($: EngineInterface) {
   $.ui.invalidate('ui.render')
   await maybeAutoOpen($)
   await maybeNotify($)
+  await paceRedraws($)
   const keep = await read($, keepA)
   // No ping while a main request runs: that request touches the cache anyway.
   if (keep.until === null || isPinging || mainRequests > 0) return
@@ -318,6 +327,8 @@ async function tick($: EngineInterface) {
       return
     }
     await update($, cacheA, c => (c === null ? c : { ...c, lastAt: startedAt }))
+    heartbeat = { until: (await $.clock.now()) + HEARTBEAT_MS, read: got }
+    await paceRedraws($)
   } finally {
     isPinging = false
   }
@@ -464,6 +475,48 @@ async function copyReport($: EngineInterface): Promise<string> {
     : `Could not copy the session report (${copied.reason ?? 'unknown'}).`
 }
 
+// Every second while the cache is in its last stretch (17 % of the TTL) or a heartbeat shows; off
+// otherwise, so an idle session redraws only on the 15-second tick (reference › Limits: redraws are
+// throttled to 30 a second in the terminal, so one a second is far below it).
+// Option sessionBudget: a toast when the session's cost (Claude Code's figure, as in the band) passes
+// 80 % and 100 % of it, each once per session.
+async function checkBudget($: EngineInterface) {
+  if (budget <= 0) return
+  const measure = await read($, measureA)
+  const usd = measure?.usd ?? null
+  if (usd === null) return
+  const level = usd >= budget ? 100 : usd >= budget * 0.8 ? 80 : 0
+  if (level <= budgetWarned) return
+  budgetWarned = level
+  const what = isPlan(measure) ? 'API value' : 'spent'
+  $.ui.toast(
+    level === 100
+      ? `Session budget reached: $${usd.toFixed(2)} ${what} of $${budget.toFixed(2)}`
+      : `Session at ${Math.round((usd / budget) * 100)}% of its budget: $${usd.toFixed(2)} ${what} of $${budget.toFixed(2)}`,
+    { timeoutMs: 10_000 },
+  )
+}
+
+async function paceRedraws($: EngineInterface) {
+  if (!isInteractive) return
+  const now = await $.clock.now()
+  const ttl = await ttlNow($)
+  const status = cacheStatus(await read($, cacheA), now, ttl.ms)
+  const isLast = status.kind === 'warm' && status.remaining <= ttl.ms * PING_SHARE
+  const isBeating = heartbeat !== null && heartbeat.until > now
+  if ((isLast || isBeating) && fastTimer === null) {
+    fastTimer = $.clock.every(1_000, () => fastTick($))
+  } else if (!isLast && !isBeating && fastTimer !== null) {
+    fastTimer.cancel()
+    fastTimer = null
+  }
+}
+
+async function fastTick($: EngineInterface) {
+  $.ui.invalidate('ui.render')
+  await paceRedraws($)
+}
+
 async function resetCache($: EngineInterface) {
   await update($, cacheA, () => null)
   await update($, measureA, m => (m === null ? m : { ...m, percent: null, tokens: null }))
@@ -537,6 +590,10 @@ export const register: Register = (on, options) => {
   expiryNotice = options.expiryNotice === 'on'
   lastMain = null
   notifiedFor = null
+  fastTimer = null
+  heartbeat = null
+  budget = typeof options.sessionBudget === 'number' && options.sessionBudget > 0 ? options.sessionBudget : 0
+  budgetWarned = 0
   openTurns = {}
 
   on('session.start', async ($, e, next) => {
@@ -854,6 +911,7 @@ export const register: Register = (on, options) => {
 
       return measured
     })
+    await checkBudget($)
 
     return result
   })
@@ -1000,7 +1058,18 @@ export const register: Register = (on, options) => {
     // Claude Code's own cost figure, the one /cost shows: on a subscription a comparison value (what an
     // API key would pay), on an API key or a cloud provider real spend. Hidden at $0.00.
     const usd = measure?.usd ?? null
-    const costText = usd === null || usd < 0.005 ? '' : isPlan(measure) ? ` · API value $${usd.toFixed(2)}` : ` · spent $${usd.toFixed(2)}`
+    const costWord = isPlan(measure) ? 'API value' : 'spent'
+    const costText =
+      usd === null || (usd < 0.005 && budget <= 0)
+        ? ''
+        : budget > 0
+          ? ` · ${costWord} $${usd.toFixed(2)} of $${budget.toFixed(2)}`
+          : ` · ${costWord} $${usd.toFixed(2)}`
+    const costColor = budget > 0 && usd !== null ? (usd >= budget ? 'error' : usd >= budget * 0.8 ? 'warning' : undefined) : undefined
+    // The last stretch pulses (the dot, once a second); a keepwarm ping flashes for a few seconds.
+    const isBeating = heartbeat !== null && heartbeat.until > now
+    const beatText = isBeating && heartbeat !== null ? ` · ping ok · ${short(heartbeat.read)} read` : ''
+    const isDim = isLow && Math.floor(now / 1_000) % 2 === 1
     // The cache is cold anyway: compacting now loses no warm cache (it still reads the context once).
     const compactText = status.kind === 'expired' && showButton && percent !== null && percent >= COMPACT_HINT_PCT ? ' · cold: good time to' : ''
     const minBar = 6
@@ -1009,6 +1078,8 @@ export const register: Register = (on, options) => {
     // Dropped first when the row gets narrow: after it the auto-compact point, then the bar.
     const showCost =
       costText !== '' && base + costText.length + (showAuto ? autoText.length : 0) + (showRewrite ? rewriteText.length : 0) + minBar < cols
+    const showBeat =
+      beatText !== '' && base + beatText.length + (showAuto ? autoText.length : 0) + (showCost ? costText.length : 0) + minBar < cols
     const showCompact =
       compactText !== '' &&
       base + compactText.length + (showAuto ? autoText.length : 0) + (showRewrite ? rewriteText.length : 0) + (showCost ? costText.length : 0) + minBar < cols
@@ -1019,18 +1090,25 @@ export const register: Register = (on, options) => {
       (showRewrite ? rewriteText.length : 0) -
       (showCost ? costText.length : 0) -
       (showCompact ? compactText.length : 0) -
+      (showBeat ? beatText.length : 0) -
       1
     const cells = free >= minBar ? Math.min(20, free) : 0
     const lit = status.kind === 'warm' ? litCells(status.remaining, ttl.ms, cells) : 0
 
     const mine = (
       <Box flexDirection="row">
-        <Text color={status.kind === 'warm' ? 'success' : 'error'}>● </Text>
+        <Text color={status.kind === 'warm' ? (isLow ? 'warning' : 'success') : 'error'} dimColor={isDim}>
+          ●{' '}
+        </Text>
         <Text dimColor>cache </Text>
         <Text color={status.kind === 'warm' ? (isLow ? 'warning' : 'success') : 'error'} bold={status.kind === 'warm'}>
           {label}
         </Text>
-        {isKeeping && <Text color="success"> ↻</Text>}
+        {isKeeping && (
+          <Text color="success" bold={isBeating}>
+            {' '}↻
+          </Text>
+        )}
         <Text> </Text>
         {cells > 0 && <Text color={isLow ? 'warning' : 'success'}>{'■'.repeat(lit)}</Text>}
         {cells > 0 && <Text color="inactive">{'■'.repeat(cells - lit)}</Text>}
@@ -1043,7 +1121,12 @@ export const register: Register = (on, options) => {
         <Text dimColor>context </Text>
         <Text bold>{pct}</Text>
         {showAuto && <Text dimColor>{autoText}</Text>}
-        {showCost && <Text dimColor>{costText}</Text>}
+        {showCost && (
+          <Text dimColor={costColor === undefined} color={costColor}>
+            {costText}
+          </Text>
+        )}
+        {showBeat && <Text color="success">{beatText}</Text>}
         {showRewrite && (
           <Text color={status.kind === 'expired' ? 'warning' : 'claude'} wrap="truncate-end">
             {rewriteText}
@@ -1398,12 +1481,30 @@ export const register: Register = (on, options) => {
         </Box>
         {steps.length === 0 && <Text dimColor>No request measured yet.</Text>}
         {steps.length > 0 && Raster && (
-          <Raster key="requests" columns={fullIn} rows={chartRows} cells={rasterCells(columnCells(columns, fullIn, chartRows))} />
-        )}
-        {steps.length > 0 && Raster && (
-          <Box flexDirection="row" justifyContent="space-between">
-            <Text dimColor>{hhmm(shown[0]!.at)}</Text>
-            <Text dimColor>{hhmm(shown.at(-1)!.at)}</Text>
+          <Box flexDirection="column">
+            <Raster key="requests" columns={fullIn} rows={chartRows} cells={rasterCells(columnCells(columns, fullIn, chartRows))} />
+            <Box flexDirection="row" justifyContent="space-between">
+              <Text dimColor>{hhmm(shown[0]!.at)}</Text>
+              <Text dimColor>{hhmm(shown.at(-1)!.at)}</Text>
+            </Box>
+            {/* Hover a column (fullscreen renderer, which captures the mouse): its details cover the
+                time row. Surface-side only – no hook runs (types: BoxProps.hover, BoxHoverProps.scope). */}
+            {shown.map((s, i) => (
+              <Box
+                key={`req-${i}`}
+                position="absolute"
+                top={0}
+                left={(slots - shown.length + i) * 2}
+                width={2}
+                height={chartRows}
+                hover={{ scope: `cache-meter-req-${i}` }}
+              />
+            ))}
+            {shown.map((s, i) => (
+              <Box position="absolute" top={chartRows} left={0} width={fullIn} display="none" hover={{ scope: `cache-meter-req-${i}`, display: 'flex' }}>
+                <Text wrap="truncate-end">{columnDetail(s, fullIn)}</Text>
+              </Box>
+            ))}
           </Box>
         )}
         {steps.length > 0 &&
@@ -1593,6 +1694,16 @@ export const register: Register = (on, options) => {
               {usd !== null && hours >= 0.05 ? ` · $${(usd / hours).toFixed(2)}/h` : ''}
               {usd !== null && prompts ? ` · $${(usd / prompts).toFixed(2)}/prompt` : ''}
             </Text>
+          </Text>
+          <Text wrap="truncate-end">
+            {label('Budget')}
+            {budget <= 0 ? (
+              <Text dimColor>off – option sessionBudget warns at 80 % and 100 %</Text>
+            ) : (
+              <Text color={usd !== null && usd >= budget ? 'error' : usd !== null && usd >= budget * 0.8 ? 'warning' : 'success'}>
+                {usd === null ? '–' : `${Math.round((usd / budget) * 100)}%`} of ${budget.toFixed(2)}
+              </Text>
+            )}
           </Text>
           <Text wrap="truncate-end">
             {label('Tokens')}
@@ -1857,4 +1968,13 @@ function mcpNote(tools: number, toolNames: readonly string[] | undefined, calls:
   const idle = n === 0 && prompts !== null && prompts >= 3 ? ' – unused so far' : ''
 
   return ` · ${tools} tools · ${n} call${n === 1 ? '' : 's'}${idle}`
+}
+
+/** One request column's details for its hover row, padded so it covers the time row beneath the chart. */
+function columnDetail(s: Step, width: number): string {
+  const hit = hitPct(s)
+  const what = s.kind === 'first' ? ' · first write' : s.kind === 'cold' ? ' · cold re-write' : ''
+  const text = `${hhmm(s.at)} · ${short(s.input + s.read + s.write)} in · ${hit === null ? '–' : `${hit}%`} hit · ${short(s.write)} written · out ${short(s.output)}${what}`
+
+  return text.padEnd(width)
 }

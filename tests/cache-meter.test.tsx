@@ -560,7 +560,8 @@ test('/keepwarm stops when a ping gets no answer', async ($, on) => {
   expect(forks).toHaveLength(1)
 })
 
-test('/keepwarm does not ping while a main request runs', async ($, on) => {
+// Long simulated stretches with the one-second redraw timer running: more than the default 5 s.
+test('/keepwarm does not ping while a main request runs', { timeoutMs: 20_000 }, async ($, on) => {
   const { clock, forks, next } = world(on)
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   await step($)
@@ -577,7 +578,8 @@ test('/keepwarm does not ping while a main request runs', async ($, on) => {
   expect(forks).toHaveLength(0)
 })
 
-test('/keepwarm pings again after an aborted turn', async ($, on) => {
+// Long simulated stretches with the one-second redraw timer running: more than the default 5 s.
+test('/keepwarm pings again after an aborted turn', { timeoutMs: 20_000 }, async ($, on) => {
   const { clock, forks, next } = world(on)
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   await step($)
@@ -1323,4 +1325,90 @@ test('/tokens report: Markdown on the clipboard, the pane untouched, nothing in 
   }
   next.copy = { isCopied: false, reason: 'no-clipboard' }
   expect((await run($, 'tokens', 'report')).text).toBe('Could not copy the session report (no-clipboard).')
+})
+
+test('last stretch: the dot pulses once a second; a redraw timer runs only then', async ($, on) => {
+  const { clock } = world(on)
+  let redraws = 0
+  on('ui.invalidate', () => {
+    redraws += 1
+    return { value: undefined }
+  })
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  // Warm and far from expiry: only the 15-second tick redraws.
+  redraws = 0
+  await clock.advance(60_000)
+  expect(redraws).toBeLessThan(6)
+  await clock.advance(51 * 60_000)
+  redraws = 0
+  await clock.advance(10_000)
+  expect(redraws).toBeGreaterThan(9)
+  const dots: unknown[] = []
+  for (let i = 0; i < 2; i++) {
+    const ui = await $.ui.mount({ surface: 'terminal', ...band(130) })
+    dots.push((await ui.find({ type: 'Text', text: '● ' }))?.props.dimColor)
+    await ui.unmount()
+    await clock.advance(1_000)
+  }
+  expect(dots[0]).not.toBe(dots[1])
+  // Expired: the fast timer stops again.
+  await clock.advance(20 * 60_000)
+  redraws = 0
+  await clock.advance(60_000)
+  expect(redraws).toBeLessThan(6)
+})
+
+test('keepwarm heartbeat: the band flashes "ping ok" for a few seconds after a ping', async ($, on) => {
+  const { clock } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  await run($, 'keepwarm', '2h')
+  await clock.advance(50 * 60_000)
+  await clock.settle()
+  let ui = await $.ui.mount({ surface: 'terminal', ...band(160) })
+  expect(await ui.find({ type: 'Text', text: ' · ping ok · 99.0k read' })).toBeDefined()
+  await ui.unmount()
+  await clock.advance(6_000)
+  ui = await $.ui.mount({ surface: 'terminal', ...band(160) })
+  expect(await ui.find({ type: 'Text', text: / · ping ok/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('request chart: a hover area per column reveals its details over the time row', async ($, on) => {
+  world(on)
+  await step($)
+  await step($)
+  const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  // The kit's find does not report hover props (surface-side); the areas and hidden rows are checked.
+  const area = await ui.find({ key: 'req-1' })
+  expect(area?.props).toMatchObject({ position: 'absolute', width: 2, height: 4 })
+  expect(await ui.find({ type: 'Text', text: /^\d\d:\d\d · 100\.0k in · 93% hit · 6\.0k written · out 500 *$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /· first write *$/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('session budget: off by default', async ($, on) => {
+  const { toasts } = world(on)
+  await $.session.measure({ context: { tokens: 100_000, window: 1_000_000, percent: 10 }, rateLimits: [], cost: { usd: 50 }, changed: ['cost'] })
+  expect(toasts.filter(t => /budget/.test(t))).toEqual([])
+  expect(await healthText($, /off – option sessionBudget/)).toBeDefined()
+})
+
+test('session budget: band shows "of $X", a toast at 80 % and at 100 %, each once', { options: { sessionBudget: 2 } }, async ($, on) => {
+  const { toasts } = world(on)
+  const at = (usd: number) => $.session.measure({ context: { tokens: 100_000, window: 1_000_000, percent: 10 }, rateLimits: [], cost: { usd }, changed: ['cost'] })
+  await at(1)
+  expect(toasts.filter(t => /budget/.test(t))).toEqual([])
+  await at(1.7)
+  expect(toasts.filter(t => /budget/.test(t))).toEqual(['Session at 85% of its budget: $1.70 spent of $2.00'])
+  const ui = await $.ui.mount({ surface: 'terminal', ...band(160) })
+  expect(await ui.find({ type: 'Text', text: ' · spent $1.70 of $2.00' })).toBeDefined()
+  await ui.unmount()
+  await at(1.9)
+  await at(2.1)
+  await at(2.4)
+  expect(toasts.filter(t => /budget/.test(t)).length).toBe(2)
+  expect(toasts.at(-1)).toBe('Session budget reached: $2.10 spent of $2.00')
+  expect(await healthText($, /^120% of \$2\.00$/)).toBeDefined()
 })

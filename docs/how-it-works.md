@@ -185,3 +185,15 @@ From `measure.history` (the context size after each turn, last 12): the run sinc
 ## `/tokens report`
 
 Handled before the tab names, so it never opens, closes or switches the pane. It gathers what the pane shows into Markdown (`reportMarkdown` in `hooks/lib.ts`) and passes it to `$.ui.copy`. The command's own output is only a confirmation: `CommandRunResult.text` is a transcript line, and whether the model reads it is not documented. `isCopied: true` is not proof – an OSC 52 write does not report back (types: `UiCopyResult`) – so the confirmation asks to paste and check.
+
+## Last stretch, heartbeat, hover
+
+**Redraws.** The 15-second tick redraws the band and pane. While the cache is in its last stretch (17 % of the TTL) or a keepwarm heartbeat shows, a second timer (`$.clock.every(1000)`) redraws once a second and cancels itself when neither holds – far below the terminal's limit of 30 redraws a second (*reference › Limits*). In that stretch the band's dot alternates between normal and dim each second; under a minute the label counts seconds.
+
+**Heartbeat.** After a ping that read the cache, the band shows `· ping ok · <tokens> read` and a bold `↻` for five seconds.
+
+**Hover.** Over the request chart lies one invisible, absolutely placed `Box` per column (two cells wide, `key` `req-<i>`, `hover: { scope }`); a hidden row per column (`display: "none"`, `hover: { scope, display: "flex" }`) lies over the time row and is revealed while the pointer is on its column. The surface does this itself – no hook runs (types: `BoxProps.hover`, `BoxHoverProps.scope`). The terminal reports the pointer only in the fullscreen renderer.
+
+## Session budget
+
+Option `sessionBudget` (dollars, `0` = off) against `cost.usd` – the figure `/cost` and the band show: real spend on an API key, API value on a subscription. The band's cost segment reads `of $<budget>` and turns yellow at 80 % and red at 100 %; `session.measure` raises a toast when a level is first passed (once per level and session).

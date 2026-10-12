@@ -12,7 +12,7 @@ Only what Claude Code reports to mods within your session:
 - **Per subagent:** its type and task description, as Claude Code lists it, and its token counts.
 - **At a model switch:** Claude Code's own estimate of what re-writing the context costs, and whether it thinks the cache is warm.
 - **Per session:** context fill and its breakdown – including the paths of your memory files (CLAUDE.md, rules) and the names of MCP servers, skills and agents with their token counts – cost as `/cost` shows it, plan-limit percentages and reset times, the number of prompts, the session's start time, the kinds of API errors a turn ended on, and Claude Code's own verdict on whether the prompt cache is warm.
-- **Settings:** the prompt-cache TTL controls (`FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL`, `ENABLE_PROMPT_CACHING_1H`, `promptCacheTtl`) and its own four options.
+- **Settings:** the prompt-cache TTL controls (`FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL`, `ENABLE_PROMPT_CACHING_1H`, `promptCacheTtl`) and its own five options.
 - **Your prompts:** when you send one it notes only that you did (to close its pane above the prompt), not the text.
 
 It never reads the text of your prompts or Claude's answers, and no files. Of tool calls it reads only what the list above names: the result's text is measured for its length and dropped. The line it shows under an answer is its own; the answer is not changed.
