@@ -29,7 +29,7 @@ A live countdown above the prompt: minutes until the cache expires, the hit rate
 
 ### ☕ Keep it
 
-Type **`/keepwarm`** before lunch or a meeting. Shortly before expiry one ping – your conversation sent once more and billed as a cache read – keeps the cache alive – about **1/20 of a re-write**, with hard limits so it never runs away. Every ping flashes a heartbeat in the band, so you see it working. **Never think about it again:** `/keepwarm auto` once, and every break of the session stays warm by itself. Forgot? An optional **notification** from your terminal reminds you ten minutes before the cache expires.
+Type **`/keepwarm`** before lunch or a meeting. Shortly before expiry one ping – your conversation sent once more and billed as a cache read – keeps the cache alive – about **1/20 of a re-write or less** (1/40 on Opus 5.5), with hard limits so it never runs away. Every ping flashes a heartbeat in the band, so you see it working. **Never think about it again:** `/keepwarm auto` once, and every break of the session stays warm by itself. Forgot? An optional **notification** from your terminal reminds you ten minutes before the cache expires.
 
 </td>
 <td width="33%" valign="top">
@@ -48,13 +48,13 @@ Type **`/keepwarm`** before lunch or a meeting. Shortly before expiry one ping �
 
 | | The problem | What Cache Meter does | How |
 |:-:|---|---|---|
-| ☕ | **“Back from lunch, the first answer takes ages – and re-writes everything.”** | Keeps the cache warm through the break – one ping costs **≈ 1/20** of a re-write | [`/keepwarm`](#keep-the-cache-warm-with-keepwarm) |
+| ☕ | **“Back from lunch, the first answer takes ages – and re-writes everything.”** | Keeps the cache warm through the break – one ping costs **1/20 of a re-write or less** | [`/keepwarm`](#keep-the-cache-warm-with-keepwarm) |
 | 🔁 | **“I always forget to type it before a break.”** | Covers **every** break of the session by itself – only while you are away | [`/keepwarm auto`](#every-break-by-itself-keepwarm-auto) · opt-in |
 | ⏱️ | **“When does my cache run out?”** | A live **countdown**, the hit rate and the context fill, always in view | [band above the prompt](#what-you-see) |
 | 💸 | **“What did that answer just cost?”** | The cost **under every answer**, the session total, a warning at your budget | [automatic](#every-answer-priced) · `sessionBudget` |
 | ⚠️ | **“A model switch silently re-wrote everything.”** | A heads-up **before** a switch splits a warm cache – with Claude Code's own re-write estimate at a model switch | [automatic](#warned-before-the-cache-breaks) |
-| 🔍 | **“The cache was cold – but why?”** | Names the likely **cause** of every warm miss | [`/tokens health`](#see-everything-with-tokens) |
-| 🧱 | **“My context fills up so fast.”** | Shows **what** fills it – tool results, files, MCP servers (also unused ones), subagents | [`/tokens context`](#see-everything-with-tokens) |
+| 🔍 | **“The cache was cold – but why?”** | Names the likely **cause** of a warm miss | [`/tokens health`](#see-everything-with-tokens) |
+| 🧱 | **“My context fills up so fast.”** | Shows **what** fills it – tool results, files, MCP servers (also unused ones), skills and agents | [`/tokens context`](#see-everything-with-tokens) |
 | 📄 | **“One file read flooded the context.”** | Says so the moment a single result is **≥ 10k tokens** (and ≥ 2 % of the window) | [automatic](#a-word-when-it-matters) |
 | 📈 | **“Will I hit my plan limit before it resets?”** | Forecasts it and warns **once** when a limit is half used and on course to fill | [automatic](#a-word-when-it-matters) · `limitNotice` |
 | 🗜️ | **“Auto-compact always comes as a surprise.”** | Shows **where** it triggers and about how many prompts are left | band · [`/tokens`](#see-everything-with-tokens) |
@@ -92,7 +92,7 @@ Install the Claude Code mod from https://github.com/florian101010/cache-meter �
 
 | Command | Does |
 |---|---|
-| `/tokens` · `/tokens context` · `/tokens health` | the dashboard, or one tab of it (again: close) |
+| `/tokens` · `/tokens context` · `/tokens health` | the dashboard, or one tab of it; `/tokens` again closes it, a tab name switches an open pane |
 | `/tui fullscreen` | the dashboard as a sidebar beside the chat (from 110 columns) |
 | `/keepwarm` · `/keepwarm 10m`…`8h` · `/keepwarm off` | keep the cache warm through a break, with hard limits |
 | `/keepwarm auto` (or `/keepwarm-auto`) | keep it warm through every break this session, by itself – it pings on its own once on |
@@ -261,7 +261,7 @@ Small touches go with it, each a fraction of a second: the big countdown flashes
 
 <p align="center"><img src="https://raw.githubusercontent.com/florian101010/cache-meter/assets/brand/feature-report.svg" width="100%" alt="Copy it – /tokens report: your session stats as a Markdown report fill line by line and land on your own clipboard with a check mark – never your conversation."></p>
 
-`/tokens report` puts your session stats on your clipboard as Markdown – figures and labels, never a word of your prompts or Claude's answers: cost, hit rate, cold re-writes and warm misses with their cause, context fill and the auto-compact forecast, the heaviest files, servers and tool results, subagents and plan limits. Paste it into an issue, a pull request or your notes. Paths are shortened to `~` and Bash commands appear only by program name; review it before you post it publicly.
+`/tokens report` puts your session stats on your clipboard as Markdown – figures and labels, never a word of your prompts or Claude's answers: cost, hit rate, cold re-writes and warm misses with their cause, context fill and the auto-compact forecast, the heaviest files, servers and tool results, subagents and plan limits. Paste it into an issue, a pull request or your notes. Paths are shortened to `~` and Bash commands appear only by program name; each subagent's task description – a line Claude wrote when it started the subagent – is included as it is. Review it before you post it publicly.
 
 It stays with you: the report goes only to your own clipboard – the one of the device your terminal runs on. The Health tab's Session card reminds you: *copy as Markdown: /tokens report*.
 
@@ -463,7 +463,7 @@ A cache read keeps the entry for the duration of its original write – one hour
 <details>
 <summary><b>How do I get the session's stats as text – to keep, compare or paste into an issue?</b></summary>
 
-`/tokens report` puts your session stats on your clipboard as Markdown (never your conversation): cost, hit rate, cold re-writes and warm misses with their cause, context fill and the auto-compact forecast, the heaviest files, servers and tool results, subagents and plan limits. Paths are shortened to `~` and Bash commands appear only by program name; still, review it before you post it publicly.
+`/tokens report` puts your session stats on your clipboard as Markdown (never your conversation): cost, hit rate, cold re-writes and warm misses with their cause, context fill and the auto-compact forecast, the heaviest files, servers and tool results, subagents and plan limits. Paths are shortened to `~`, Bash commands appear only by program name, and each subagent's task description (written by Claude) is included as it is; still, review it before you post it publicly.
 </details>
 
 <details>

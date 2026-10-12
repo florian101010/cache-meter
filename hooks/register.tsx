@@ -1819,7 +1819,7 @@ export const register: Register = (on, options) => {
             : isKeeping
             ? `${keep.pings}/${MAX_PINGS} pings · ${short(keep.readTokens)} read · next ~${remainingLabel(pingIn)}`
             : canKeep
-              ? 'Break ahead? A ping ≈ 1/20 of a re-write.'
+              ? 'Break ahead? A ping ≤ 1/20 of a re-write.'
               : !isInteractive
                 ? 'Interactive sessions only.'
                 : ttl.ms < HOUR
