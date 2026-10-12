@@ -1860,9 +1860,17 @@ export const register: Register = (on, options) => {
     const healthView = (
       <Box flexDirection="column">
         <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="column">
-          <Text color="claude" bold>
-            Session
-          </Text>
+          {/* The one place in the pane that tells you the session can be shared. */}
+          <Box flexDirection="row" justifyContent="space-between">
+            <Box flexShrink={0} marginRight={1}>
+              <Text color="claude" bold>
+                Session
+              </Text>
+            </Box>
+            <Text dimColor wrap="truncate-end">
+              {tier === 'narrow' ? '/tokens report' : 'share it: /tokens report (Markdown to the clipboard)'}
+            </Text>
+          </Box>
           <Text wrap="truncate-end">
             {label('Age')}
             <Text bold>{age === null ? '–' : duration(age)}</Text>

@@ -2055,3 +2055,9 @@ test('pane footer: names the two other tabs, not the one on screen', async ($, o
   expect(await footer('context')).toBe('/tokens overview | health')
   expect(await footer('health')).toBe('/tokens overview | context')
 })
+
+test('Health tab: the session card says how to share the session', async ($, on) => {
+  world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  expect(await healthText($, /^share it: \/tokens report \(Markdown to the clipboard\)$/)).toBeDefined()
+})

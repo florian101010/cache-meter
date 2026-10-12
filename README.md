@@ -194,6 +194,8 @@ The big countdown flashes once at each new minute. Both run only while the Overv
 
 `/tokens report` puts the whole session on your clipboard as Markdown – cost, hit rate, cold re-writes and warm misses with their cause, context fill and the auto-compact forecast, the heaviest files, servers and tool results, subagents and plan limits. Paste it into an issue, a pull request or your notes. Paths are shortened to `~` and Bash commands appear only by program name; review it before you post it publicly.
 
+The dashboard reminds you where it matters: the Health tab's Session card reads *share it: /tokens report*.
+
 ## Contents
 
 - [Every answer, priced](#every-answer-priced)
