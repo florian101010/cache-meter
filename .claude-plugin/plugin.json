@@ -1,8 +1,8 @@
 {
   "name": "cache-meter",
   "displayName": "Cache Meter",
-  "version": "0.5.0",
-  "description": "Claude Code mod: keep your prompt cache warm through a break with /keepwarm, and see when it expires, its hit rate, context fill and every request's tokens above the prompt.",
+  "version": "0.5.1",
+  "description": "Claude Code mod: /keepwarm keeps your prompt cache alive through a break; a countdown, hit rate, context fill and API value above the prompt; and a /tokens dashboard with what caching saved, what fills your context, API errors and cost per hour.",
   "author": {
     "name": "Florian Grimmer",
     "url": "https://github.com/florian101010"
@@ -25,7 +25,7 @@
   ],
   "documentationUrl": "https://github.com/florian101010/cache-meter#readme",
   "supportUrl": "https://github.com/florian101010/cache-meter/issues",
-  "privacyPolicyUrl": "https://github.com/florian101010/cache-meter/blob/main/SECURITY.md",
+  "privacyPolicyUrl": "https://github.com/florian101010/cache-meter/blob/main/PRIVACY.md",
   "types": "./types/index.d.ts",
   "userConfig": {
     "cacheTtl": {

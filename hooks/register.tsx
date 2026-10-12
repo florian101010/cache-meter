@@ -1379,11 +1379,14 @@ export const register: Register = (on, options) => {
           <Text dimColor wrap="truncate-end">
             {tier === 'narrow'
               ? `${canClick ? 'click a tab · ' : ''}/tokens health`
-              : `${canClick ? 'click a tab or ' : ''}/tokens context | health · keys: ctrl+x tab, then 1–3 · ${isKeeping ? 's stop · ' : canKeep ? 'w keep warm · ' : ''}c compact`}
+              : `${canClick ? 'click a tab or ' : ''}/tokens context | health · keys: ctrl+x tab, then 1–3${isKeeping ? ' · s stop' : canKeep ? ' · w keep warm' : ''}`}
           </Text>
-          <Button key="pane-compact" plain hotkey="c" onPress={() => compactNow($)}>
-            Compact
-          </Button>
+          {/* The hint truncates; the button keeps its width and a gap (it ran into the hint at ~80 columns). */}
+          <Box flexShrink={0} marginLeft={2}>
+            <Button key="pane-compact" plain hotkey="c" onPress={() => compactNow($)}>
+              Compact
+            </Button>
+          </Box>
         </Box>
       </Box>
     )

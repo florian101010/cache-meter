@@ -2,6 +2,15 @@
 
 All notable changes to Cache Meter, a Claude Code mod. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] – 2026-10-12
+
+### Fixed
+- The pane's footer hint ran into the Compact button in a sidebar of about 80 columns; the button now keeps its width and a gap, and the hint no longer repeats `c compact`.
+
+### Docs
+- README shows real screenshots of the band, the overview, and the Context and Health tabs; opens with three benefit columns, what a break costs, both ways to install (shell or by pasting the link into Claude Code) and three things to try; new section *See everything with `/tokens`*.
+- **PRIVACY.md** – what the mod reads, keeps and sends; `privacyPolicyUrl` points to it. Manifest and marketplace descriptions name the dashboard.
+
 ## [0.5.0] – 2026-10-12
 
 ### Added
@@ -92,7 +101,8 @@ All notable changes to Cache Meter, a Claude Code mod. The format follows [Keep 
 - Pane `/tokens`: per-request token history, totals, plan limits, cost.
 - `/keepwarm`.
 
-[0.5.0]: https://github.com/florian101010/cache-meter/compare/a520960...HEAD
+[0.5.1]: https://github.com/florian101010/cache-meter/compare/cache-meter--v0.5.0...HEAD
+[0.5.0]: https://github.com/florian101010/cache-meter/compare/a520960...cache-meter--v0.5.0
 [0.4.0]: https://github.com/florian101010/cache-meter/compare/18e9711...a520960
 [0.3.0]: https://github.com/florian101010/cache-meter/compare/e430ab2...18e9711
 [0.2.1]: https://github.com/florian101010/cache-meter/compare/e430ab2...HEAD
