@@ -58,7 +58,7 @@ claude --settings '{"env":{"CLAUDE_CODE_PLUGIN_DIRS":"/absolute/path/to/cache-me
    ```
 
    (This makes one small model request. Delete the debug log afterwards – it contains session data.)
-7. Update `README.md`, `docs/how-it-works.md` and `CHANGELOG.md` in the same pull request. Bump `version` in `.claude-plugin/plugin.json` for every change users should receive.
+7. Update, in the same pull request, every file that describes what changed: `README.md` (features, band and pane tables, options, hook table, FAQ), `docs/how-it-works.md`, `CHANGELOG.md`; `PRIVACY.md` and `SECURITY.md` when what the mod reads, hooks or sends changes; `AGENTS.md` and `llms.txt` when features or options change. Then search all of them for numbers and lists that went stale (option count, hook list, versions). Bump `version` in `.claude-plugin/plugin.json` for every change users should receive: the plugin directory picks up every push to `main` as a new version.
 8. Commit with [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `docs:`, `chore:`, `refactor:`, `test:`).
 
 ## Pull requests

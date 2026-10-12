@@ -57,7 +57,7 @@ Visual check needs a real terminal session: the band, `/tokens`, and `/usage` �
 
 **Rule 3 – prices come from the pricing page.** Price multipliers (`readMultiplier`, `writeMultiplier` in `hooks/lib.ts`, the README cost table) follow <https://platform.claude.com/docs/en/about-claude/pricing#prompt-caching>, fetched fresh – check it on every new model and before every release; details: [CONTRIBUTING.md › Prices](CONTRIBUTING.md#prices).
 
-Workflow: branch → read the docs above → change → tests (for a new safeguard, break it once and see its test fail) → `validate --strict`, `test`, `tsc -p .`, smoke test → update `README.md`, `docs/how-it-works.md`, `CHANGELOG.md`, bump `version` in `.claude-plugin/plugin.json` → Conventional Commit → pull request. Never merge to `main` without the owner's explicit go. Details: [CONTRIBUTING.md](CONTRIBUTING.md).
+Workflow: branch → read the docs above → change → tests (for a new safeguard, break it once and see its test fail) → `validate --strict`, `test`, `tsc -p .`, smoke test → update every doc the change touches (`README.md`, `docs/how-it-works.md`, `CHANGELOG.md`; `PRIVACY.md`/`SECURITY.md` when reads, hooks or sends change; this file and `llms.txt` when features or options change) and check them for stale counts and lists, bump `version` in `.claude-plugin/plugin.json` → Conventional Commit → pull request. Never merge to `main` without the owner's explicit go. Details: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 Code conventions enforced by `validate`: helpers that take `$` are top-level functions; `$` calls are written in full (`$.noun.method(...)`); `$.state` keys are declared in `types/index.d.ts`; `$.env.get` names are string literals. Pure logic goes in `hooks/lib.ts` so tests can call it directly.
 
