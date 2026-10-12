@@ -107,8 +107,9 @@ function world(on: On, opts: { env?: Record<string, string>; forkRead?: number; 
     return { value: undefined }
   })
   // The pane's open/closed record, as $.ui.panes() reports it.
-  const pane = { isOpen: false, closed: [] as string[] }
-  on('ui.open', () => {
+  const pane = { isOpen: false, closed: [] as string[], opened: [] as Record<string, unknown>[] }
+  on('ui.open', ($, e) => {
+    pane.opened.push(e as Record<string, unknown>)
     pane.isOpen = true
     return { value: { isPlaced: true } }
   })
@@ -593,7 +594,8 @@ test('pane: the keepwarm button starts and stops keepwarm', async ($, on) => {
   await step($)
   const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
   await ui.press({ key: 'keepwarm-start' })
-  expect(toasts.some(t => t.startsWith('Keepwarm until'))).toBe(true)
+  // The toast box is narrow: one short line.
+  expect(toasts.some(t => /^Keepwarm on until \d\d:\d\d · pings at ≤ 10 min left$/.test(t))).toBe(true)
   expect(await ui.find({ type: 'Text', text: '↻ Keepwarm on' })).toBeDefined()
   await ui.press({ key: 'keepwarm-stop' })
   expect(toasts.some(t => t.startsWith('Keepwarm off'))).toBe(true)
@@ -702,7 +704,8 @@ test('context tab: heaviest items from the free estimate, exact count only on a 
   // Used categories only, heaviest first; free space is not a share of the context.
   expect(await ui.find({ type: 'Text', text: 'Messages' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: 'Free space' })).toBeUndefined()
-  expect(await ui.find({ type: 'Text', text: '/home/u/.claude/CLAUDE.md' })).toBeDefined()
+  // The home directory shows as ~ (shorter, and no user name on a screenshot).
+  expect(await ui.find({ type: 'Text', text: '~/.claude/CLAUDE.md' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: ' · 2 tools' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /1 more tools behind tool search/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: '120 of 154' })).toBeDefined()
@@ -773,4 +776,42 @@ test('band: the API value shows when there is room and is dropped first', async 
   expect(await ui.find({ type: 'Text', text: ' · API $2.50' })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: ' (auto-compact 97%)' })).toBeDefined()
   await ui.unmount()
+})
+
+test('cache check: nothing is counted while Cache Meter knows nothing of the cache', async ($, on) => {
+  world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  // A resume right at the start: no request seen yet, so there is no verdict of ours to compare.
+  await $.classic.SessionStart({ source: 'resume', seconds_since_last_response: 600, prompt_cache_likely_expired: false, context_tokens: 100_000 } as never)
+  // The resume set the countdown from Claude Code's figures; a later switch is a real comparison.
+  await $.classic.PostModelSwitch({
+    hook_event_name: 'PostModelSwitch',
+    from_model: 'a',
+    to_model: 'a',
+    requested_model: null,
+    source: 'command',
+    context_tokens: 100_000,
+    prompt_cache_warm: true,
+    cache_ttl: '1h',
+    estimated_cache_write_usd: 0.4,
+    pricing: 'catalog',
+  } as never)
+  const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  await ui.press({ key: 'tab-health' })
+  expect(await ui.find({ type: 'Text', text: 'Claude Code agreed 1 of 1 times' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('/tokens: Esc closes the pane above the prompt, but not the docked sidebar', async ($, on) => {
+  const { pane } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  const tokens = (isFullscreen: boolean, columns: number) =>
+    $.command.run({ command: 'tokens', args: '', presentation: { isFullscreen, columns } } as never) as Promise<{ text?: string }>
+  expect((await tokens(true, 190)).text).toMatch(/sidebar/)
+  await tokens(true, 190) // closes
+  await tokens(false, 190)
+  await tokens(false, 190) // closes
+  await tokens(true, 100) // fullscreen, but too narrow to dock
+  expect(pane.opened.map(o => o.closeOnEscape)).toEqual([undefined, true, true])
+  expect(pane.opened.map(o => o.rows)).toEqual([26, 26, 36])
 })

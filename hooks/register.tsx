@@ -194,9 +194,12 @@ async function countExactly($: EngineInterface) {
 }
 
 // Claude Code's own verdict on the cache against Cache Meter's clock, taken before either is acted on.
+// Skipped while Cache Meter knows nothing of the cache (no request seen, e.g. right after /resume reset $.state).
 async function recordCheck($: EngineInterface, engineWarm: boolean, source: 'model' | 'resume') {
+  const cache = await read($, cacheA)
+  if (cache === null) return
   const now = await $.clock.now()
-  const ourWarm = cacheStatus(await read($, cacheA), now, (await ttlNow($)).ms).kind === 'warm'
+  const ourWarm = cacheStatus(cache, now, (await ttlNow($)).ms).kind === 'warm'
   await update($, healthA, h => ({
     ...h,
     checks: {
@@ -313,8 +316,17 @@ async function stopKeepWarm($: EngineInterface): Promise<string> {
   return `Keepwarm off (${keep.pings} pings, ${short(keep.readTokens)} tokens read from the cache).`
 }
 
+// The toast box is narrow and takes only text (types: $.ui.toast), so a press gets the short form;
+// /keepwarm prints the full explanation into the transcript.
 async function pressKeepWarm($: EngineInterface, ms: number | null) {
-  $.ui.toast(ms === null ? await stopKeepWarm($) : await startKeepWarm($, ms), { timeoutMs: 8_000 })
+  const text = ms === null ? await stopKeepWarm($) : await startKeepWarm($, ms)
+  const keep = await read($, keepA)
+  const ttl = await ttlNow($)
+  const short =
+    ms !== null && keep.until !== null
+      ? `Keepwarm on until ${hhmm(keep.until)} · pings at ≤ ${Math.round((ttl.ms * PING_SHARE) / 60_000)} min left`
+      : text.split(/(?<=[.)])\s/)[0] ?? text
+  $.ui.toast(short, { timeoutMs: 8_000 })
 }
 
 export const register: Register = (on, options) => {
@@ -572,9 +584,18 @@ export const register: Register = (on, options) => {
       return { text: 'Closed the "Tokens & Cache" pane.' }
     }
     // From about 114 terminal columns the body is wide enough for two columns, which needs fewer rows.
-    await $.ui.open({ id: PANE, title: 'Tokens & Cache', rows: (e.presentation?.columns ?? 80) >= 114 ? 26 : 36, closeOnEscape: true })
+    const columns = e.presentation?.columns ?? 80
+    const pane = { id: PANE, title: 'Tokens & Cache', rows: columns >= 114 ? 26 : 36 }
+    // Docked beside a fullscreen transcript from 110 columns (types: CommandPresentation), the pane is a
+    // sidebar: Esc only hands the keys back. Above the prompt Esc closes it (closeOnEscape takes only true).
+    const isDock = e.presentation?.isFullscreen === true && columns >= 110
+    await $.ui.open(isDock ? pane : { ...pane, closeOnEscape: true })
 
-    return { text: 'Opened the "Tokens & Cache" pane. Esc at an empty prompt or /tokens again closes it.' }
+    return {
+      text: isDock
+        ? 'Opened the "Tokens & Cache" sidebar. /tokens again closes it.'
+        : 'Opened the "Tokens & Cache" pane. Esc at an empty prompt or /tokens again closes it.',
+    }
   })
 
   // Above the prompt the pane is a glance: it takes rows from the transcript, so the person's next prompt
@@ -1056,7 +1077,7 @@ export const register: Register = (on, options) => {
             <Text wrap="truncate-start">{name}</Text>
           </Box>
           <Text color="suggestion"> {'█'.repeat(lit)}</Text>
-          <Text color="inactive">{'░'.repeat(barW - lit)}</Text>
+          <Text>{' '.repeat(barW - lit)}</Text>
           <Text bold> {right(short(tokens), 7)}</Text>
           <Text dimColor wrap="truncate-end">
             {note}
@@ -1110,7 +1131,7 @@ export const register: Register = (on, options) => {
             </Text>
             <Text dimColor>Memory files (CLAUDE.md and rules)</Text>
             {map.memoryFiles.length === 0 && <Text dimColor> none</Text>}
-            {map.memoryFiles.slice(0, 5).map(f => itemRow(f.name, f.tokens, topFile, nameW))}
+            {map.memoryFiles.slice(0, 5).map(f => itemRow(homeShort(f.name), f.tokens, topFile, nameW))}
             <Text dimColor wrap="truncate-end">
               MCP servers{map.deferredMcpTools > 0 ? ` · ${map.deferredMcpTools} more tools behind tool search, not loaded` : ''}
             </Text>
@@ -1177,7 +1198,7 @@ export const register: Register = (on, options) => {
           </Text>
           <Text wrap="truncate-end">
             {label('Tokens')}
-            <Text bold>{prompts ? short(Math.round(tokensAll / prompts)) : '–'}</Text>
+            <Text bold>{prompts && totals.mainSteps > 0 ? short(Math.round(tokensAll / prompts)) : '–'}</Text>
             <Text dimColor> per prompt (main conversation, in + out)</Text>
           </Text>
         </Box>
@@ -1297,8 +1318,8 @@ export const register: Register = (on, options) => {
         <Box flexDirection="row" justifyContent="space-between">
           <Text dimColor wrap="truncate-end">
             {tier === 'narrow'
-              ? 'keys: ctrl+x tab'
-              : `keys after ctrl+x tab: 1–3 tabs · ${isKeeping ? 's stop · ' : canKeep ? 'w keep warm · ' : ''}c compact · Esc back`}
+              ? 'click a tab · keys: ctrl+x tab'
+              : `click a tab, or ctrl+x tab for keys: 1–3 · ${isKeeping ? 's stop · ' : canKeep ? 'w keep warm · ' : ''}c compact`}
           </Text>
           <Button key="pane-compact" plain hotkey="c" onPress={() => compactNow($)}>
             Compact
@@ -1347,4 +1368,9 @@ function hitColor(pct: number | null): string | undefined {
   if (pct >= 50) return 'warning'
 
   return 'error'
+}
+
+/** A home directory as `~`, so paths stay short and screenshots show no user name. */
+function homeShort(path: string): string {
+  return path.replace(/^\/(Users|home)\/[^/]+(?=\/|$)/, '~')
 }
