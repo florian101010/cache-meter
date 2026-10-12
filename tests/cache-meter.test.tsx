@@ -14,6 +14,7 @@ import {
   agentLabel,
   breakCause,
   effortKeepsCache,
+  hhmm,
   hitPct,
   isUnexpectedWrite,
   limitForecast,
@@ -111,8 +112,15 @@ function world(on: On, opts: { env?: Record<string, string>; forkRead?: number; 
     usd: 1.5,
     // The loaded MCP tools the context estimate reports; a test changes them to stage a tool-set change.
     tools: null as { name: string; serverName: string; tokens: number; isLoaded: boolean }[] | null,
+    // A deny $.ui.notify answers with instead (a Notification hook refusing), and failed name lookups to come.
+    notifyDeny: null as string | null,
+    agentListFails: 0,
     // What $.ui.notify answers.
     notify: { isSent: true, channel: 'terminal' } as Record<string, unknown>,
+    // What $.session.turns() answers (prompts in the transcript).
+    turns: 4,
+    // Whether the next tool call is refused (a deny from a hook beneath).
+    deny: false,
     server: [] as { id: string; name: string; input: unknown; startedAt: number; endedAt?: number }[],
   }
   // The breakdown detail of each $.session.usage call, to tell the free estimate from the exact count.
@@ -149,17 +157,21 @@ function world(on: On, opts: { env?: Record<string, string>; forkRead?: number; 
     return { value: { ...v.value, context, cost: { usd: next.usd } } } as never
   })
   on('turn.start', ($, e) => ({ turnId: e.turnId }))
-  on('tool.call', () => ({ result: 'ok' }))
+  on('tool.call', () => (next.deny ? { deny: 'refused' } : { result: 'ok' }) as never)
   on('classic.PreModelSwitch', () => ({}))
   const notifies: string[] = []
   on('ui.notify', ($, e) => {
     notifies.push((e as { text: string }).text)
-    return { value: next.notify } as never
+    return (next.notifyDeny === null ? { value: next.notify } : { deny: next.notifyDeny }) as never
   })
-  on('agent.list', () => ({
-    value: [{ id: 'agent-1', type: 'Explore', description: 'find the tests', status: 'completed' }],
-  }) as never)
-  on('session.turns', () => ({ value: 4 }))
+  on('agent.list', () => {
+    if (next.agentListFails > 0) {
+      next.agentListFails -= 1
+      return { deny: 'not now' } as never
+    }
+    return { value: [{ id: 'agent-1', type: 'Explore', description: 'find the tests', status: 'completed' }] } as never
+  })
+  on('session.turns', () => ({ value: next.turns }))
   on('classic.StopFailure', () => ({}))
   on('session.start', () => ({ cwd: '/work' }))
   on('classic.SessionStart', () => ({}))
@@ -973,6 +985,11 @@ test('limit forecast: pace since the first reading, renewed after a reset', asyn
   // The window reset (lower percentage): the start is renewed, so the forecast works again.
   const renewed = nextLimitStarts({ five_hour: start }, [{ kind: 'five_hour', percentUsed: 3, resetsAt: '2026-10-12T20:00:00Z' }], t0 + 5 * HOUR)
   expect(renewed.five_hour).toEqual({ at: t0 + 5 * HOUR, pct: 3, resetsAt: '2026-10-12T20:00:00Z' })
+  // The reset moved while the percentage rose: a new window all the same.
+  const moved = nextLimitStarts({ five_hour: start }, [{ kind: 'five_hour', percentUsed: 25, resetsAt: '2026-10-12T20:00:00Z' }], t0 + 2 * HOUR)
+  expect(moved.five_hour).toEqual({ at: t0 + 2 * HOUR, pct: 25, resetsAt: '2026-10-12T20:00:00Z' })
+  // No reset time: the window may free up first, so no forecast.
+  expect(limitForecast(start, 40, t0 + HOUR, undefined)).toBeNull()
   const kept = nextLimitStarts({ five_hour: start }, [{ kind: 'five_hour', percentUsed: 30, resetsAt: '2026-10-12T15:00:00Z' }], t0 + HOUR)
   expect(kept.five_hour).toBe(start)
 })
@@ -987,19 +1004,24 @@ test('limit forecast drawn in the overview once the pace is known', async ($, on
   await clock.advance(HOUR)
   await $.session.measure(at(40) as never)
   ui = await $.ui.mount({ surface: 'terminal', ...PANE })
-  expect(await ui.find({ type: 'Text', text: /full ≈ \d\d:\d\d at this pace/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ` · full ≈ ${hhmm(T0 + 4 * HOUR)} at this pace` })).toBeDefined()
   await ui.unmount()
 })
 
 test('MCP servers: calls counted per server, idle ones marked after a few prompts', async ($, on) => {
-  world(on)
+  const { next } = world(on)
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   await $.tool.call({ tool: 'mcp__github__a' } as never)
+  await $.tool.call({ tool: 'mcp__github__a' } as never)
   await $.tool.call({ tool: 'mcp__github__b' } as never)
+  // A refused call did not run: not counted.
+  next.deny = true
+  await $.tool.call({ tool: 'mcp__github__b' } as never)
+  next.deny = false
   await $.session.measure({ context: { tokens: 100_000, window: 1_000_000, percent: 10 }, rateLimits: [], changed: ['context'] })
   const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
   await ui.press({ key: 'tab-context' })
-  expect(await ui.find({ type: 'Text', text: / · 2 tools · 2 calls$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: / · 2 tools · 3 calls$/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /unused so far/ })).toBeUndefined()
   await ui.unmount()
 })
@@ -1019,9 +1041,8 @@ test('model switch while warm: a note with the estimate, never a decision', asyn
     pricing: 'catalog' as const,
   }
   for (const source of ['command', 'picker', 'sdk'] as const) {
-    const result = (await $.classic.PreModelSwitch({ ...sw, source } as never)) as Record<string, unknown>
-    expect(result.permissionDecision).toBeUndefined()
-    expect(result.block).toBeUndefined()
+    // Exactly what the stub beneath answered: no decision, no reason, no block of its own.
+    expect(await $.classic.PreModelSwitch({ ...sw, source } as never)).toEqual({})
   }
   expect(toasts.filter(t => t.startsWith('Model switch re-writes 148.0k tokens to the cache (≈ $1.18) · cache warm 60m more')).length).toBe(3)
   // Cold, or to the same model: nothing to say.
@@ -1069,13 +1090,28 @@ test('band: a cold cache over half full suggests compacting', async ($, on) => {
   await ui.unmount()
 })
 
-test('MCP servers: a server with no call after a few prompts is marked unused', async ($, on) => {
-  world(on)
+test('MCP servers: unused only after three prompts since the start or a /resume', async ($, on) => {
+  const { next } = world(on)
+  // A resumed transcript already holds 4 prompts; the call counts start again ($.state resets there).
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  next.turns = 5
   await $.session.measure({ context: { tokens: 100_000, window: 1_000_000, percent: 10 }, rateLimits: [], changed: ['context'] })
-  const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  let ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  await ui.press({ key: 'tab-context' })
+  expect(await ui.find({ type: 'Text', text: / · 2 tools · 0 calls$/ })).toBeDefined()
+  await ui.unmount()
+  next.turns = 7
+  await $.session.measure({ context: { tokens: 100_000, window: 1_000_000, percent: 10 }, rateLimits: [], changed: ['context'] })
+  ui = await $.ui.mount({ surface: 'terminal', ...PANE })
   await ui.press({ key: 'tab-context' })
   expect(await ui.find({ type: 'Text', text: / · 2 tools · 0 calls – unused so far$/ })).toBeDefined()
+  await ui.unmount()
+  // /resume or /branch: counted from there again.
+  await $.classic.SessionStart({ source: 'resume', seconds_since_last_response: 60, context_tokens: 100_000 })
+  await $.session.measure({ context: { tokens: 100_000, window: 1_000_000, percent: 10 }, rateLimits: [], changed: ['context'] })
+  ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  await ui.press({ key: 'tab-context' })
+  expect(await ui.find({ type: 'Text', text: /unused so far/ })).toBeUndefined()
   await ui.unmount()
 })
 
@@ -1115,14 +1151,16 @@ test('cache-splitting change: what splits it, what keeps it', async () => {
   expect(toolDiff(['a', 'b'], ['b', 'c', 'd'])).toEqual({ added: 2, removed: 1 })
 })
 
-test('break cause: model or effort first, then tools, then the TTL, then the effort caveat', async () => {
+test('break cause: model or effort first, then the TTL, then tools, then the effort caveat', async () => {
   const none = { change: null, effortOnly: null, tools: null, idleMs: 30_000, ttlMs: HOUR }
   expect(breakCause({ ...none, change: 'model a → b', tools: { added: 1, removed: 0 }, idleMs: 20 * 60_000 })).toBe('model a → b – each splits the cache')
-  expect(breakCause({ ...none, tools: { added: 3, removed: 12 }, idleMs: 20 * 60_000 })).toBe('tool set changed (+3 / −12 MCP tools)')
+  expect(breakCause({ ...none, tools: { added: 3, removed: 12 } })).toBe('tool set changed (+3 / −12 MCP tools)')
+  // A long pause explains it better than a tool loaded in between.
+  expect(breakCause({ ...none, tools: { added: 1, removed: 0 }, idleMs: 20 * 60_000 })).toMatch(/^after 20m idle/)
   expect(breakCause({ ...none, tools: { added: 0, removed: 0 }, idleMs: 12 * 60_000 })).toBe('after 12m idle: the real TTL is likely 5m, not 1h00m (option cacheTtl)')
   expect(breakCause({ ...none, idleMs: 12 * 60_000, ttlMs: FIVE_MIN })).toMatch(/^not observable here/)
   expect(breakCause({ ...none, effortOnly: 'effort high → low' })).toMatch(/only with an API key or a subscription$/)
-  expect(breakCause(none)).toMatch(/^not observable here: fast mode/)
+  expect(breakCause(none)).toBe('not observable here: fast mode turned on, a code-intelligence plugin (LSP tool), a tool deny rule, or removed images')
   expect(agentLabel(undefined, 'abcdefghijklmnop')).toBe('abcdefghijkl')
   expect(agentLabel({ type: 'Explore', description: '' }, 'x')).toBe('Explore')
 })
@@ -1230,4 +1268,105 @@ test('warm miss after an effort change on a model that keeps the cache: named wi
   await clock.advance(60_000)
   await stepWith($, 'claude-opus-5-5', 'low')
   expect(await healthText($, /effort high → low – keeps the cache on this model only with an API key or a subscription$/)).toBeDefined()
+})
+
+test('line under the answer: when the core text is the answer itself, only the line', async ($, on) => {
+  const { next } = world(on, { turnText: 'ok' })
+  await $.turn.start({ turnId: 't', text: 'hi' } as never)
+  await step($)
+  next.usd = 1.6
+  expect((await complete($)).text).toBe('◉ Cache Meter · $0.10 spent · 1 request · 93% from cache · 6.0k written to cache')
+})
+
+test('warm miss: with tool search active a loaded tool is no cause', async ($, on) => {
+  const { clock, next } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await stepWith($, 'claude-opus-5', 'high')
+  next.write = 60_000
+  next.read = 10_000
+  // One MCP tool still behind tool search, another loaded meanwhile.
+  next.tools = [
+    { name: 'mcp__linear__x', serverName: 'linear', tokens: 900, isLoaded: true },
+    { name: 'mcp__memory__c', serverName: 'memory', tokens: 500, isLoaded: false },
+  ]
+  await clock.advance(60_000)
+  await stepWith($, 'claude-opus-5', 'high')
+  expect(await healthText($, /tool set changed/)).toBeUndefined()
+  expect(await healthText($, /^ +not observable here/)).toBeDefined()
+})
+
+test('a /model switch warns once: no second note at the request, no warm miss', async ($, on) => {
+  const { toasts, clock, next } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await stepWith($, 'claude-opus-5', 'high')
+  const sw = { from_model: 'claude-opus-5', to_model: 'claude-sonnet-5', requested_model: null, context_tokens: 100_000, prompt_cache_warm: true, cache_ttl: '1h' as const, estimated_cache_write_usd: 0.8, pricing: 'catalog' as const }
+  await $.classic.PreModelSwitch({ ...sw, source: 'command' } as never)
+  await $.classic.PostModelSwitch({ ...sw, source: 'command' } as never)
+  next.write = 90_000
+  next.read = 0
+  await clock.advance(30_000)
+  await stepWith($, 'claude-sonnet-5', 'high')
+  expect(toasts.filter(t => t.startsWith('Model switch') || t.startsWith('This request')).length).toBe(1)
+  expect(await healthText($, /none – every warm request read the cache/)).toBeDefined()
+})
+
+test('subagents: their model or effort neither warns nor counts as a warm miss', async ($, on) => {
+  const { toasts, clock, next } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await stepWith($, 'claude-opus-5', 'high')
+  next.write = 60_000
+  next.read = 10_000
+  await stepWith($, 'claude-haiku-5', 'low', 'agent-1')
+  next.write = 6_000
+  next.read = 93_000
+  await clock.advance(30_000)
+  await stepWith($, 'claude-opus-5', 'high')
+  expect(toasts.filter(t => t.startsWith('This request')).length).toBe(0)
+  expect(await healthText($, /none – every warm request read the cache/)).toBeDefined()
+})
+
+test('after /resume the next request is not compared with one before it', async ($, on) => {
+  const { toasts } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await stepWith($, 'claude-opus-5', 'high')
+  await $.classic.SessionStart({ source: 'resume', seconds_since_last_response: 60, context_tokens: 100_000 })
+  await stepWith($, 'claude-opus-5', 'low')
+  expect(toasts.filter(t => t.startsWith('This request')).length).toBe(0)
+})
+
+test('expiry notice: none while keepwarm runs, none at a five-minute TTL', { options: { expiryNotice: 'on' } }, async ($, on) => {
+  const { clock, notifies } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  await run($, 'keepwarm', '2h')
+  await clock.advance(55 * 60_000)
+  expect(notifies).toEqual([])
+})
+
+test('expiry notice: none at a five-minute TTL', { options: { expiryNotice: 'on', cacheTtl: '5m' } }, async ($, on) => {
+  const { clock, notifies } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  await clock.advance(4.5 * 60_000)
+  expect(notifies).toEqual([])
+})
+
+test('expiry notice: a rejected notification shows its own reason, and no retry in that window', { options: { expiryNotice: 'on' } }, async ($, on) => {
+  const { clock, notifies, next } = world(on)
+  next.notifyDeny = 'a Notification hook said no'
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  await clock.advance(51 * 60_000)
+  await clock.advance(8 * 60_000)
+  expect(notifies.length).toBe(1)
+  expect(await healthText($, /not sent: .*a Notification hook said no/)).toBeDefined()
+})
+
+test('subagents: a failed name lookup is tried again', async ($, on) => {
+  const { next } = world(on)
+  next.agentListFails = 1
+  await step($, 'agent-1')
+  expect(await healthText($, / agent-1$/)).toBeDefined()
+  await step($, 'agent-1')
+  expect(await healthText($, /Explore: find the tests$/)).toBeDefined()
 })
