@@ -215,9 +215,58 @@ def report(s):
 <path d="M {cx - 13} {cy + 6} L {cx - 3} {cy + 17} L {cx + 15} {cy - 7}" fill="none" stroke="{GREEN_HI}" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/></g>'''
 
 
+# --- auto: a timeline – you work (prompts keep the cache full), you are away (it drains to the ping mark, a
+# ping refills it, twice), you are back (cache warm) --------------------------------------------------------
+def auto(s):
+    x0, x1, ty = 40, 440, 168
+    tx = lambda x: (x - x0) / (x1 - x0) * 0.9
+    play_a, play_v = s.a("x1", "0;0.9;1", f"{x0};{x1};{x1}")
+    play2_a, play2_v = s.a("x2", "0;0.9;1", f"{x0};{x1};{x1}")
+    px = x0 if s.t is None else float(play_v)
+    out = []
+    # the cache bar: full while you work, drains while you are away, refilled by each ping
+    p1, p2, back = 228, 330, 404
+    k = [0, tx(120), tx(p1), tx(p1) + 0.005, tx(p2), tx(p2) + 0.005, tx(back), tx(back) + 0.005, 1]
+    keys = ";".join(f"{v:.3f}" for v in k)
+    full, low = 360, 62
+    w_a, w_v = s.a("width", keys, f"{full};{full};{low};{full};{low};{full};{full - 70};{full};{full}")
+    c_a, c_v = s.a("fill", keys, f"{GREEN};{GREEN};{AMBER};{GREEN};{AMBER};{GREEN};{GREEN};{GREEN};{GREEN}")
+    bw = full if s.t is None else w_v
+    bc = GREEN if s.t is None else c_v
+    out.append(f'<text x="{x0}" y="62" font-family="{MONO}" font-size="13" fill="{MUTED}">prompt cache</text>')
+    out.append(f'<rect x="{x0}" y="74" width="{full}" height="14" rx="7" fill="{TRACK}"/>')
+    out.append(f'<rect x="{x0}" y="74" width="{bw}" height="14" rx="7" fill="{bc}" filter="url(#glow)">{w_a}{c_a}</rect>')
+    out.append(f'<line x1="{x0 + low:.0f}" y1="68" x2="{x0 + low:.0f}" y2="94" stroke="#ff8a5c" stroke-width="4" stroke-linecap="round"/>')
+    # the timeline: work, away, back
+    out.append(f'<line x1="{x0}" y1="{ty}" x2="{x1}" y2="{ty}" stroke="{TRACK}" stroke-width="6" stroke-linecap="round"/>')
+    out.append(f'<rect x="132" y="{ty - 3}" width="{back - 144}" height="6" rx="3" fill="{ORANGE}" fill-opacity="0.18"/>')
+    for x in (58, 86, 114):
+        o_a, o_v = s.a("opacity", f"0;{tx(x):.3f};{tx(x) + 0.01:.3f};0.97;1", "0.15;0.15;1;1;0.15")
+        out.append(f'<circle cx="{x}" cy="{ty}" r="8" fill="{ORANGE}" opacity="{1 if s.t is None else o_v}">{o_a}</circle>')
+    for x in (p1, p2):
+        f_a, f_v = s.a("opacity", f"0;{tx(x):.3f};{tx(x) + 0.01:.3f};{tx(x) + 0.08:.3f};1", "0;0;1;0.35;0.35")
+        r_a, r_v = s.a("r", f"0;{tx(x):.3f};{tx(x) + 0.06:.3f};1", "6;6;20;8")
+        out.append(f'<circle cx="{x}" cy="{ty}" r="{8 if s.t is None else r_v}" fill="#ff8a5c" opacity="{0.35 if s.t is None else f_v}" filter="url(#glow)">{f_a}{r_a}</circle>')
+        out.append(f'<text x="{x}" y="{ty - 18}" text-anchor="middle" font-family="{MONO}" font-size="13" fill="#ff8a5c">ping</text>')
+    b_a, b_v = s.a("opacity", f"0;{tx(back):.3f};{tx(back) + 0.01:.3f};0.97;1", "0.15;0.15;1;1;0.15")
+    out.append(f'<circle cx="{back}" cy="{ty}" r="8" fill="{ORANGE}" opacity="{1 if s.t is None else b_v}">{b_a}</circle>')
+    out.append(f'<text x="86" y="{ty + 30}" text-anchor="middle" font-family="{MONO}" font-size="13" fill="{MUTED}">you work</text>')
+    out.append(f'<text x="{(132 + back) / 2:.0f}" y="{ty + 30}" text-anchor="middle" font-family="{MONO}" font-size="13" fill="{MUTED}">away · 2h</text>')
+    out.append(f'<text x="{back}" y="{ty + 30}" text-anchor="middle" font-family="{MONO}" font-size="13" fill="{MUTED}">back</text>')
+    # "cache warm" when you are back
+    ok_a, ok_v = s.a("opacity", f"0;{tx(back):.3f};{tx(back) + 0.02:.3f};0.97;1", "0;0;1;1;0")
+    out.append(f'<g opacity="{0 if s.t is None else ok_v}">{ok_a}<rect x="{back - 92}" y="{ty - 62}" width="128" height="28" rx="14" fill="{GREEN}" fill-opacity="0.14" stroke="{GREEN}" stroke-opacity="0.6"/>'
+               f'<text x="{back - 28}" y="{ty - 43}" text-anchor="middle" font-family="{MONO}" font-size="13" fill="{GREEN_HI}">cache warm ✓</text></g>')
+    # the playhead
+    out.append(f'<line x1="{px}" y1="{ty - 12}" x2="{px}" y2="{ty + 12}" stroke="{TEXT}" stroke-opacity="0.7" stroke-width="2">{play_a}{play2_a}</line>')
+    return "\n".join(out)
+
+
 BANNERS = [
     ("keepwarm", "Keep it: /keepwarm – one tiny ping keeps the prompt cache alive while you are away.", keepwarm, "KEEP IT", "/keepwarm",
      "One tiny ping keeps the cache alive while you are away.", "≈ 1/20 of a re-write · heartbeat in the band · stops on a miss"),
+    ("auto", "Every break: /keepwarm auto – switched on once, it keeps the prompt cache warm through every break of the session, by itself.", auto, "EVERY BREAK", "/keepwarm auto",
+     "Type it once – every break stays warm, by itself.", "opt-in · pings only while you are away · 2h break ≈ 2 pings"),
     ("cost", "See it: every answer, priced – and a session budget that warns at 80 percent.", cost, "SEE IT", "Every answer, priced",
      "What each answer cost – and a budget that warns at 80 %.", "API value on a plan · real spend on an API key"),
     ("warn", "Before it breaks: a heads-up before a switch re-writes the cache.", warn, "BEFORE IT BREAKS", "Warned in time",
