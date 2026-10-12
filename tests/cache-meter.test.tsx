@@ -1133,6 +1133,7 @@ test('MCP servers: unused only after three prompts since the start or a /resume'
 
 test('line under the answer: a line another mod put there is kept', async ($, on) => {
   const { next } = world(on, { turnText: 'other mod: summary' })
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   await $.turn.start({ turnId: 't', text: 'hi' } as never)
   await step($)
   next.usd = 1.6
@@ -1394,10 +1395,10 @@ test('/tokens report: Markdown on the clipboard, the pane untouched, nothing in 
     '## Cost and cache',
     '## Context',
     '## Subagents',
-    'Explore: find the tests',
+    '`Explore: find the tests`',
     'Cache hit rate: 93%',
     '- Tool results (≈ tokens, characters ÷ 4): Bash 10.0k in 1, Read 2.0k in 1',
-    '- Largest: Bash npm 10.0k, Read ~/project/a.ts 2.0k',
+    '- Largest: `Bash npm` 10.0k, `Read ~/project/a.ts` 2.0k',
   ]) {
     expect(report).toContain(part)
   }
@@ -1409,6 +1410,7 @@ test('/tokens report: Markdown on the clipboard, the pane untouched, nothing in 
 
 test('line under the answer: when the core text is the answer itself, only the line', async ($, on) => {
   const { next } = world(on, { turnText: 'ok' })
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   await $.turn.start({ turnId: 't', text: 'hi' } as never)
   await step($)
   next.usd = 1.6
@@ -1578,6 +1580,7 @@ test('session budget: off by default', async ($, on) => {
 
 test('session budget: band shows "of $X", a toast at 80 % and at 100 %, each once', { options: { sessionBudget: 2 } }, async ($, on) => {
   const { toasts } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   const at = (usd: number) => $.session.measure({ context: { tokens: 100_000, window: 1_000_000, percent: 10 }, rateLimits: [], cost: { usd }, changed: ['cost'] })
   await at(1)
   expect(toasts.filter(t => /budget/.test(t))).toEqual([])
@@ -1609,4 +1612,59 @@ test('context map: memory-file paths are stored home-shortened (other mods can r
     0,
   )
   expect(map.memoryFiles.map(f => f.name)).toEqual(['~/.claude/CLAUDE.md', '~\\CLAUDE.md'])
+})
+
+test('privacy round 2: Unicode spaces, token-like names, home dirs and URLs never reach a label', async () => {
+  const S = 'ghp_SECRET123'
+  for (const space of ['\u00a0', '\u2003', '\u000b', '\u000c', '\u000d', '\u2028', '\ufeff', '\u3000', '\u1680']) {
+    expect(toolLabel('Bash', { command: `TOKEN=a${space}${S} curl x` })).toBe('Bash')
+    expect(toolLabel('Bash', { command: `${space}${S}` })).toBe('Bash')
+  }
+  for (const command of [`/tmp/${S}`, `./sk-ant-api03-abcdef run`, S, 'xoxb-1234 go', '/home/florian', '/Users/carol', 'run20261012000000', 'a'.repeat(40)]) {
+    expect(toolLabel('Bash', { command })).toBe('Bash')
+  }
+  // A secret that looks like an ordinary word: only the bash-only word split keeps it out.
+  for (const space of ['\u00a0', '\u2003', '\u3000']) {
+    expect(toolLabel('Bash', { command: `PASSWORD=a${space}hunter2pass mysql -u root` })).toBe('Bash')
+  }
+  expect(toolLabel('Bash', { command: 'TOKEN=a\tnpm test' })).toBe('Bash npm')
+  expect(toolLabel('Bash', { command: './scripts/deploy.sh --prod' })).toBe('Bash deploy.sh')
+  // file_path only for the file tools, never a URL, no query or fragment
+  expect(toolLabel('mcp__x__upload', { file_path: 'https://h/up?sig=SECRET' })).toBe('mcp__x__upload')
+  expect(toolLabel('mcp__x__upload', { file_path: '/Users/carol/contract-mueller.pdf' })).toBe('mcp__x__upload')
+  expect(toolLabel('Read', { file_path: 'https://h/up?sig=SECRET' })).toBe('Read')
+  expect(toolLabel('Read', { file_path: '/Users/carol/a.md?token=SECRET#x' })).toBe('Read ~/a.md')
+  expect(toolLabel('Read', { file_path: '/tmp/ghp_SECRET123.txt' })).toBe('Read /tmp/…')
+  expect(toolLabel('Edit', { file_path: 'C:\\keys\\sk-ant-api03-x\\a.md' })).toBe('Edit C:\\keys\\…\\a.md')
+  // home directories in more layouts
+  for (const [path, want] of [
+    ['c:\\users\\carol\\a.md', 'Read ~\\a.md'],
+    ['C:/Users/carol/a.md', 'Read ~/a.md'],
+    ['/var/home/carol/a.md', 'Read ~/a.md'],
+    ['/volume1/homes/florian/a.md', 'Read ~/a.md'],
+    ['/volume1/@home/florian/a.md', 'Read ~/a.md'],
+    ['/Users//carol/a.md', 'Read ~/a.md'],
+  ]) {
+    expect(toolLabel('Read', { file_path: path })).toBe(want)
+  }
+  // one line, at most 80 characters
+  const long = toolLabel('Read', { file_path: `/srv/${'x'.repeat(100)}\nINJECTED` })
+  expect(long).not.toMatch(/\n/)
+  expect(long.length).toBeLessThanOrEqual(80)
+})
+
+test('privacy round 2: no line under the answer without a screen (-p, SDK)', async ($, on) => {
+  const { next } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
+  await $.turn.start({ turnId: 't', text: 'hi' } as never)
+  await step($)
+  next.usd = 1.9
+  expect((await complete($)).text).toBe('')
+})
+
+test('session budget: no toast without a screen (-p, SDK)', { options: { sessionBudget: 2 } }, async ($, on) => {
+  const { toasts } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
+  await $.session.measure({ context: { tokens: 100_000, window: 1_000_000, percent: 10 }, rateLimits: [], cost: { usd: 3 }, changed: ['cost'] })
+  expect(toasts.filter(t => /budget/.test(t))).toEqual([])
 })

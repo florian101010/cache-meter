@@ -16,7 +16,7 @@ Cache Meter is a [Claude Code mod](https://code.claude.com/docs/en/plugins/mods/
 | Environment | reads `FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL`, `ENABLE_PROMPT_CACHING_1H`; writes nothing |
 | Settings | reads the merged settings once per session start or reset, and uses only `promptCacheTtl` |
 | Stored data | session state only (`$.state`); nothing persists after the session, `/clear`, `/resume` or `/branch`. Other loaded mods can read it (types: `$.state`), so paths are stored `~`-shortened |
-| What Claude reads | only the short replies of its own commands – a command's text goes into the conversation (mods › api › Add a command); never data |
+| What Claude reads | the short replies of its own commands – a command's text goes into the conversation (mods › api › Add a command); never data. Whether Claude reads the line under an answer is not documented; it is shown only in interactive sessions |
 
 `claude plugin validate .` prints the authoritative list of hooks and calls for the version you have.
 
