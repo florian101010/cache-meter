@@ -29,7 +29,7 @@ A live countdown above the prompt: minutes until the cache expires, the hit rate
 
 ### ☕ Keep it
 
-Type **`/keepwarm`** before lunch or a meeting. Shortly before expiry one tiny ping keeps the cache alive – about **1/20 of a re-write**, with hard limits so it never runs away. Every ping flashes a heartbeat in the band, so you see it working. Forgot? An optional **notification** from your terminal reminds you ten minutes before the cache expires.
+Type **`/keepwarm`** before lunch or a meeting. Shortly before expiry one tiny ping keeps the cache alive – about **1/20 of a re-write**, with hard limits so it never runs away. Every ping flashes a heartbeat in the band, so you see it working. **Never think about it again:** `/keepwarm auto` once, and every break of the session stays warm by itself. Forgot? An optional **notification** from your terminal reminds you ten minutes before the cache expires.
 
 </td>
 <td width="33%" valign="top">
@@ -124,11 +124,13 @@ Cache Meter speaks up only with figures it measured – no guessed savings:
 
 | When | What you see |
 |---|---|
-| One tool result floods the context (≥ 10k tokens and ≥ 2 % of the window) | `Read ~/src/big.ts put ≈ 50.0k tokens into the context – sent again with every request until /compact` – the size is an estimate (characters ÷ 4) |
+| One tool result floods the context (≥ 10k tokens and ≥ 2 % of the window) | `Read ~/src/big.ts put ≈ 50.0k tokens into the context – sent again with every request until /compact` – the size is an estimate (characters ÷ 4); at most one such toast per 20 seconds |
 | A plan limit is half used and, at this pace, full before it resets | `5 hours limit at 60% – full ≈ 18:40 at this pace (resets Mon 20:00)` – once per window; a notification too with `limitNotice` |
 | The conversation's messages are a quarter of the context or more (≥ 20k) | in the Context tab: `Messages 60.0k (30% of the context) are sent again with every request – /compact summarizes them to free space, itself one large request` |
 | An MCP server's tools ride along with every request | in the Context tab, beside each server: its share of each request, and `unused so far` after three prompts without a call |
 | You `/clear` | `Conversation cleared – it came to $1.50 spent · 12 requests · 94% from cache` – only what that conversation measured (after `/resume`: *since you resumed it*; after a reload mid-conversation without the cost) |
+| The dashboard opens above the prompt in a terminal | a tip in the reply and on the Overview: `/tui fullscreen puts this beside the chat as a sidebar` (in fullscreen: a window of 110 columns or more) |
+| A break outlasts `/keepwarm auto`'s window | `Keepwarm auto: break longer than 2h – the cache may expire; on again with your next answer` |
 
 ## Keep the cache warm with `/keepwarm`
 
@@ -161,16 +163,28 @@ Each ping also pays for its few uncached tokens and its one-word answer. On a su
 
 It runs only in interactive sessions, never drops a message, and after an expensive cold re-write it only *suggests* `/keepwarm` – it never switches itself on.
 
-### Every break, by itself: `/keepwarm auto`
+**Check that it works on your setup:** 10–50 minutes after a ping, run `/usage` – the *Prompt cache (main)* line should say warm – or watch the hit rate of your next request in the band.
 
-Type it once; from then on Cache Meter covers every break of this session without you thinking of it. Each prompt you send and each answer moves the window to *now + 2 hours* (`/keepwarm auto 4h` for longer breaks, 10m to 8h). While you work no ping is needed – every request refreshes the cache. Once you have been away long enough for the cache to near expiry – lunch, a call, a long read – the same ping as above goes out; your next prompt ends the break.
+<p align="center"><img src="https://raw.githubusercontent.com/florian101010/cache-meter/assets/brand/feature-auto.svg" width="100%" alt="Every break – /keepwarm auto: on a timeline, prompts keep the cache bar full while you work; during a two-hour break it drains to the ping mark, two pings refill it, and when you are back a chip says cache warm."></p>
+
+## Every break, by itself: `/keepwarm auto`
+
+**You no longer have to remember `/keepwarm`.** Type `/keepwarm auto` once, and every coffee break, call or long read of this session finds the cache still warm when you come back – no re-write, no waiting for the first answer to rebuild it.
+
+```text
+/keepwarm auto        # every break up to 2 hours
+/keepwarm auto 4h     # longer breaks (10m to 8h)
+/keepwarm off         # stop
+```
+
+It is also listed as `/keepwarm-auto` in the slash-command menu.
+
+**How it knows you are away:** each prompt you send and each answer moves the window to *now + 2 hours*. While you work no ping is needed – every request refreshes the cache. Once you have been away long enough for the cache to near expiry – lunch, a call, a long read – the same ping as above goes out; your next prompt ends the break.
 
 - **What it costs:** the same ping, only when you are away. A two-hour break at the one-hour TTL is two pings – about **$0.06** for a 150k-token conversation on Opus 5.5 at API prices, against **$1.20** for the re-write ([costs above](#keep-the-cache-warm-with-keepwarm)).
-- **It pings on its own once on** – that is the point of it, and the one thing Cache Meter does unasked. Nothing is stored: it is on for this session only, stays on through `/clear`, `/resume` and `/branch`, and is off again in the next session.
+- **It pings on its own once on** – that is the point of it, and the only request Cache Meter sends without you asking each time. Nothing is stored: it is on for this session only, stays on through `/clear`, `/resume` and `/branch`, and is off again in the next session.
 - **Limits:** at most 12 pings per break (an 8-hour break at the one-hour TTL is about nine). A break longer than the window lets the cache go with a toast, and the next answer covers the next break. A miss, an unanswered ping or a 5-minute TTL switches auto off for good.
 - **See it:** the keepwarm card reads *Keepwarm auto · breaks up to 2h*, with the pings of this break and in all; `/keepwarm off` (or **Stop** in the card) ends it and reports the pings.
-
-**Check that it works on your setup:** 10–50 minutes after a ping, run `/usage` – the *Prompt cache (main)* line should say warm – or watch the hit rate of your next request in the band.
 
 <p align="center"><img src="https://raw.githubusercontent.com/florian101010/cache-meter/assets/brand/feature-tokens.svg" width="100%" alt="Understand it – /tokens: request columns grow, a tall red one is a warm miss, and its tooltip says “148.0k written · effort high → medium · splits the cache”."></p>
 
@@ -234,6 +248,7 @@ It stays with you: the report goes only to your own clipboard – the one of the
 - [Every answer, priced](#every-answer-priced)
 - [Warned before the cache breaks](#warned-before-the-cache-breaks)
 - [Keep the cache warm with `/keepwarm`](#keep-the-cache-warm-with-keepwarm)
+- [Every break, by itself: `/keepwarm auto`](#every-break-by-itself-keepwarm-auto)
 - [See everything with `/tokens`](#see-everything-with-tokens) · [Copy the session as Markdown](#copy-the-session-as-markdown)
 - [Features](#features)
 - [Requirements](#requirements)
