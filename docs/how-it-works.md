@@ -77,6 +77,10 @@ The count of running main requests is raised before the first `await` in `turn.s
 
 `/tokens` opens the pane 44 rows tall above the prompt (types: `PaneOpenArgs.rows`; docked beside the transcript in fullscreen). It is a column of round-bordered cards sized to `e.props.bodyColumns`: the cache card (tall digits, state, hit rates, TTL source, a countdown meter), the keepwarm card (buttons with hotkeys `w`/`s`), context (a meter with a `┃` at the auto-compact point, trend sparkline from three turns on), requests (fixed-width stacked bars, right-aligned numbers, hit rate colored green ≥ 80 %, yellow ≥ 50 %, red below), and one card for session totals and plan limits. Meters are a `Raster` of colored cells in the terminal and text bars elsewhere, because only the terminal draws `Raster` (*reference › Elements*). The fill is one solid color, not a gradient: the terminal rounds Raster colors to a smaller palette (*gallery › Raster*), and a per-cell gradient showed as bands. Hotkeys act only while the pane has focus (*interface › Keyboard focus and hotkeys*).
 
+### Where the pane sits
+
+The surface seats the pane, not the mod (*interface › Pick where to draw*): docked as a sidebar beside the transcript in the fullscreen renderer from 110 columns, otherwise inline above the prompt. The mod reads where it was seated (`Pane.placement`) and acts on it: inline, your next own prompt (`prompt.submit` with `origin.kind` `composer`) closes the pane, since the band already carries the summary; docked, it stays. `/tokens` toggles; `closeOnEscape` lets Esc at an empty prompt close it. No `focus` on open: a focused pane takes the keys, and its hotkeys would swallow typing.
+
 ## Band layout
 
 The band is one row sized to `e.props.bodyColumns`. The width of every segment is computed first; on a narrow terminal the re-write hint goes first, then the auto-compact note, then the bar (minimum six cells). The `[ Compact ]` button is hidden while `e.props.isWorking`. The weather symbols are single-width characters, not emoji, so the row lines up in every terminal font.

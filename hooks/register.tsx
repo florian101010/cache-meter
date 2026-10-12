@@ -85,6 +85,8 @@ let setting = 'auto'
 let isInteractive = false
 let isPinging = false
 let mainRequests = 0
+// Where the surface last seated the pane: beside a fullscreen transcript (dock) or above the prompt (inline).
+let seat: 'dock' | 'inline' | null = null
 
 async function ttlNow($: EngineInterface) {
   const measure = await read($, measureA)
@@ -437,11 +439,27 @@ export const register: Register = (on, options) => {
     return result
   })
 
+  // /tokens toggles. rows: the height asked for above the prompt, default a third (types: PaneOpenArgs.rows);
+  // closeOnEscape: Esc at the idle, empty prompt closes it too. No focus: hotkeys would swallow typing.
   on('command.run', { command: 'tokens' }, async $ => {
-    // rows: the height to ask for when the pane sits above the prompt; default a third (types: PaneOpenArgs.rows).
-    await $.ui.open({ id: PANE, title: 'Tokens & Cache', rows: 44 })
+    if ((await $.ui.panes()).some(p => p.id === PANE)) {
+      await $.ui.close({ id: PANE })
 
-    return { text: 'Opened the "Tokens & Cache" pane.' }
+      return { text: 'Closed the "Tokens & Cache" pane.' }
+    }
+    await $.ui.open({ id: PANE, title: 'Tokens & Cache', rows: 44, closeOnEscape: true })
+
+    return { text: 'Opened the "Tokens & Cache" pane. Esc at an empty prompt or /tokens again closes it.' }
+  })
+
+  // Above the prompt the pane is a glance: it takes rows from the transcript, so the person's next prompt
+  // closes it (the band keeps the summary). Docked beside a fullscreen transcript it is a sidebar and stays.
+  on('prompt.submit', async ($, e, next) => {
+    if (e.origin.kind === 'composer' && seat === 'inline' && (await $.ui.panes()).some(p => p.id === PANE)) {
+      await $.ui.close({ id: PANE })
+    }
+
+    return next(e)
   })
 
   on('command.run', { command: 'keepwarm' }, async ($, e) => {
@@ -541,6 +559,7 @@ export const register: Register = (on, options) => {
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Button, Text } = $.ui.resolve(e)
+    seat = e.props.placement
     // Raster (colored cells) is drawn by the terminal only (reference › Elements); elsewhere text bars.
     const Raster = e.surface === 'terminal' ? $.ui.resolve(e).Raster : null
     const steps = await read($, stepsA)

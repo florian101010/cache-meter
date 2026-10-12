@@ -7,6 +7,7 @@ All notable changes to Cache Meter, a Claude Code mod. The format follows [Keep 
 ### Changed
 - `/tokens` redesigned as a dashboard: header, round-bordered cards, tall countdown digits, solid-color meters drawn with `Raster` in the terminal (text bars in the Desktop app), a context gauge with an auto-compact marker, aligned request columns with colored hit rates, one card for session totals and plan limits (subagent row only when used).
 - Keepwarm card with **Keep warm 2h** / **Stop keepwarm** buttons (hotkeys `w` / `s`, `c` for Compact) and a key-hint line; the pane opens 44 rows tall above the prompt.
+- `/tokens` toggles the pane; Esc at an empty prompt closes it too. Above the prompt (classic renderer) the pane closes when you send your next prompt, so it doesn't take rows from the conversation; docked beside the transcript (fullscreen, `/tui fullscreen`, from 110 columns) it stays open as a sidebar.
 - Band: the hit rate is colored (green from 80 %, yellow from 50 %, red below); shortly before the cache expires the band suggests `/keepwarm?`.
 
 ## [0.3.0] – 2026-10-12

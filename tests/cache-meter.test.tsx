@@ -62,7 +62,23 @@ function world(on: On, opts: { env?: Record<string, string>; forkRead?: number; 
     toasts.push(e.text)
     return { value: undefined }
   })
-  on('ui.open', () => ({ value: { isPlaced: true } }))
+  // The pane's open/closed record, as $.ui.panes() reports it.
+  const pane = { isOpen: false, closed: [] as string[] }
+  on('ui.open', () => {
+    pane.isOpen = true
+    return { value: { isPlaced: true } }
+  })
+  on('ui.close', ($, e) => {
+    pane.isOpen = false
+    pane.closed.push(e.id)
+    return { value: undefined }
+  })
+  on('ui.panes', () => ({
+    value: pane.isOpen
+      ? [{ id: 'cache-meter', title: 'Tokens & Cache', isShown: true, isFocused: false, isPlaced: true, plugin: 'cache-meter' }]
+      : [],
+  }))
+  on('prompt.submit', ($, e) => ({ text: e.text }))
   on('command.register', () => ({ value: undefined }) as never)
   on('settings.read', () => ({ value: {} }))
   on('session.usage', () => usageValue(100_000, 1_000_000, 970_000))
@@ -98,7 +114,7 @@ function world(on: On, opts: { env?: Record<string, string>; forkRead?: number; 
     } as never
   })
 
-  return { clock, toasts, forks, next }
+  return { clock, toasts, forks, next, pane }
 }
 
 /** Runs a slash command; the kit fills origin and presentation (test § Write a test). */
@@ -503,5 +519,29 @@ test('pane: the keepwarm button starts and stops keepwarm', async ($, on) => {
   await ui.press({ key: 'keepwarm-stop' })
   expect(toasts.some(t => t.startsWith('Keepwarm off'))).toBe(true)
   expect(await ui.find({ type: 'Button', key: 'keepwarm-start' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('/tokens toggles; above the prompt the next own prompt closes the pane, docked it stays', async ($, on) => {
+  const { pane } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+  expect((await run($, 'tokens', '')).text).toMatch(/^Opened/)
+  expect((await run($, 'tokens', '')).text).toMatch(/^Closed/)
+
+  // Docked: a prompt leaves it open.
+  await run($, 'tokens', '')
+  let ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  await $.prompt.submit({ text: 'next question', origin: { kind: 'composer' } } as never)
+  expect(pane.isOpen).toBe(true)
+  await ui.unmount()
+  // Inline: a prompt the person did not type (a scheduled one) leaves it open ...
+  ui = await $.ui.mount({ surface: 'terminal', ...PANE, props: { ...PANE.props, placement: 'inline' as const } })
+  await $.prompt.submit({ text: 'scheduled', origin: { kind: 'scheduled-trigger' } } as never)
+  expect(pane.isOpen).toBe(true)
+  // ... the person's own prompt closes it.
+  await $.prompt.submit({ text: 'next question', origin: { kind: 'composer' } } as never)
+  expect(pane.isOpen).toBe(false)
+  expect(pane.closed).toEqual(['cache-meter', 'cache-meter'])
   await ui.unmount()
 })
