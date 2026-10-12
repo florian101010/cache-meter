@@ -1,0 +1,20 @@
+# Content hashes (sha256, first 16 hex) of the official pages this mod relies on, as markdown
+# (https://code.claude.com/docs/en/<page>.md). .github/scripts/upstream-docs.sh --check compares, --write updates.
+# Checked 2026-10-12 against Claude Code 2.1.296.
+fe5601eb58bd3be5  plugins/mods/overview
+9b820aecef3fba43  plugins/mods/create
+662a6a6066a0dade  plugins/mods/reference
+5d86e539cf9caa13  plugins/mods/interface
+f450fdb56c59295a  plugins/mods/gallery
+07233a8b8ec6582e  plugins/mods/events
+e6a04c782102f8d0  plugins/mods/api
+833c7baa491ab8af  plugins/mods/test
+3fc352a7ca68c080  plugins/mods/troubleshoot
+cb2e78c06e78eb80  plugins/mods/admin
+36f80c095b64fc5c  plugins/install
+981414aeb6545162  plugins/loading
+c2346f30a836617b  plugins/cli-reference
+16b6dafd91d4a258  plugins/manifest-reference
+f9733d0ca8639440  plugins/marketplace-reference
+de13a11825487ea2  prompt-caching
+31754d5adce5052a  hooks

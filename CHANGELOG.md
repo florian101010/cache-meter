@@ -11,6 +11,10 @@ Alive: the band moves when it matters, and a budget keeps a session in check.
 - **Keepwarm heartbeat:** after each ping the band shows `· ping ok · <tokens> read` and a bold `↻` for five seconds.
 - **Request details on hover** (fullscreen renderer): point at a column of the request chart for its time, tokens, hit rate, writes and output.
 - **Session budget** (option `sessionBudget`, dollars, off by default): the band shows `of $X`, yellow from 80 %, red from 100 %, with a toast at each; the Health tab shows the share.
+- **Keeping up with Claude Code:** a weekly workflow runs the tests on the newest Claude Code and compares the official pages the mod relies on with stored content hashes (`.github/scripts/upstream-docs.sh`, `docs/upstream-docs.txt`); a change opens an issue. CONTRIBUTING lists every official page and what it settles here.
+
+### Docs
+- README: how to update (`claude plugin update cache-meter@cache-meter`, or auto-update for the marketplace).
 
 ## [0.8.0] – 2026-10-12
 

@@ -141,7 +141,7 @@ It runs only in interactive sessions, never drops a message, and after an expens
 - [See everything with `/tokens`](#see-everything-with-tokens)
 - [Features](#features)
 - [Requirements](#requirements)
-- [Installation](#installation)
+- [Installation](#installation) · [Update](#update)
 - [Usage](#usage)
 - [Configuration](#configuration)
 - [Privacy, cost and permissions](#privacy-cost-and-permissions)
@@ -217,6 +217,16 @@ claude --plugin-dir /absolute/path/to/cache-meter   # for one session (the clone
 To load the clone in every session, add its **absolute** path to `CLAUDE_CODE_PLUGIN_DIRS` in the `env` block of `~/.claude/settings.json` (paths separated by `:`; see [settings and environment variables](https://code.claude.com/docs/en/plugins/mods/reference#settings-and-environment-variables)). Claude Code then loads the clone exactly as it is checked out – keep that checkout on `main` and develop in a separate worktree. While a copy named `cache-meter` is already loaded that way, `--plugin-dir` cannot load a second one (the first wins); see [CONTRIBUTING.md](CONTRIBUTING.md#set-up) for how to try a worktree.
 
 > A mod runs with your permissions and is not sandboxed. Read [Privacy, cost and permissions](#privacy-cost-and-permissions) first; `claude plugin validate <dir>` lists every event a mod hooks and every call it makes ([decide whether to trust a mod](https://code.claude.com/docs/en/plugins/mods/overview#decide-whether-to-trust-a-mod)).
+
+### Update
+
+New versions land on `main` – what changed is in the [changelog](CHANGELOG.md). A plugin from a third-party marketplace such as this one does **not** update by itself ([install › Keep plugins updated](https://code.claude.com/docs/en/plugins/install#keep-plugins-updated)):
+
+```bash
+claude plugin update cache-meter@cache-meter
+```
+
+or `/plugin` → **Installed** → Cache Meter → **Update now**. To update automatically from now on: `/plugin` → **Marketplaces** → `cache-meter` → **Enable auto-update**. The running session keeps its version; run `/reload-plugins` or start a new session. From a local clone: `git pull` in the clone, then `/reload-plugins`.
 
 ## Usage
 
@@ -361,6 +371,7 @@ Issues and pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) fi
 - [AGENTS.md](AGENTS.md) – install, verify, test and change the mod, for coding agents
 - [SECURITY.md](SECURITY.md) – everything the mod can reach
 - [CHANGELOG.md](CHANGELOG.md) – versions
+- [The official documentation it is built on](CONTRIBUTING.md#the-official-documentation-this-mod-relies-on) – every mods and plugin page, and how the mod keeps up with new Claude Code releases
 
 
 ## License

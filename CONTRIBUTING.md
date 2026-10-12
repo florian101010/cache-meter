@@ -12,6 +12,39 @@ The mods API is early access, changes between releases and is newer than any mod
 
 **Required reading before any change**, every time: [reference](https://code.claude.com/docs/en/plugins/mods/reference), [interface](https://code.claude.com/docs/en/plugins/mods/interface) (the mod draws) and [test](https://code.claude.com/docs/en/plugins/mods/test) (every change needs tests); plus [events](https://code.claude.com/docs/en/plugins/mods/events) or [api](https://code.claude.com/docs/en/plugins/mods/api) for the event or call you touch. Cite page and section in a comment for every non-obvious API fact, or mark it as *undocumented*. This applies to AI agents working on the repository as well.
 
+## Keeping up with Claude Code and the mods API
+
+The mods API is early access and changes between Claude Code releases. Three things keep this mod current:
+
+1. **CI is pinned.** `ci.yml` installs exactly `CLAUDE_CODE_VERSION` (now 2.1.296), so a new release never breaks a pull request by surprise. Raise it on purpose, after the steps below, and update *Tested with* in the README and AGENTS.md.
+2. **A weekly check** (`.github/workflows/upstream.yml`, Mondays, or by hand under *Actions*) runs `validate --strict` and every test on the **newest** Claude Code, and compares the official pages below with the content hashes in `docs/upstream-docs.txt` (`.github/scripts/upstream-docs.sh --check`). Either kind of change opens one issue, *Upstream: …*, and comments on it again while it stays open.
+3. **On such an issue:** read the release notes of the new version (`claude --version`, the [changelog](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md)) and the changed pages, load the mod in a session of that version so Claude Code writes its new type declarations (`.claude-plugin/types/claude-code/index.d.ts`), run `tsc -p .`, `claude plugin validate --strict .` and `claude plugin test .`, fix code and docs, run `.github/scripts/upstream-docs.sh --write`, raise `CLAUDE_CODE_VERSION`, bump `version` – one pull request.
+
+### The official documentation this mod relies on
+
+| Page | What it settles here |
+|---|---|
+| [mods › overview](https://code.claude.com/docs/en/plugins/mods/overview) | What a mod is, where mods run, trusting and turning mods off |
+| [mods › create](https://code.claude.com/docs/en/plugins/mods/create) | Files of a mod, getting the types for your build, `--plugin-dir`, `validate` |
+| [mods › reference](https://code.claude.com/docs/en/plugins/mods/reference) | Every event, every `$` method, render sites, elements, **limits**, settings – read before every change |
+| [mods › interface](https://code.claude.com/docs/en/plugins/mods/interface) | Band and pane, elements, presses, redraws, hover, `$.state` – read before every drawing change |
+| [mods › gallery](https://code.claude.com/docs/en/plugins/mods/gallery) | How elements look in the terminal and Desktop |
+| [mods › events](https://code.claude.com/docs/en/plugins/mods/events) | Hooks, matchers, *Follow a turn*, settings hook events (`classic.*`), failing hooks |
+| [mods › api](https://code.claude.com/docs/en/plugins/mods/api) | Commands, model calls (`$.model.fork`), timers, files and processes |
+| [mods › test](https://code.claude.com/docs/en/plugins/mods/test) | The test kit, stubs, `mock.clock`, `$.ui.mount`, options – read before every change |
+| [mods › troubleshoot](https://code.claude.com/docs/en/plugins/mods/troubleshoot) | Why a mod does nothing, where its errors are logged |
+| [mods › admin](https://code.claude.com/docs/en/plugins/mods/admin) | What organizations can enforce (`prependPlugins`, the built-in guard) |
+| [plugins › install](https://code.claude.com/docs/en/plugins/install) | Installing, scopes, **keeping plugins updated** |
+| [plugins › loading](https://code.claude.com/docs/en/plugins/loading) | When auto-update runs, which marketplaces auto-update |
+| [plugins › CLI reference](https://code.claude.com/docs/en/plugins/cli-reference) | `claude plugin install / update / validate / test`, marketplace commands |
+| [plugins › manifest reference](https://code.claude.com/docs/en/plugins/manifest-reference) | `plugin.json` fields, `userConfig` (types, `options`, `min`/`max`), `types` |
+| [plugins › marketplace reference](https://code.claude.com/docs/en/plugins/marketplace-reference) | `.claude-plugin/marketplace.json` |
+| [prompt caching](https://code.claude.com/docs/en/prompt-caching) | TTLs, what invalidates and keeps the cache, subagents – the facts the countdown and causes rest on |
+| [hooks](https://code.claude.com/docs/en/hooks) | Settings hook events the mod observes (`PreModelSwitch`, `PostModelSwitch`, `SessionStart`, `StopFailure`) |
+| [Plugin directory: submit](https://claude.com/docs/plugins/submit) | Directory listing, versions, review |
+
+Index of every page: <https://code.claude.com/docs/llms.txt> (section *Mods*). Prices: [pricing › Prompt caching](https://platform.claude.com/docs/en/about-claude/pricing#prompt-caching), see [Prices](#prices).
+
 ## Prices
 
 Cache Meter turns token counts into cost statements (`/keepwarm`'s “a ping costs about 1/20 of a re-write”, the pane's “cache saved X % of input cost”). Those rest on Anthropic's price **multipliers**, never on dollar prices.
@@ -82,4 +115,7 @@ docs/how-it-works.md              design and data flow
 AGENTS.md                         guide for coding agents: install, verify, test, change
 .claude/CLAUDE.md                 imports AGENTS.md for Claude Code sessions in this repository
 llms.txt                          machine-readable index of the documentation
+.github/workflows/upstream.yml    weekly: tests on the newest Claude Code, official docs compared
+.github/scripts/upstream-docs.sh          content hashes of the official pages (--check, --write)
+docs/upstream-docs.txt            the hashes, with the date and Claude Code version they were taken at
 ```
