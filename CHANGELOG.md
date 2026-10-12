@@ -5,6 +5,7 @@ All notable changes to Cache Meter, a Claude Code mod. The format follows [Keep 
 ## [0.5.3] – 2026-10-12
 
 ### Docs
+- README lists every hook and what it does (and that each passes its event on unchanged), as the directory asks for hooks on `classic.SessionStart` and `session.compact`.
 - No wording the directory's scan reads as an image reference or a credential: the changelog and contributing guide no longer name the icon file or the working-directory variable, and a test comment no longer holds a URL. No change in behaviour.
 
 ## [0.5.2] – 2026-10-12

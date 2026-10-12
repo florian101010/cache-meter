@@ -241,6 +241,27 @@ With `auto`, Cache Meter follows Claude Code's own TTL controls and your plan st
 | **Sends** | Nothing on its own. Only when you ask: `/keepwarm` pings and **Count exactly** in the Context tab – through Claude Code, with your credentials, to the provider your session already uses | [api › Call a model](https://code.claude.com/docs/en/plugins/mods/api#call-a-model) (`$.model.fork` uses the session's credentials); `$.session.usage({ breakdown: 'full' })` sends token-count requests (type declaration `SessionUsageArgs`); no `$.http` or `$.process` call in the code |
 | **Costs** | Nothing, except `/keepwarm`: each ping reads your whole context at the model's cache-read price – billed like any request on an API key, counted against your limits on a plan. How cache reads count towards the 5-hour and weekly limits is **not documented**; watch them in the pane. **Count exactly** uses token counting, which is free on the API; whether Claude Code counts it against plan limits is **not documented** | [pricing › Prompt caching](https://platform.claude.com/docs/en/about-claude/pricing#prompt-caching) (cache read 0.1×, 0.05× or 0.025× of the input price); [api › Call a model](https://code.claude.com/docs/en/plugins/mods/api#call-a-model) (“bill to the user's plan, API key, or cloud provider”); [token counting › Pricing and rate limits](https://platform.claude.com/docs/en/build-with-claude/token-counting#pricing-and-rate-limits) (“free to use”) |
 
+<details>
+<summary><b>Every hook and what it does</b> – all pass the event on unchanged</summary>
+
+| Event | What Cache Meter does there | What it changes |
+|---|---|---|
+| `session.start` | Registers `/tokens` and `/keepwarm`, starts its 15-second timer, takes a first reading | Nothing |
+| `classic.SessionStart` (after `/clear`, `/resume`, `/branch`) | Reloads the TTL controls and the reading; on a resume continues the countdown and records Claude Code's verdict on the cache | Nothing – passes the event on with `next(e)`; it adds no context and no instructions |
+| `turn.step` | Reads each request's token counts, model, stop reason and server-side tool calls | Nothing – the request and its result go through as they are |
+| `classic.StopFailure` | Counts the kind of API error a turn ended on | Nothing |
+| `turn.complete` | Notes that no main request is running (so `/keepwarm` never pings during one) | Nothing |
+| `session.measure` | Reads context fill, plan limits, cost and the context breakdown | Nothing |
+| `session.compact` | After a real compaction, resets the countdown, since the next request writes a fresh cache. The same name is the call `$.session.compact` that the **Compact** button makes; the hook sees every compaction, whoever starts it | Nothing – it never skips or alters a compaction |
+| `classic.PostModelSwitch` | Records the cache TTL, the re-write estimate and Claude Code's verdict on the cache | Nothing |
+| `command.run` (`/tokens`, `/keepwarm` only) | Answers its own two commands | Other commands are not matched |
+| `prompt.submit` | Closes its own pane above the prompt when you send a prompt | Nothing – the prompt is not read, changed or dropped |
+| `ui.close` | Notes that you closed its pane, so it doesn't reopen | Nothing – it never keeps a pane open |
+| `ui.render` (band, its own pane) | Draws the band – keeping what other mods draw below it – and the `/tokens` pane | Only its own drawing |
+
+`claude plugin validate .` prints this list for the version you have.
+</details>
+
 ## FAQ
 
 ### Cost
