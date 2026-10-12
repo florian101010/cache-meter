@@ -197,4 +197,8 @@ Handled before the tab names, so it never opens, closes or switches the pane. It
 
 ## Session budget
 
-Option `sessionBudget` (dollars, `0` = off) against `cost.usd` – the figure `/cost` and the band show: real spend on an API key, API value on a subscription. The band's cost segment reads `of $<budget>` and turns yellow at 80 % and red at 100 %; `session.measure` raises a toast when a level is first passed (once per level and session).
+Option `sessionBudget` (dollars, `0` = off) against `cost.usd`, checked after every main request (see *Live during a turn*) and after each turn – the figure `/cost` and the band show: real spend on an API key, API value on a subscription. The band's cost segment reads `of $<budget>` and turns yellow at 80 % and red at 100 %; `session.measure` raises a toast when a level is first passed (once per level and session).
+
+## Live during a turn
+
+`session.measure` fires after each turn (*reference › Session*), so a long first turn used to show no context fill and no cost. After every main request `turn.step` now reads the plain `$.session.usage()` – "the plain call costs nothing" (types: `$.session.usage`) – and updates `measure`'s fill, tokens, cost, plan limits and their window starts, then checks the session budget. The context history, the prompt count and the auto-compact point stay per turn, from `session.measure`, so the auto-compact forecast keeps counting prompts. Whether Claude Code has already added the newest response's cost at that moment is not documented; at the latest the next request or the end of the turn brings it.

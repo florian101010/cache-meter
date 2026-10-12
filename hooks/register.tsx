@@ -499,6 +499,32 @@ async function copyReport($: EngineInterface): Promise<string> {
     : `Could not copy the session report (${copied.reason ?? 'unknown'}).`
 }
 
+// After each main request: the status line's figures – context fill, cost, plan limits – from the
+// plain $.session.usage(), which "costs nothing" (types: $.session.usage). History, prompts and the
+// auto-compact point stay per turn (session.measure), so the auto-compact forecast keeps counting prompts.
+async function refreshMeasure($: EngineInterface) {
+  let usage: Awaited<ReturnType<EngineInterface['session']['usage']>>
+  try {
+    usage = await $.session.usage()
+  } catch {
+    return
+  }
+  const now = await $.clock.now()
+  await update($, measureA, m =>
+    m === null
+      ? m
+      : {
+          ...m,
+          percent: usage.context.percent ?? m.percent,
+          tokens: usage.context.tokens ?? m.tokens,
+          limits: usage.rateLimits.map(l => ({ kind: l.kind, percentUsed: l.percentUsed, resetsAt: l.resetsAt })),
+          usd: usage.cost?.usd ?? m.usd,
+          limitStart: nextLimitStarts(m.limitStart ?? {}, usage.rateLimits, now),
+        },
+  )
+  await checkBudget($)
+}
+
 // Option sessionBudget: a toast when the session's cost (Claude Code's figure, as in the band) passes
 // 80 % and 100 % of it, each once per session.
 async function checkBudget($: EngineInterface) {
@@ -806,6 +832,10 @@ export const register: Register = (on, options) => {
         })
       }
     }
+
+    // Context, cost and limits after every main request, not only after the turn: a long turn shows
+    // live figures, and a session budget warns while the turn runs.
+    if (isMain) await refreshMeasure($)
 
     return result
   })

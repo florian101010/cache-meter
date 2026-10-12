@@ -196,7 +196,7 @@ It runs only in interactive sessions, never drops a message, and after an expens
 | `● cache 42m` | Time left until the main conversation's prompt cache expires. Green = warm, yellow = 17 % of the TTL or less – then the dot pulses once a second and the last minute counts in seconds – red = `expired` / `empty` |
 | `■■■□□` | The same as a bar (up to 20 cells; dropped first on narrow terminals) |
 | `93% hit` | Cache hit rate of the last main request = read ÷ (new + read + written) |
-| `☀ context 9%` | Context fill against the model's window; the symbol tracks the distance to the auto-compact point (☀ ☁ ☂ ☇ ↯) |
+| `☀ context 9%` | Context fill against the model's window, refreshed after every request; the symbol tracks the distance to the auto-compact point (☀ ☁ ☂ ☇ ↯) |
 | `(auto-compact 97%)` | Where auto-compact triggers, on the same scale (`off` when disabled) |
 | `· API value $1.10` | On a subscription: what the session would cost on an API key – a comparison, Claude Code's own figure as `/cost` shows it. On an API key or a cloud provider it reads `· spent $1.10`. With a [`sessionBudget`](#configuration) it reads `· spent $1.10 of $5.00`, yellow from 80 %, red from 100 %. Hidden at $0 without a budget, dropped first on narrow terminals |
 | `↻` | `/keepwarm` is running; after each ping it lights up for five seconds with `· ping ok · 148.0k read` |
@@ -314,7 +314,7 @@ With `auto`, Cache Meter follows Claude Code's own TTL controls and your plan st
 |---|---|---|
 | `session.start` | Registers `/tokens` and `/keepwarm`, starts its 15-second timer, takes a first reading | Nothing |
 | `classic.SessionStart` (after `/clear`, `/resume`, `/branch`) | Reloads the TTL controls and the reading; on a resume continues the countdown and records Claude Code's verdict on the cache | Nothing – passes the event on with `next(e)`; it adds no context and no instructions |
-| `turn.step` | Reads each request's token counts, model, effort, stop reason and server-side tool calls; before a main request that splits a warm cache it shows a note; after a warm miss it names the cause (a fresh, free context estimate shows a changed tool set); sums each subagent's requests and looks up its type and task once (`$.agent.list`) | Nothing – the request and its result go through as they are |
+| `turn.step` | Reads each request's token counts, model, effort, stop reason and server-side tool calls; before a main request that splits a warm cache it shows a note; after a warm miss it names the cause (a fresh, free context estimate shows a changed tool set); sums each subagent's requests and looks up its type and task once (`$.agent.list`); after each main request refreshes context, cost and plan limits from the plain `$.session.usage()`, which costs nothing | Nothing – the request and its result go through as they are |
 | `classic.StopFailure` | Counts the kind of API error a turn ended on | Nothing |
 | `turn.start` | Notes the session cost when a turn starts, for the line under its answer | Nothing |
 | `turn.complete` | Notes that no main request is running (so `/keepwarm` never pings during one); returns the line shown under the answer (option `turnLine`) | The answer itself is not changed – the line is shown beneath it ([reference › Turns](https://code.claude.com/docs/en/plugins/mods/reference#turns)) |

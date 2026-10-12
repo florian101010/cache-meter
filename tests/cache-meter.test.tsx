@@ -113,6 +113,8 @@ function world(on: On, opts: { env?: Record<string, string>; forkRead?: number; 
     stop: 'end_turn' as string | null,
     // The session cost $.session.usage reports; a test raises it during a turn.
     usd: 1.5,
+    // The context fill $.session.usage reports (tokens of a 1M window).
+    contextTokens: 100_000,
     // The loaded MCP tools the context estimate reports; a test changes them to stage a tool-set change.
     tools: null as { name: string; serverName: string; tokens: number; isLoaded: boolean }[] | null,
     // The text core reports for the next tool result; null = none (another mod's own answer).
@@ -161,7 +163,7 @@ function world(on: On, opts: { env?: Record<string, string>; forkRead?: number; 
   on('settings.read', () => ({ value: {} }))
   on('session.usage', ($, e) => {
     usageDetails.push((e as { breakdown?: string }).breakdown)
-    const v = usageValue(100_000, 1_000_000, 970_000) as { value: { context: { breakdown: Record<string, unknown> } } & Record<string, unknown> }
+    const v = usageValue(next.contextTokens, 1_000_000, 970_000) as { value: { context: { breakdown: Record<string, unknown> } } & Record<string, unknown> }
     const context = next.tools === null ? v.value.context : { ...v.value.context, breakdown: { ...v.value.context.breakdown, mcpTools: next.tools } }
     return { value: { ...v.value, context, cost: { usd: next.usd } } } as never
   })
@@ -756,7 +758,8 @@ test('context tab: heaviest items from the free estimate, exact count only on a 
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   await step($)
   await $.session.measure({ context: { tokens: 100_000, window: 1_000_000, percent: 10 }, rateLimits: [], changed: ['context'] })
-  expect(usageDetails.every(d => d === 'summary')).toBe(true)
+  // Only free calls without a press: the local estimate or the plain call (types: "costs nothing"), never 'full'.
+  expect(usageDetails.every(d => d === 'summary' || d === undefined)).toBe(true)
 
   const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
   await ui.press({ key: 'tab-context' })
@@ -1667,4 +1670,44 @@ test('session budget: no toast without a screen (-p, SDK)', { options: { session
   await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
   await $.session.measure({ context: { tokens: 100_000, window: 1_000_000, percent: 10 }, rateLimits: [], cost: { usd: 3 }, changed: ['cost'] })
   expect(toasts.filter(t => /budget/.test(t))).toEqual([])
+})
+
+test('live during a turn: context and cost refresh after each main request', async ($, on) => {
+  const { next } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  next.contextTokens = 300_000
+  next.usd = 2.5
+  // No session.measure yet: the turn is still running.
+  await step($)
+  const ui = await $.ui.mount({ surface: 'terminal', ...band(160) })
+  expect(await ui.find({ type: 'Text', text: '30%' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ' · spent $2.50' })).toBeDefined()
+  await ui.unmount()
+  // A subagent's request does not refresh (its cost arrives with the next main request or the turn).
+  next.usd = 3.5
+  await step($, 'agent-1')
+  const after = await $.ui.mount({ surface: 'terminal', ...band(160) })
+  expect(await after.find({ type: 'Text', text: ' · spent $2.50' })).toBeDefined()
+  await after.unmount()
+})
+
+test('live during a turn: the session budget warns before the turn ends', { options: { sessionBudget: 2 } }, async ($, on) => {
+  const { next, toasts } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  next.usd = 1.7
+  await step($)
+  expect(toasts.filter(t => /budget/.test(t))).toEqual(['Session at 85% of its budget: $1.70 spent of $2.00'])
+})
+
+test('live during a turn: the auto-compact forecast still counts prompts, not requests', async ($, on) => {
+  const { next } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  for (const tokens of [200_000, 300_000, 400_000, 500_000]) {
+    next.contextTokens = tokens
+    await step($)
+  }
+  // Four requests, no finished turn: no pace to forecast from.
+  const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  expect(await ui.find({ type: 'Text', text: /prompts? at this pace/ })).toBeUndefined()
+  await ui.unmount()
 })
