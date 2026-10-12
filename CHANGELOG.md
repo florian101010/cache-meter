@@ -2,6 +2,17 @@
 
 All notable changes to Cache Meter, a Claude Code mod. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] – 2026-10-12
+
+### Changed
+- `/tokens` redesigned as a dashboard that fits its space: two columns above the prompt from 110 body columns, one column as a sidebar, a compact version in a narrow sidebar; every line truncates instead of wrapping. The pane asks for 26 rows (36 on narrower terminals) instead of a third of the screen.
+- Cache card: tall countdown digits, expiry time, a `┃` where keepwarm would ping, what expiry would cost. Meters fill to an eighth of a cell, drawn with `Raster` in the terminal and as text in the Desktop app.
+- New **what caching saved** figure (share of the input cost, from the pricing page's multipliers; Mythos 5.1 included).
+- Requests as a **column chart**: height = share not read from the cache, color = hit rate; a cold re-write stands out as a tall red column.
+- Keepwarm card with **Keep warm 2h** / **Stop** (hotkeys `w` / `s`, `c` for Compact) and a key-hint line.
+- `/tokens` toggles the pane; Esc at an empty prompt closes it too. Above the prompt (classic renderer) the pane closes when you send your next prompt, so it doesn't take rows from the conversation; docked beside the transcript (fullscreen, `/tui fullscreen`, from 110 columns) it stays open as a sidebar.
+- Band: the hit rate is colored (green from 80 %, yellow from 50 %, red below); shortly before the cache expires the band suggests `/keepwarm?`.
+
 ## [0.3.0] – 2026-10-12
 
 ### Changed
@@ -59,7 +70,8 @@ All notable changes to Cache Meter, a Claude Code mod. The format follows [Keep 
 - Pane `/tokens`: per-request token history, totals, plan limits, cost.
 - `/keepwarm`.
 
-[0.3.0]: https://github.com/florian101010/cache-meter/compare/e430ab2...HEAD
+[0.4.0]: https://github.com/florian101010/cache-meter/compare/18e9711...HEAD
+[0.3.0]: https://github.com/florian101010/cache-meter/compare/e430ab2...18e9711
 [0.2.1]: https://github.com/florian101010/cache-meter/compare/e430ab2...HEAD
 [0.2.0]: https://github.com/florian101010/cache-meter/pull/1
 [0.1.1]: https://github.com/florian101010/cache-meter/commit/3217bf4

@@ -12,6 +12,14 @@ The mods API is early access, changes between releases and is newer than any mod
 
 **Required reading before any change**, every time: [reference](https://code.claude.com/docs/en/plugins/mods/reference), [interface](https://code.claude.com/docs/en/plugins/mods/interface) (the mod draws) and [test](https://code.claude.com/docs/en/plugins/mods/test) (every change needs tests); plus [events](https://code.claude.com/docs/en/plugins/mods/events) or [api](https://code.claude.com/docs/en/plugins/mods/api) for the event or call you touch. Cite page and section in a comment for every non-obvious API fact, or mark it as *undocumented*. This applies to AI agents working on the repository as well.
 
+## Prices
+
+Cache Meter turns token counts into cost statements (`/keepwarm`'s “a ping costs about 1/20 of a re-write”, the pane's “cache saved X % of input cost”). Those rest on Anthropic's price **multipliers**, never on dollar prices.
+
+- **Single source:** the official pricing page, section *Prompt caching*: <https://platform.claude.com/docs/en/about-claude/pricing#prompt-caching> – fetched fresh, never from memory. Cache write 1.25× (5 minutes) / 2× (1 hour) of the base input price; cache read 0.1×, with per-model exceptions in the table's footnotes. Dollar figures in the pane come only from Claude Code itself (`cost.usd`, `estimated_cache_write_usd`).
+- **Where they live:** in code only `readMultiplier` and `writeMultiplier` in `hooks/lib.ts`; in docs the table *What it costs* in `README.md`, the FAQ ratios (1/20, 1/40, 1/80) and the keepwarm card's text. The test `cache saving: …` pins the values, so a change touches code, test and README together.
+- **When to check:** whenever Anthropic releases a model (a new model id falls back to 0.1×, which may be wrong), before every release tag, and otherwise once a month. Record the date in the comment above `readMultiplier`.
+
 ## Set up
 
 Requirements: Claude Code 2.1.287 or later, TypeScript (`tsc`) 5.4 or later for type checking.

@@ -167,3 +167,205 @@ export const ZERO: Usage4 = { input: 0, read: 0, write: 0, output: 0 }
 export function add(a: Usage4, b: Usage4): Usage4 {
   return { input: a.input + b.input, read: a.read + b.read, write: a.write + b.write, output: a.output + b.output }
 }
+
+// ---------------------------------------------------------------------------------------------
+// Drawing helpers for the pane: tall digits and colored cells for a Raster (reference › Elements:
+// "Raster … cells"; types: RasterProps.cells = base64 of little-endian u32 triplets
+// [codePoint, foreground, background], 0x01000000 = the terminal's default color).
+
+/** Three-row block digits for the countdown, three columns each. */
+const TALL: Readonly<Record<string, readonly [string, string, string]>> = {
+  '0': ['█▀█', '█ █', '▀▀▀'],
+  '1': ['▀█ ', ' █ ', '▀▀▀'],
+  '2': ['▀▀█', '█▀▀', '▀▀▀'],
+  '3': ['▀▀█', ' ▀█', '▀▀▀'],
+  '4': ['█ █', '▀▀█', '  ▀'],
+  '5': ['█▀▀', '▀▀█', '▀▀▀'],
+  '6': ['█▀▀', '█▀█', '▀▀▀'],
+  '7': ['▀▀█', '  █', '  ▀'],
+  '8': ['█▀█', '█▀█', '▀▀▀'],
+  '9': ['█▀█', '▀▀█', '▀▀▀'],
+  '-': ['   ', '━━━', '   '],
+}
+
+/** `tall('58')` → three rows that draw 58 in block digits; unknown characters are skipped. */
+export function tall(text: string): [string, string, string] {
+  const glyphs = [...text].map(c => TALL[c]).filter((g): g is readonly [string, string, string] => g !== undefined)
+  const row = (i: 0 | 1 | 2) => glyphs.map(g => g[i]).join(' ')
+
+  return [row(0), row(1), row(2)]
+}
+
+export const DEFAULT_COLOR = 0x01000000
+
+const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+
+/** Standard padded base64, without relying on a global the environment may not have. */
+export function base64(bytes: Uint8Array): string {
+  let out = ''
+  for (let i = 0; i < bytes.length; i += 3) {
+    const a = bytes[i] ?? 0
+    const b = bytes[i + 1] ?? 0
+    const c = bytes[i + 2] ?? 0
+    const n = (a << 16) | (b << 8) | c
+    out += B64[(n >> 18) & 63]! + B64[(n >> 12) & 63]!
+    out += i + 1 < bytes.length ? B64[(n >> 6) & 63]! : '='
+    out += i + 2 < bytes.length ? B64[n & 63]! : '='
+  }
+
+  return out
+}
+
+export type Cell = readonly [codePoint: number, fg: number, bg: number]
+
+/** Packs cells as a Raster's `cells` string. */
+export function rasterCells(cells: readonly Cell[]): string {
+  const words = new Uint32Array(cells.length * 3)
+  cells.forEach(([cp, fg, bg], i) => {
+    words[i * 3] = cp
+    words[i * 3 + 1] = fg
+    words[i * 3 + 2] = bg
+  })
+  const bytes = new Uint8Array(words.length * 4)
+  words.forEach((w, i) => {
+    bytes[i * 4] = w & 255
+    bytes[i * 4 + 1] = (w >>> 8) & 255
+    bytes[i * 4 + 2] = (w >>> 16) & 255
+    bytes[i * 4 + 3] = (w >>> 24) & 255
+  })
+
+  return base64(bytes)
+}
+
+/** Fill colors of the meters, as 0xRRGGBB (the terminal may round them to its palette, gallery › Raster). */
+export const FILL = {
+  warm: 0x40c070,
+  low: 0xf0b030,
+  cold: 0xe05060,
+  context: 0x7088f0,
+} as const
+
+/** Colors of the request columns by hit rate: the same thresholds as the hit rate's text color. */
+export const HEALTH = { good: 0x40c070, fair: 0xf0b030, poor: 0xe05060 } as const
+
+export const TRACK = 0x45475a
+
+/** A marker on a meter: the cell it sits on, its Raster color and the theme key the text bar uses. */
+export type Mark = { at: number; color: number; theme: string }
+
+/** A run of same-role characters of a meter; `role` is the index of a mark for a marker cell. */
+export type Run = { text: string; role: 'fill' | 'track' | number }
+
+/** Left-to-right partial blocks, 1/8 to 7/8 of a cell. */
+const EIGHTHS = ['▏', '▎', '▍', '▌', '▋', '▊', '▉']
+
+/** The cell a fraction (0…1) of a `width`-cell meter falls on. */
+export function markAt(fraction: number, width: number): number {
+  return Math.max(0, Math.min(width - 1, Math.round(fraction * width)))
+}
+
+/**
+ * A one-row meter as runs: `fraction` of `width` cells filled, to an eighth of a cell, the rest a
+ * dim track, markers drawn over both. One solid fill color, not a gradient: the terminal rounds
+ * Raster colors to a smaller palette (gallery › Raster), which turned a gradient into bands.
+ */
+export function meterRuns(width: number, fraction: number, marks: readonly Mark[] = []): Run[] {
+  const filled = Math.max(0, Math.min(1, fraction)) * width
+  let full = Math.floor(filled)
+  let part = Math.round((filled - full) * 8)
+  if (part === 8) {
+    full += 1
+    part = 0
+  }
+  const runs: Run[] = []
+  const push = (ch: string, role: Run['role']) => {
+    const last = runs[runs.length - 1]
+    if (last !== undefined && last.role === role) last.text += ch
+    else runs.push({ text: ch, role })
+  }
+  for (let i = 0; i < width; i++) {
+    const mark = marks.findIndex(m => m.at === i)
+    if (mark >= 0) push('┃', mark)
+    else if (i < full) push('█', 'fill')
+    else if (i === full && part > 0) push(EIGHTHS[part - 1]!, 'fill')
+    else push('░', 'track')
+  }
+
+  return runs
+}
+
+/** The meter's runs as Raster cells. */
+export function meterCells(runs: readonly Run[], fill: number, marks: readonly Mark[] = []): Cell[] {
+  return runs.flatMap(r =>
+    [...r.text].map((ch): Cell => [
+      ch.codePointAt(0)!,
+      r.role === 'fill' ? fill : r.role === 'track' ? TRACK : (marks[r.role]?.color ?? TRACK),
+      DEFAULT_COLOR,
+    ]),
+  )
+}
+
+/** Bottom-up partial blocks, 1/8 to 8/8 of a cell. */
+const LEVELS = [0x2581, 0x2582, 0x2583, 0x2584, 0x2585, 0x2586, 0x2587, 0x2588]
+
+/** One column of the request chart: its height as a share (0…1) and its color. */
+export type Column = { share: number; color: number }
+
+/**
+ * A column chart `rows` tall, row-major from the top: one two-cell column per value, newest at the
+ * right edge, heights to an eighth of a cell; any share above zero shows at least an eighth. Slots
+ * without a value, and the bottom row under a zero, show a dim baseline.
+ */
+export function columnCells(values: readonly Column[], width: number, rows: number): Cell[] {
+  const slots = Math.floor(width / 2)
+  const shown = values.slice(-slots)
+  const offset = slots - shown.length
+  const cells: Cell[] = []
+  for (let r = 0; r < rows; r++) {
+    const fromBottom = rows - 1 - r
+    for (let x = 0; x < width; x++) {
+      const v = x < slots * 2 ? shown[Math.floor(x / 2) - offset] : undefined
+      const levels = v === undefined ? 0 : v.share > 0 ? Math.max(1, Math.round(Math.min(1, v.share) * rows * 8)) : 0
+      const level = Math.max(0, Math.min(8, levels - fromBottom * 8))
+      if (level > 0 && v !== undefined) cells.push([LEVELS[level - 1]!, v.color, DEFAULT_COLOR])
+      else if (fromBottom === 0) cells.push([LEVELS[0]!, TRACK, DEFAULT_COLOR])
+      else cells.push([0x20, DEFAULT_COLOR, DEFAULT_COLOR])
+    }
+  }
+
+  return cells
+}
+
+/**
+ * Cache-read price as a multiple of the base input price, by model: 0.05× on Opus 5.5 and Sonnet
+ * 5.5, 0.025× on Fable 5.1 and Mythos 5.1, 0.1× elsewhere. Source and how to keep these current:
+ * CONTRIBUTING.md › Prices (pricing › Prompt caching, checked 2026-10-12).
+ */
+export function readMultiplier(model: string): number {
+  if (/(opus|sonnet)-5-5/.test(model)) return 0.05
+  if (/(fable|mythos)-5-1/.test(model)) return 0.025
+
+  return 0.1
+}
+
+/** Cache-write price as a multiple of the base input price: 2× for a one-hour write, 1.25× for five minutes. */
+export function writeMultiplier(ttlMs: number): number {
+  return ttlMs >= HOUR ? 2 : 1.25
+}
+
+/**
+ * The share of the input cost the cache saved, in percent, against sending every input token
+ * uncached: negative when writing cost more than reading saved. Null before any input.
+ */
+export function cacheSaving(u: Usage4, readMult: number, writeMult: number): number | null {
+  const all = u.input + u.read + u.write
+  if (all === 0) return null
+  const paid = u.input + u.read * readMult + u.write * writeMult
+
+  return Math.round((1 - paid / all) * 100)
+}
+
+/** Right-aligns `text` in `width` columns. */
+export function right(text: string, width: number): string {
+  return text.length >= width ? text : ' '.repeat(width - text.length) + text
+}

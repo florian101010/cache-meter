@@ -5,7 +5,24 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { FIVE_MIN, HOUR, forecast, hitPct, litCells, parseKeepWarm, remainingLabel, resolveTtl } from '../hooks/lib'
+import {
+  FIVE_MIN,
+  HOUR,
+  cacheSaving,
+  columnCells,
+  forecast,
+  hitPct,
+  litCells,
+  meterCells,
+  meterRuns,
+  parseKeepWarm,
+  rasterCells,
+  readMultiplier,
+  remainingLabel,
+  resolveTtl,
+  tall,
+  writeMultiplier,
+} from '../hooks/lib'
 
 const T0 = Date.parse('2026-10-12T10:00:00Z')
 const SUMMARY = [{ role: 'user' as const, text: 'Summary', toolUses: [] }]
@@ -62,7 +79,23 @@ function world(on: On, opts: { env?: Record<string, string>; forkRead?: number; 
     toasts.push(e.text)
     return { value: undefined }
   })
-  on('ui.open', () => ({ value: { isPlaced: true } }))
+  // The pane's open/closed record, as $.ui.panes() reports it.
+  const pane = { isOpen: false, closed: [] as string[] }
+  on('ui.open', () => {
+    pane.isOpen = true
+    return { value: { isPlaced: true } }
+  })
+  on('ui.close', ($, e) => {
+    pane.isOpen = false
+    pane.closed.push(e.id)
+    return { value: undefined }
+  })
+  on('ui.panes', () => ({
+    value: pane.isOpen
+      ? [{ id: 'cache-meter', title: 'Tokens & Cache', isShown: true, isFocused: false, isPlaced: true, plugin: 'cache-meter' }]
+      : [],
+  }))
+  on('prompt.submit', ($, e) => ({ text: e.text }))
   on('command.register', () => ({ value: undefined }) as never)
   on('settings.read', () => ({ value: {} }))
   on('session.usage', () => usageValue(100_000, 1_000_000, 970_000))
@@ -98,7 +131,7 @@ function world(on: On, opts: { env?: Record<string, string>; forkRead?: number; 
     } as never
   })
 
-  return { clock, toasts, forks, next }
+  return { clock, toasts, forks, next, pane }
 }
 
 /** Runs a slash command; the kit fills origin and presentation (test § Write a test). */
@@ -311,8 +344,12 @@ test('pane draws with requests and limits on every surface', async ($, on) => {
   })
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ surface, ...PANE })
-    expect(await ui.find({ type: 'Text', text: /warm · 60m left/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: 'WARM' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: / min left · until \d\d:\d\d$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^cache saved \d+% of input cost$/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /5 hours/ })).toBeDefined()
+    // Colored cells in the terminal, a text bar in the Desktop app (reference › Elements).
+    expect((await ui.find({ type: 'Raster' })) !== undefined).toBe(surface === 'terminal')
     expect(await ui.find({ type: 'Text', text: /\$2\.50/ })).toBeDefined()
     expect(await ui.find({ type: 'Button', key: 'pane-compact' })).toBeDefined()
     await ui.unmount()
@@ -383,7 +420,7 @@ test('cold: limits – under 10k, more read than written, after /compact, subage
   await step($, 'agent-1')
   expect(toasts.some(t => t.startsWith('Cache was cold'))).toBe(false)
   const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
-  expect(await ui.find({ type: 'Text', text: /None – the cache was warm/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /None – warm for every request/ })).toBeDefined()
   await ui.unmount()
 })
 
@@ -476,4 +513,105 @@ test('/keepwarm pings again after an aborted turn', async ($, on) => {
   expect(forks).toHaveLength(1)
   await clock.advance(15 * 60_000)
   await hanging
+})
+
+test('drawing helpers: tall digits, raster cells, meter', async () => {
+  expect(tall('58')).toEqual(['█▀▀ █▀█', '▀▀█ █▀█', '▀▀▀ ▀▀▀'])
+  // Reference values computed independently: base64 of little-endian u32 triplets.
+  expect(rasterCells([[0x2588, 0xff8800, 0x01000000]])).toBe('iCUAAACI/wAAAAAB')
+  expect(rasterCells([[0x2588, 0x00ff00, 0x01000000], [0x2591, 0x585b70, 0x01000000]])).toBe('iCUAAAD/AAAAAAABkSUAAHBbWAAAAAAB')
+  // 4.5 of 10 cells: four full, a half block, a marker on cell 7, the rest track.
+  const mark = { at: 7, color: 0xff6b81, theme: 'error' }
+  const runs = meterRuns(10, 0.45, [mark])
+  expect(runs.map(r => r.text).join('')).toBe('████▌░░┃░░')
+  expect(runs.map(r => r.role)).toEqual(['fill', 'track', 0, 'track'])
+  const cells = meterCells(runs, 0x40c070, [mark])
+  expect(cells[4]).toEqual([0x258c, 0x40c070, 0x01000000])
+  expect(cells[7]).toEqual([0x2503, 0xff6b81, 0x01000000])
+  // 7.96 eighths round up to a full cell, not to an empty partial one.
+  expect(meterRuns(4, 0.999, []).map(r => r.text).join('')).toBe('████')
+  // Columns: two slots in four cells, newest at the right; a full and an empty one, two rows tall.
+  const chart = columnCells([{ share: 1, color: 0xe05060 }, { share: 0, color: 0x40c070 }], 4, 2)
+  expect(chart.map(c => String.fromCodePoint(c[0])).join('')).toBe('██  ██▁▁')
+  expect(chart[6]?.[1]).toBe(0x45475a)
+  // A tiny share still shows an eighth; one value sits in the right-hand slot.
+  const tiny = columnCells([{ share: 0.01, color: 0x40c070 }], 4, 2)
+  expect(tiny.map(c => String.fromCodePoint(c[0])).join('')).toBe('    ▁▁▁▁')
+  expect(tiny[6]?.[1]).toBe(0x40c070)
+  expect(tiny[4]?.[1]).toBe(0x45475a)
+})
+
+test('cache saving: base price against reads and writes, by model and TTL', async () => {
+  // 460k read, 122k written, 8 new on Opus 5.5 (read 0.05×) with one-hour writes (2×): 54 % saved.
+  expect(cacheSaving({ input: 8, read: 460_000, write: 122_000, output: 0 }, readMultiplier('claude-opus-5-5'), writeMultiplier(HOUR))).toBe(54)
+  // Only writes: twice the base price, so the cache cost 100 % more.
+  expect(cacheSaving({ input: 0, read: 0, write: 100, output: 0 }, 0.1, writeMultiplier(HOUR))).toBe(-100)
+  expect(cacheSaving({ input: 0, read: 0, write: 0, output: 5 }, 0.1, 2)).toBe(null)
+  expect(readMultiplier('claude-fable-5-1')).toBe(0.025)
+  expect(readMultiplier('claude-mythos-5-1')).toBe(0.025)
+  expect(readMultiplier('claude-sonnet-5-5')).toBe(0.05)
+  expect(readMultiplier('claude-haiku-5-5')).toBe(0.1)
+  expect(writeMultiplier(FIVE_MIN)).toBe(1.25)
+})
+
+test('pane: the keepwarm button starts and stops keepwarm', async ($, on) => {
+  const { toasts } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  await ui.press({ key: 'keepwarm-start' })
+  expect(toasts.some(t => t.startsWith('Keepwarm until'))).toBe(true)
+  expect(await ui.find({ type: 'Text', text: '↻ Keepwarm on' })).toBeDefined()
+  await ui.press({ key: 'keepwarm-stop' })
+  expect(toasts.some(t => t.startsWith('Keepwarm off'))).toBe(true)
+  expect(await ui.find({ type: 'Button', key: 'keepwarm-start' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('/tokens toggles; above the prompt the next own prompt closes the pane, docked it stays', async ($, on) => {
+  const { pane } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+  expect((await run($, 'tokens', '')).text).toMatch(/^Opened/)
+  expect((await run($, 'tokens', '')).text).toMatch(/^Closed/)
+
+  // Docked: a prompt leaves it open.
+  await run($, 'tokens', '')
+  let ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  await $.prompt.submit({ text: 'next question', origin: { kind: 'composer' } } as never)
+  expect(pane.isOpen).toBe(true)
+  await ui.unmount()
+  // Inline: a prompt the person did not type (a scheduled one) leaves it open ...
+  ui = await $.ui.mount({ surface: 'terminal', ...PANE, props: { ...PANE.props, placement: 'inline' as const } })
+  await $.prompt.submit({ text: 'scheduled', origin: { kind: 'scheduled-trigger' } } as never)
+  expect(pane.isOpen).toBe(true)
+  // ... the person's own prompt closes it.
+  await $.prompt.submit({ text: 'next question', origin: { kind: 'composer' } } as never)
+  expect(pane.isOpen).toBe(false)
+  expect(pane.closed).toEqual(['cache-meter', 'cache-meter'])
+  await ui.unmount()
+})
+
+test('pane widths: a narrow dock drops secondary text, from 110 columns two columns', async ($, on) => {
+  world(on)
+  await step($)
+  const at = (bodyColumns: number) => $.ui.mount({ surface: 'terminal', ...PANE, props: { ...PANE.props, bodyColumns } })
+
+  let ui = await at(50)
+  expect(await ui.find({ type: 'Text', text: 'prompt cache · tokens' })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: 'not from cache' })).toBeDefined()
+  expect(await ui.find({ key: 'columns' })).toBeUndefined()
+  await ui.unmount()
+
+  ui = await at(90)
+  expect(await ui.find({ type: 'Text', text: 'prompt cache · tokens' })).toBeDefined()
+  expect(await ui.find({ key: 'columns' })).toBeUndefined()
+  await ui.unmount()
+
+  ui = await at(140)
+  expect(await ui.find({ key: 'columns' })).toBeDefined()
+  // The countdown spans one column of two: (140 - 1) / 2 = 69, minus 4 of card chrome.
+  expect((await ui.find({ type: 'Raster', key: 'countdown' }))?.props.columns).toBe(65)
+  expect((await ui.find({ type: 'Raster', key: 'requests' }))?.props.columns).toBe(136)
+  await ui.unmount()
 })
