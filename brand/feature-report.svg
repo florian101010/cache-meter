@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="240" viewBox="0 0 1280 240" role="img" aria-label="Copy it: /tokens report copies the whole session as Markdown to your own clipboard.">
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="240" viewBox="0 0 1280 240" role="img" aria-label="Copy it: /tokens report copies your session stats as Markdown to your own clipboard – never your conversation.">
 <defs>
 <radialGradient id="bg" cx="0.12" cy="0.3" r="1.1"><stop offset="0" stop-color="#2b2540"/><stop offset="0.55" stop-color="#16141f"/><stop offset="1" stop-color="#0c0b12"/></radialGradient>
 <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#ff9a6b"/><stop offset="1" stop-color="#d97757"/></linearGradient>
@@ -20,7 +20,7 @@
 <rect x="470" y="40" width="108" height="28" rx="14" fill="#d97757" fill-opacity="0.14" stroke="#d97757" stroke-opacity="0.55"/>
 <text x="487" y="59" font-family="'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="13" font-weight="700" letter-spacing="1.6" fill="#ff9a6b">COPY IT</text>
 <text x="470" y="118" font-family="'Helvetica Neue', 'Segoe UI', Roboto, Arial, sans-serif" font-size="46" font-weight="700" fill="#f5f5f7" letter-spacing="-0.8">/tokens report</text>
-<text x="472" y="160" font-family="'Helvetica Neue', 'Segoe UI', Roboto, Arial, sans-serif" font-size="23" fill="#cdd6f4">The whole session as Markdown on your own clipboard.</text>
+<text x="472" y="160" font-family="'Helvetica Neue', 'Segoe UI', Roboto, Arial, sans-serif" font-size="23" fill="#cdd6f4">Your session stats as Markdown – never your conversation.</text>
 <text x="472" y="198" font-family="'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="15" fill="#7f849c">cost · cache · context · subagents · plan limits</text>
 <rect x="1" y="1" width="1278" height="238" rx="23" fill="none" stroke="#ffffff" stroke-opacity="0.06" stroke-width="2"/>
 </svg>
