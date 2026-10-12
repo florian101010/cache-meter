@@ -120,6 +120,9 @@ let mainRequests = 0
 // The line under each answer (option turnLine), and per open turn the session cost at its start and
 // its main requests. Keyed by turnId; a reload loses at most the line of the turn that was running.
 let showTurnLine = true
+// Prompts already in the transcript when this load or /clear, /resume, /branch began: MCP calls are
+// counted from then on ($.state resets there, $.session.turns() does not), so "unused" counts from there too.
+let promptBase = 0
 let openTurns: Record<string, { usd: number | null; requests: number }> = {}
 // Where the surface last seated the pane: beside a fullscreen transcript (dock) or above the prompt (inline).
 let seat: 'dock' | 'inline' | null = null
@@ -301,6 +304,14 @@ async function tick($: EngineInterface) {
   }
 }
 
+async function turnsNow($: EngineInterface): Promise<number> {
+  try {
+    return await $.session.turns()
+  } catch {
+    return 0
+  }
+}
+
 async function resetCache($: EngineInterface) {
   await update($, cacheA, () => null)
   await update($, measureA, m => (m === null ? m : { ...m, percent: null, tokens: null }))
@@ -371,12 +382,14 @@ export const register: Register = (on, options) => {
   isPinging = false
   mainRequests = 0
   showTurnLine = options.turnLine !== 'off'
+  promptBase = 0
   openTurns = {}
 
   on('session.start', async ($, e, next) => {
     const result = await next(e)
     await loadTtlConfig($)
     await measureNow($)
+    promptBase = await turnsNow($)
     // Hooks also run under -p and the SDK, where nothing draws (overview § Where mods run).
     isInteractive = e.isInteractive
     if (e.isInteractive) {
@@ -409,6 +422,7 @@ export const register: Register = (on, options) => {
   on('classic.SessionStart', { source: ['clear', 'resume', 'fork'] }, async ($, e, next) => {
     await loadTtlConfig($)
     await measureNow($)
+    promptBase = await turnsNow($)
     if ((e.source === 'resume' || e.source === 'fork') && e.seconds_since_last_response !== undefined) {
       if (e.prompt_cache_likely_expired !== undefined) await recordCheck($, !e.prompt_cache_likely_expired, 'resume')
       const now = await $.clock.now()
@@ -472,13 +486,13 @@ export const register: Register = (on, options) => {
         // Measured, not explained: how often a warm cache was re-written anyway. Why is left open,
         // because the prompt sections are not compared (a prompt.compose hook would run on every render).
         if (isUnexpectedWrite(wasCold, before !== null && before.lastAt > 0, u)) {
-          await update($, healthA, h => {
-            const prev = h.unexpected ?? { count: 0, written: 0, lastAt: null, lastIdleMs: null }
+          await update($, healthA, health => {
+            const prev = health.unexpected ?? { count: 0, written: 0, lastAt: null, lastIdleMs: null }
             // The pause before it tells the two causes apart: seconds point at the prompt, minutes
             // at a cache that lives shorter than the TTL assumed (API key without promptCacheTtl).
             const lastIdleMs = before === null ? null : Math.max(0, startedAt - before.lastAt)
 
-            return { ...h, unexpected: { count: prev.count + 1, written: prev.written + u.write, lastAt: startedAt, lastIdleMs } }
+            return { ...health, unexpected: { count: prev.count + 1, written: prev.written + u.write, lastAt: startedAt, lastIdleMs } }
           })
         }
         await update($, cacheA, () => ({
@@ -545,11 +559,9 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
-  // A main turn has ended, also when aborted (events § Follow a turn; TurnCompleteInput.isAborted):
-  // no main request runs any more. Resets the counter even if an aborted stream never reached its
-  // finally above, so /keepwarm cannot stall silently.
-  // The session cost when a turn starts, for the line under its answer. SessionCost.usd sums every
-  // priced response, subagents' included: the line shows what the whole answer cost (types: SessionCost).
+  // The session cost when a turn starts, for the line under its answer. SessionCost.usd sums "every
+  // priced API response this session" (types: SessionCost), so the line shows the cost added during the
+  // turn: subagents it started count, as would any other priced call in that time (inferred, not stated).
   on('turn.start', async ($, e, next) => {
     let usd: number | null = null
     try {
@@ -599,7 +611,7 @@ export const register: Register = (on, options) => {
   // Counted after the call ran; the call and its result pass through unchanged.
   on('tool.call', { tool: /^mcp__/ }, async ($, e, next) => {
     const result = await next(e)
-    if (!('deny' in result && result.deny)) await update($, healthA, h => ({ ...h, toolCalls: bump(h.toolCalls ?? {}, e.tool) }))
+    if (!('deny' in result && result.deny)) await update($, healthA, health => ({ ...health, toolCalls: bump(health.toolCalls ?? {}, e.tool) }))
 
     return result
   })
@@ -1294,7 +1306,7 @@ export const register: Register = (on, options) => {
               MCP servers{map.deferredMcpTools > 0 ? ` · ${map.deferredMcpTools} more tools behind tool search, not loaded` : ''}
             </Text>
             {map.mcpServers.length === 0 && <Text dimColor> none loaded</Text>}
-            {map.mcpServers.slice(0, 5).map(m => itemRow(m.name, m.tokens, topServer, nameW, mcpNote(m.tools, m.toolNames, health.toolCalls ?? {}, measure?.prompts ?? null)))}
+            {map.mcpServers.slice(0, 5).map(m => itemRow(m.name, m.tokens, topServer, nameW, mcpNote(m.tools, m.toolNames, health.toolCalls ?? {}, measure?.prompts == null ? null : measure.prompts - promptBase)))}
             <Text wrap="truncate-end">
               <Text dimColor>Skills </Text>
               {map.skills === null ? (
@@ -1573,8 +1585,9 @@ function costLabel(measure: Measure | null, isLong: boolean): string {
 }
 
 /**
- * An MCP server's note in the context tab: its tools and how often this session called them. "unused
- * so far" only after a few prompts, so a fresh session does not call every server idle.
+ * An MCP server's note in the context tab: its tools and how often they were called since the start,
+ * /clear, /resume or /branch. "unused so far" only after a few prompts in that span, so a fresh or
+ * resumed session does not call every server idle.
  */
 function mcpNote(tools: number, toolNames: readonly string[] | undefined, calls: Readonly<Record<string, number>>, prompts: number | null): string {
   if (toolNames === undefined) return ` · ${tools} tools`

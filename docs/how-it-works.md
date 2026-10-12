@@ -163,8 +163,8 @@ With the option `cacheTtl` set to `auto`, the TTL is derived in this order, foll
 
 ## Limit forecast
 
-`session.measure` keeps, per plan limit, its first reading in the current window (`limitStart`: time, percentage, `resetsAt`). A lower percentage or a changed `resetsAt` starts a new window. From ten minutes after that reading, the overview shows when the limit reaches 100 % at the average pace since then – only if that is before the reset. A straight line through two readings: a burst of work makes it early, a pause late.
+`session.measure` keeps, per plan limit, its first reading in the current window (`limitStart`: time, percentage, `resetsAt`). A lower percentage or a changed `resetsAt` starts a new window. From ten minutes after that reading, the overview shows when the limit reaches 100 % at the average pace since then – only if that is before the reset, and not at all when Claude Code gives no reset time. A straight line through two readings: a burst of work makes it early, a pause late.
 
 ## MCP calls and idle servers
 
-The Context tab lists each loaded MCP server's tools with the calls this session made to any of them (`tool.call` above, matched by the wire names in the context breakdown, `ContextMcpTool.name`). After three prompts a server with no call reads *unused so far*. Servers behind tool search are not listed: their tools are not in the cached prefix (prompt-caching › *Connecting or removing an MCP server*).
+The Context tab lists each loaded MCP server's tools with the calls this session made to any of them (`tool.call` above, matched by the wire names in the context breakdown, `ContextMcpTool.name`). After three prompts a server with no call reads *unused so far* – counted from the start, `/clear`, `/resume` or `/branch`: `$.state` (and with it the call count) resets there, `$.session.turns()` does not, so the prompts are counted from a baseline taken at that moment. Servers behind tool search are not listed: their tools are not in the cached prefix (prompt-caching › *Connecting or removing an MCP server*).

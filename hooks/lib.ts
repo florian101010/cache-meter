@@ -1,6 +1,6 @@
 // Pure helpers of cache-meter: no `$`, so the tests call them directly.
 
-import type { CacheInfo, ContextMap, Limit, Usage4 } from '../types'
+import type { CacheInfo, ContextMap, Limit, LimitStart, Usage4 } from '../types'
 
 export const HOUR = 3_600_000
 export const FIVE_MIN = 300_000
@@ -462,8 +462,8 @@ export function serverCalls(toolNames: readonly string[], calls: Readonly<Record
 export const FORECAST_MIN_MS = 10 * 60_000
 
 /**
- * When a plan limit reaches 100 % at the pace since its first reading in this session, or null:
- * too early, no rise, or not before the window resets.
+ * When a plan limit reaches 100 % at the pace since its first reading in this window, or null:
+ * too early, no rise, no known reset time, or not before the window resets.
  */
 export function limitForecast(
   start: { at: number; pct: number } | undefined,
@@ -474,9 +474,10 @@ export function limitForecast(
   if (start === undefined || now - start.at < FORECAST_MIN_MS || pct <= start.pct || pct >= 100) return null
   const perMs = (pct - start.pct) / (now - start.at)
   const at = now + (100 - pct) / perMs
+  // Without a reset time the window may free up first: no forecast rather than a wrong one.
   const reset = resetsAt === undefined ? Number.NaN : Date.parse(resetsAt)
 
-  return Number.isNaN(reset) || at < reset ? at : null
+  return !Number.isNaN(reset) && at < reset ? at : null
 }
 
 /** The line under an answer: what the turn cost and how well it hit the cache. Cost only when known. */
@@ -493,11 +494,11 @@ export function turnLine(u: Usage4, requests: number, usd: number | null, isPlan
  * percentage fell, or the reset time moved), so the forecast does not die after the first reset.
  */
 export function nextLimitStarts(
-  prev: Readonly<Record<string, { at: number; pct: number; resetsAt: string | null }>>,
-  limits: readonly { kind: string; percentUsed: number; resetsAt?: string }[],
+  prev: Readonly<Record<string, LimitStart>>,
+  limits: readonly Limit[],
   now: number,
-): Record<string, { at: number; pct: number; resetsAt: string | null }> {
-  const next: Record<string, { at: number; pct: number; resetsAt: string | null }> = {}
+): Record<string, LimitStart> {
+  const next: Record<string, LimitStart> = {}
   for (const l of limits) {
     const old = prev[l.kind]
     const resetsAt = l.resetsAt ?? null
@@ -518,8 +519,10 @@ export function isUnexpectedWrite(wasCold: boolean, hadCache: boolean, u: Usage4
 }
 
 /** The note at a model switch while the cache is warm: what Claude Code estimates the switch re-writes. */
-export function switchNote(tokens: number, usd: number, isListPrice: boolean, remainingMs: number | null): string {
-  const price = `≈ $${usd.toFixed(2)}${isListPrice ? '' : ' (estimate)'}`
+export function switchNote(tokens: number, usd: number, isKnownPrice: boolean, remainingMs: number | null): string {
+  // 'catalog' (list price) and 'configured' (the organization's modelPricing) are known prices; 'default'
+  // means the target model was unknown and a default tier was assumed (types: PreModelSwitch pricing).
+  const price = `≈ $${usd.toFixed(2)}${isKnownPrice ? '' : ' (estimate)'}`
   const warm = remainingMs === null ? '' : ` · cache warm ${remainingLabel(remainingMs)} more`
 
   return `Model switch re-writes ${short(tokens)} tokens to the cache (${price})${warm} – after it expires, switching adds nothing`

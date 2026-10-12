@@ -167,7 +167,7 @@ Two more places, only when there is something to say:
 
 | Where | What |
 |---|---|
-| Under each answer | `◉ Cache Meter · ≈ $0.42 API value · 3 requests · 97% from cache · 6.0k written to cache` – what this answer cost (subagents it started included; `spent` on an API key; no cost under half a cent), its model requests and how they used the cache. Option [`turnLine`](#configuration) |
+| Under each answer | `◉ Cache Meter · ≈ $0.42 API value · 3 requests · 97% from cache · 6.0k written to cache` – what the session cost rose by during this answer (subagents it started count; `spent` on an API key; no cost under half a cent), its model requests and how they used the cache. Option [`turnLine`](#configuration) |
 | At a model switch | While the cache is warm, Claude Code asks you to confirm a `/model` switch. Cache Meter adds a note with Claude Code's own estimate and the time left: *Model switch re-writes 148.0k tokens to the cache (≈ $1.18) · cache warm 42m more – after it expires, switching adds nothing.* It never blocks or approves a switch |
 
 **Pane `/tokens`** – the dashboard with its Overview, Context and Health tabs; see [above](#see-everything-with-tokens). The Overview's request chart draws one column per request: its height is the share not read from the cache, so a cold re-write stands out as a tall red column, a first write of the cache in blue.
