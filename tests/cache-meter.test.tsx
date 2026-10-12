@@ -2009,3 +2009,11 @@ test('pane header: the key hint stays visible when a tall tab cuts the footer of
   expect(await ui.find({ type: 'Text', text: 'ctrl+x tab: keys' })).toBeDefined()
   await ui.unmount()
 })
+
+test('pane footer: a narrow sidebar (iPad) still names the key to reach the pane', async ($, on) => {
+  world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  const ui = await $.ui.mount({ surface: 'terminal', ...PANE, props: { ...PANE.props, bodyColumns: 50 } })
+  expect(await ui.find({ type: 'Text', text: /ctrl\+x tab: keys$/ })).toBeDefined()
+  await ui.unmount()
+})

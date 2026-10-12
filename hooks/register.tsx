@@ -2114,7 +2114,7 @@ export const register: Register = (on, options) => {
           ) : (
             <Text dimColor wrap="truncate-end">
               {tier === 'narrow'
-                ? `${canClick ? 'click a tab · ' : ''}/tokens health`
+                ? `${canClick ? 'click a tab · ' : ''}ctrl+x tab: keys`
                 : `${canClick ? 'click a tab or ' : ''}/tokens context | health · ctrl+x, then tab: keys here (again if another pane lights up)`}
             </Text>
           )}
