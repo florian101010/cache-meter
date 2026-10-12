@@ -8,7 +8,8 @@ All notable changes to Cache Meter, a Claude Code mod. The format follows [Keep 
 - The pane's footer hint ran into the Compact button in a sidebar of about 80 columns; the button now keeps its width and a gap, and the hint no longer repeats `c compact`.
 
 ### Docs
-- README shows real screenshots of the band, the overview, and the Context and Health tabs.
+- README shows real screenshots of the band, the overview, and the Context and Health tabs; opens with three benefit columns, what a break costs, both ways to install (shell or by pasting the link into Claude Code) and three things to try; new section *See everything with `/tokens`*.
+- **PRIVACY.md** – what the mod reads, keeps and sends; `privacyPolicyUrl` points to it. Manifest and marketplace descriptions name the dashboard.
 
 ## [0.5.0] – 2026-10-12
 

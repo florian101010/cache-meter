@@ -11,6 +11,7 @@
 
 - [docs/how-it-works.md](https://raw.githubusercontent.com/florian101010/cache-meter/main/docs/how-it-works.md): events, state, thresholds, cold-rewrite rule, keepwarm algorithm, pane layout, the Context and Health tabs and their sources, the saving formula
 - [CONTRIBUTING.md](https://raw.githubusercontent.com/florian101010/cache-meter/main/CONTRIBUTING.md): the documentation-first rule and the change workflow
+- [PRIVACY.md](https://raw.githubusercontent.com/florian101010/cache-meter/main/PRIVACY.md): what the mod reads, keeps and sends
 - [SECURITY.md](https://raw.githubusercontent.com/florian101010/cache-meter/main/SECURITY.md): everything the mod can reach
 - [CHANGELOG.md](https://raw.githubusercontent.com/florian101010/cache-meter/main/CHANGELOG.md): versions
 

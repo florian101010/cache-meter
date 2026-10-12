@@ -24,7 +24,8 @@ Version and requirements: `.claude-plugin/plugin.json` (`version`), Claude Code 
 
    In a running session the equivalent is `/plugin install cache-meter --marketplace florian101010/cache-meter`. Docs: <https://code.claude.com/docs/en/plugins/install>.
 3. Verify: `claude plugin list` lists `cache-meter@cache-meter` as enabled. Tell the user to start a new Claude Code session (or run `/reload-plugins`); `/plugin` then shows `… mods active · cache-meter`, and after the first answer the band above the prompt shows a minute value and a hit rate.
-4. Optional: the user can set `cacheTtl` (`auto` · `60m` · `5m`) with `/config` → `cache-meter.cacheTtl`. On an API key or cloud provider (5-minute default TTL) recommend `5m`.
+4. Optional: the user can set `cacheTtl` (`auto` · `60m` · `5m`) with `/config` → `cache-meter.cacheTtl` – on an API key or cloud provider (5-minute default TTL) recommend `5m` – and `autoSidebar` (`auto` · `off`): with `auto` the dashboard opens by itself as a sidebar in the fullscreen renderer. The install output's note "2 userConfig options not yet set" is harmless: the defaults apply.
+5. Tell the user what to try: the band above the prompt after the first answer, `/tokens` (tabs: `/tokens context`, `/tokens health`), `/keepwarm` before a break.
 
 Remove: `claude plugin uninstall cache-meter@cache-meter`. Turn off for one session: `claude --safe-mode`.
 
