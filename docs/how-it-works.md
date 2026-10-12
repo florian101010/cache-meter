@@ -75,7 +75,31 @@ The count of running main requests is raised before the first `await` in `turn.s
 
 ## Pane layout
 
-`/tokens` opens the pane 44 rows tall above the prompt (types: `PaneOpenArgs.rows`; docked beside the transcript in fullscreen). It is a column of round-bordered cards sized to `e.props.bodyColumns`: the cache card (tall digits, state, hit rates, TTL source, a countdown meter), the keepwarm card (buttons with hotkeys `w`/`s`), context (a meter with a `┃` at the auto-compact point, trend sparkline from three turns on), requests (fixed-width stacked bars, right-aligned numbers, hit rate colored green ≥ 80 %, yellow ≥ 50 %, red below), and one card for session totals and plan limits. Meters are a `Raster` of colored cells in the terminal and text bars elsewhere, because only the terminal draws `Raster` (*reference › Elements*). The fill is one solid color, not a gradient: the terminal rounds Raster colors to a smaller palette (*gallery › Raster*), and a per-cell gradient showed as bands. Hotkeys act only while the pane has focus (*interface › Keyboard focus and hotkeys*).
+`/tokens` opens the pane with a requested height of 26 rows from 114 terminal columns, 36 below (`PaneOpenArgs.rows`; ignored when docked). The layout follows `e.props.bodyColumns` in three tiers, measured on 2.1.296 (a docked pane gets about 84 columns beside a 190-column terminal and about 48 beside a 120-column one):
+
+| Body columns | Layout |
+|---|---|
+| < 64 | one column; drops the header subtitle, session hit rate, TTL source, trend and long hints |
+| 64–109 | one column, everything |
+| ≥ 110 | two columns (cache + keepwarm left, context + session right), requests full width below |
+
+Every single-line text truncates (`wrap="truncate-end"`) instead of wrapping – the official mods do the same, and a wrapped line had garbled an earlier version.
+
+Cards: **cache** (tall digits, state, expiry time, hit rates, TTL source; a countdown meter with a `┃` at the point where keepwarm pings, `PING_SHARE` of the TTL; what expiry would cost), **keepwarm** (buttons with hotkeys `w`/`s`), **context** (a meter with a `┃` at the auto-compact point, trend sparkline from three turns on), **session** (what caching saved, totals, cost, cold rewrites, plan limits) and **requests** (a column chart, below).
+
+Meters are runs of `█`, a partial block to an eighth of a cell, and a `░` track: a `Raster` of colored cells in the terminal and the same runs as colored text elsewhere, because only the terminal draws `Raster` (*reference › Elements*). The fill is one solid color, not a gradient: the terminal rounds Raster colors to a smaller palette (*gallery › Raster*), and a per-cell gradient showed as bands. Hotkeys act only while the pane has focus (*interface › Keyboard focus and hotkeys*).
+
+**Request chart:** one two-cell column per main request, newest at the right, up to half the card's width (the last 80 requests are kept). Its height is the share of the request's input *not* read from the cache, `(new + written) ÷ (new + read + written)`, to an eighth of a cell; any share above zero shows at least an eighth. Its color is the request's hit rate (green ≥ 80 %, yellow ≥ 50 %, red below). Normal turns are a low green line; a cold re-write is a tall red column. The Desktop app lists the last four requests as text instead.
+
+## What caching saved
+
+`cache saved X % of input cost` compares the input tokens of the main conversation at the base input price with what they cost through the cache:
+
+```text
+saved = 1 − (new + read × r + written × w) ÷ (new + read + written)
+```
+
+`r` is the cache-read multiplier of the last request's model, `w` the cache-write multiplier of the current TTL (2× for one hour, 1.25× for five minutes) – both from the official pricing page, see [CONTRIBUTING › Prices](../CONTRIBUTING.md#prices). Output tokens are not part of it. A negative value (`cache cost +X %`) means more was written than reading saved, e.g. right after a cold re-write. Assumption: the whole session used the last request's model and the current TTL.
 
 ### Where the pane sits
 

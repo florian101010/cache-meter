@@ -53,6 +53,8 @@ Visual check needs a real terminal session: the band, `/tokens`, and `/usage` �
 
 **Rule 2 – a loaded checkout is live.** If this folder is loaded through `CLAUDE_CODE_PLUGIN_DIRS`, Claude Code runs it exactly as checked out in every new session. Keep it on `main`; work in a worktree (`git worktree add ../cache-meter-wt -b feat/<topic>`). `--plugin-dir` cannot load the worktree while another `cache-meter` is loaded (the first wins: `another plugin of that name loads first` in the debug log). From the worktree, replace the variable for one session instead: `claude --settings "{\"env\":{\"CLAUDE_CODE_PLUGIN_DIRS\":\"$PWD\"}}"`.
 
+**Rule 3 – prices come from the pricing page.** Price multipliers (`readMultiplier`, `writeMultiplier` in `hooks/lib.ts`, the README cost table) follow <https://platform.claude.com/docs/en/about-claude/pricing#prompt-caching>, fetched fresh – check it on every new model and before every release; details: [CONTRIBUTING.md › Prices](CONTRIBUTING.md#prices).
+
 Workflow: branch → read the docs above → change → tests (for a new safeguard, break it once and see its test fail) → `validate --strict`, `test`, `tsc -p .`, smoke test → update `README.md`, `docs/how-it-works.md`, `CHANGELOG.md`, bump `version` in `.claude-plugin/plugin.json` → Conventional Commit → pull request. Never merge to `main` without the owner's explicit go. Details: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 Code conventions enforced by `validate`: helpers that take `$` are top-level functions; `$` calls are written in full (`$.noun.method(...)`); `$.state` keys are declared in `types/index.d.ts`; `$.env.get` names are string literals. Pure logic goes in `hooks/lib.ts` so tests can call it directly.

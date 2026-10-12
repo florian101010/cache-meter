@@ -1,29 +1,61 @@
 # Cache Meter (Claude Code Mod)
 
-**Keep your prompt cache warm – and see when it is about to expire.** Cache Meter is a [Claude Code mod](https://code.claude.com/docs/en/plugins/mods/overview) that puts the prompt cache on screen – a countdown until it expires, the hit rate of every request, how full the context is – and with **`/keepwarm`** keeps it alive through a break, so you don't pay to re-write your whole conversation when you come back.
-
 [![CI](https://github.com/florian101010/cache-meter/actions/workflows/ci.yml/badge.svg)](https://github.com/florian101010/cache-meter/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Claude Code mod](https://img.shields.io/badge/Claude%20Code-mod-d97757)
 ![Claude Code ≥ 2.1.287](https://img.shields.io/badge/Claude%20Code-%E2%89%A5%202.1.287-555)
 
-```text
-● cache 42m ■■■■■■■■■■■■■■□□□□□□ 93% hit · ☀ context 9% (auto-compact 97%) [ Compact ]
+**Never lose your prompt cache to a coffee break.**
+
+Claude Code re-sends your entire conversation with every message. The prompt cache is what makes that fast and cheap – but it only lives for **one hour** on a Claude subscription (five minutes on an API key). Step away longer, and your next message re-writes the whole context from scratch: a [slower turn](https://code.claude.com/docs/en/prompt-caching#cache-lifetime), billed at the [cache-write rate](https://code.claude.com/docs/en/prompt-caching#check-cache-performance). Nothing on screen warns you.
+
+**Cache Meter puts the cache on screen and keeps it warm while you are away.**
+
+- **See it** – a live countdown above the prompt: minutes until the cache expires, the hit rate of the last request, how full the context is.
+- **Keep it** – type **`/keepwarm`** before lunch or a meeting. Shortly before expiry it sends one tiny ping that keeps the cache alive – about **1/20 of the cost of a re-write**, with hard limits so it never runs away.
+- **Understand it** – **`/tokens`** opens a dashboard: every request's cache hits and misses, cold re-writes and why they happened, what caching saved you, context fill and your plan limits.
+
+Safe by design: it never changes your prompts or tool calls, writes nothing to disk and sends nothing except the pings you start. Free and MIT-licensed.
+
+```bash
+claude plugin install cache-meter --marketplace florian101010/cache-meter --scope user
 ```
 
-## Why
+### What you see
 
-Claude Code re-sends your whole conversation with every message and relies on the prompt cache so the API doesn't reprocess it. The cache lives for one hour after the last request on a Claude subscription, five minutes on an API key. Step away longer and the next message re-writes the entire context – a [noticeably slower turn](https://code.claude.com/docs/en/prompt-caching#cache-lifetime), billed at the [cache write rate](https://code.claude.com/docs/en/prompt-caching#check-cache-performance) – and nothing on screen tells you it is about to happen.
+The band above the prompt, always there:
 
-Cache Meter fixes both halves of that:
+```text
+● cache 38m ■■■■■■■■■■■■■□□□□□□□ 99% hit · ☀ context 15% (auto-compact 97%) [ Compact ]
+```
 
-- **`/keepwarm`** keeps the cache alive through a break – lunch, a meeting, a long review. A ping costs about **1/20 of a re-write** (see [below](#keep-the-cache-warm-with-keepwarm)), with hard limits so it never runs up your plan.
-- **A countdown** until the cache expires, turning yellow when it is about to – so you know when a break gets expensive.
-- **The hit rate** of every request, so a cache that keeps missing stands out.
-- **Context fill** against the auto-compact point, with a Compact button.
-- **Every request's tokens** in a pane – read from cache, written to cache, uncached – plus subagents, cost, cold re-writes and your 5-hour and weekly plan limits.
+`/tokens`, the dashboard (example values; colors in your terminal):
 
-It only listens and draws: it never touches your prompts or tool calls, writes nothing to disk and calls nothing except the pings you start.
+```text
+◉ Cache Meter                                                                  prompt cache · tokens
+╭───────────────────────────────────────────────╮ ╭────────────────────────────────────────────────╮
+│ ▀▀█ █▀█  WARM · min left · until 15:32        │ │ Context 15%                      150.2k / 1.0M │
+│  ▀█ █▀█  hit 99% last · 86% session           │ │ ██████▉░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░┃ │
+│ ▀▀▀ ▀▀▀  TTL 60m · subscription               │ │ ┃ auto-compact 97%                 trend ▁▂▃▅▆ │
+│ ████████┃███████████████████▌░░░░░░░░░░░░░░░░ │ ╰────────────────────────────────────────────────╯
+│ expiry costs a re-write of ≈ 150k tokens      │ ╭────────────────────────────────────────────────╮
+╰───────────────────────────────────────────────╯ │ Session          cache saved 54% of input cost │
+╭───────────────────────────────────────────────╮ │ read 460k · written 122k · new 8 · out 1.3k    │
+│ ↻ Keepwarm off                w: Keep warm 2h │ │ 4 requests · $1.09 list price                  │
+│ Break ahead? A ping ≈ 1/20 of a re-write.     │ │ Cold       None – warm for every request.      │
+╰───────────────────────────────────────────────╯ │ 5 hours    ██░░░░░░░░░  12% · resets Mon 17:10 │
+                                                  ╰────────────────────────────────────────────────╯
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Requests                                   height = share not read from the cache · newest right │
+│                                                                         ▃▃                       │
+│                                                                         ██                       │
+│                                                                         ██                       │
+│ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁██▁▁▁▁▂▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
+│ 14:02                                                                                      15:31 │
+│ last 150.2k in · 99% hit · out 570                                                               │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+keys after ctrl+x tab: w keep warm · c compact · Esc back                                 c: Compact
+```
 
 > **What is a Claude Code mod?** A mod is a Claude Code plugin whose TypeScript hooks run *inside* Claude Code: it can draw above the prompt, open panes, add slash commands and react to events such as each model request. See the official [mods overview](https://code.claude.com/docs/en/plugins/mods/overview). Cache Meter is a mod only – no skills, no MCP server, no settings hooks.
 
@@ -47,7 +79,7 @@ The band shows `↻` while it runs. Whenever 10 minutes or less of the one-hour 
 |---|---|---|---|
 | Most models | 2× | 0.1× | ≈ 20 |
 | Claude Opus 5.5, Claude Sonnet 5.5 | 2× | 0.05× | ≈ 40 |
-| Claude Fable 5.1 | 2× | 0.025× | ≈ 80 |
+| Claude Fable 5.1, Claude Mythos 5.1 | 2× | 0.025× | ≈ 80 |
 
 Each ping also pays for its few uncached tokens and its one-word answer. On a subscription these are shares of your plan limits rather than dollars; how cache reads count towards the 5-hour and weekly limits is not documented, so watch the limits in `/tokens`.
 
@@ -98,7 +130,7 @@ In the new session the band appears above the prompt after the first answer; typ
 | `· rewrite ≈ …` | When the cache has expired: what the next request will re-write (in $ when Claude Code estimated it, otherwise in tokens) |
 | `[ Compact ]` | Runs `/compact`; hidden while a turn is running |
 
-**Pane `/tokens`** – a dashboard: a big countdown with a color meter, a keepwarm card with one-key start (`w`), a context gauge marking the auto-compact point, every main-conversation request as a stacked bar (read from cache / written to cache / uncached), session totals for the main conversation and subagents, cost as in `/cost`, plan limits (5 hours, 7 days) with reset times, a context sparkline, the cold rewrites of the session, the keepwarm balance, and the TTL together with the rule that produced it.
+**Pane `/tokens`** – a dashboard that fits its space: two columns above the prompt from 110 columns, one column as a sidebar, a compact version in a narrow sidebar. It shows a big countdown with the expiry time and a `┃` where keepwarm would ping, what expiry would cost, a keepwarm card with one-key start (`w`), a context gauge marking the auto-compact point, **what caching saved** (share of the input cost, from the price multipliers – see [Prices](CONTRIBUTING.md#prices)), session totals for the main conversation and subagents, cost as in `/cost` (API list price), plan limits with reset times, the cold rewrites of the session, and a **column chart of every request** – its height is the share not read from the cache, so a cold re-write stands out as a tall red column. `/tokens` again or Esc at an empty prompt closes it; above the prompt it also closes when you send your next prompt.
 
 **`/keepwarm [10m … 8h | off]`** – shortly before the cache would expire, sends one tiny request over your conversation (`$.model.fork`) so the cache stays warm while you are away. Stops by itself on a miss, at the end of the window, after 12 pings, or when the TTL is 5 minutes.
 
@@ -168,7 +200,7 @@ More in [SECURITY.md](SECURITY.md).
 
 ## FAQ
 
-**Does it cost anything?** No – except `/keepwarm`, which you start yourself. Each ping reads your context at the cache-read price – about 1/20 of re-writing it after expiry (1/40 on Opus 5.5 and Sonnet 5.5, 1/80 on Fable 5.1) – and counts against your plan; at most 12 pings per run.
+**Does it cost anything?** No – except `/keepwarm`, which you start yourself. Each ping reads your context at the cache-read price – about 1/20 of re-writing it after expiry (1/40 on Opus 5.5 and Sonnet 5.5, 1/80 on Fable 5.1 and Mythos 5.1) – and counts against your plan; at most 12 pings per run.
 
 **Does `/keepwarm` really keep the cache alive?** A cache read keeps the entry for the duration of its original write – one hour for the main conversation ([pricing](https://platform.claude.com/docs/en/about-claude/pricing)). Check it on your setup with `/usage` after a break (see [above](#keep-the-cache-warm-with-keepwarm)).
 
