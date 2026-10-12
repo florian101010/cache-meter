@@ -132,4 +132,4 @@ Tests decken ab: TTL-Reihenfolge, Hauptanfrage vs. Subagent, Countdown ab Anfrag
 - Idee und Optik nach Florians Screenshot-Vorlage (2026-10-12).
 - Wettersymbole und Sparkline nach Anthropics Beispiel-Mod `token-weather`.
 - Von `karanb192/cache-tax` übernommen: Resume-Felder, „Neuschreiben kostet“, `/keepwarm`, Stopp bei Schreibanteil ≥ 10 %, Zählung kalter Neuschreibungen. Bewusst nicht übernommen: Guard (verwirft auf 2.1.296 Agent-Meldungen, Issue #17), Auto-Warmhalten nach kaltem Senden, Preistabelle. cache-tax ist nicht installiert.
-- Reviews gegen die offizielle Doku am 2026-10-12: 19 Befunde (behoben in `3217bf4`), 15 Befunde nach den cache-tax-Ideen (behoben in `3d525fa`), Bestätigungs-Review mit 3 weiteren (behoben im Commit danach); Einzelheiten in den Commit-Nachrichten.
+- Reviews gegen die offizielle Doku am 2026-10-12: 19 Befunde (behoben in `3217bf4`), 15 Befunde nach den cache-tax-Ideen (behoben in `3d525fa`), Bestätigungs-Review mit 3 weiteren (behoben in `f010aa1`); Einzelheiten in den Commit-Nachrichten.
