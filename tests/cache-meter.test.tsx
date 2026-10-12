@@ -918,7 +918,7 @@ test('/tokens <tab> opens on that tab and switches an open pane instead of closi
 test('pane footer: offers clicks only in the fullscreen renderer, which captures the mouse', async ($, on) => {
   world(on)
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
-  const footer = /\/tokens context \| health · keys: ctrl\+x tab until this pane is lit, then 1–3/
+  const footer = /\/tokens context \| health · ctrl\+x, then tab: keys here \(again if another pane lights up\)/
   let ui = await $.ui.mount({ surface: 'terminal', ...PANE, viewport: { columns: 190, rows: 50, isFullscreen: false } })
   expect(await ui.find({ type: 'Text', text: footer })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^click a tab/ })).toBeUndefined()
@@ -1970,9 +1970,25 @@ test('pane footer: says when the pane has the keyboard, so digits are not typed 
   world(on)
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   const ui = await $.ui.mount({ surface: 'terminal', ...PANE, props: { ...PANE.props, isFocused: true } })
-  const lit = await ui.find({ type: 'Text', text: /^keyboard here · 1–3 tabs/ })
+  const lit = await ui.find({ type: 'Text', text: /^keys here · 1–3 switch tabs · tab \+ enter/ })
   expect(lit?.props).toMatchObject({ color: 'claude', bold: true })
   expect(String(lit?.text)).toMatch(/esc back to the prompt$/)
-  expect(await ui.find({ type: 'Text', text: /until this pane is lit/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /again if another pane lights up/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('band: no Compact button while the pane is open, so the first Ctrl+X Tab reaches the pane', async ($, on) => {
+  world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  let ui = await $.ui.mount({ surface: 'terminal', ...band(120) })
+  expect(await ui.find({ type: 'Button', key: 'compact' })).toBeDefined()
+  await ui.unmount()
+  await run($, 'tokens', '')
+  ui = await $.ui.mount({ surface: 'terminal', ...band(120) })
+  expect(await ui.find({ type: 'Button', key: 'compact' })).toBeUndefined()
+  await ui.unmount()
+  await run($, 'tokens', '')
+  ui = await $.ui.mount({ surface: 'terminal', ...band(120) })
+  expect(await ui.find({ type: 'Button', key: 'compact' })).toBeDefined()
   await ui.unmount()
 })

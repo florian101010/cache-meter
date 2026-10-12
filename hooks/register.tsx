@@ -296,6 +296,7 @@ async function maybeAutoOpen($: EngineInterface) {
   hasAutoOpened = true
   if ((await $.ui.panes()).some(p => p.id === PANE)) return
   await $.ui.open({ id: PANE, title: 'Tokens & Cache' })
+  $.ui.invalidate('ui.render')
 }
 
 async function tick($: EngineInterface) {
@@ -1107,6 +1108,7 @@ export const register: Register = (on, options) => {
     if (isOpen) {
       isDismissed = true
       await $.ui.close({ id: PANE })
+      $.ui.invalidate('ui.render')
 
       return { text: 'Closed the "Tokens & Cache" pane.' }
     }
@@ -1117,6 +1119,7 @@ export const register: Register = (on, options) => {
     // sidebar: Esc only hands the keys back. Above the prompt Esc closes it (closeOnEscape takes only true).
     const isDock = e.presentation?.isFullscreen === true && columns >= 110
     await $.ui.open(isDock ? pane : { ...pane, closeOnEscape: true })
+    $.ui.invalidate('ui.render')
 
     return {
       text: isDock
@@ -1136,6 +1139,8 @@ export const register: Register = (on, options) => {
 
   on('ui.close', async ($, e, next) => {
     if (e.id === PANE && e.origin.kind === 'person') isDismissed = true
+    // The band takes its Compact button back once the pane is gone.
+    if (e.id === PANE) $.ui.invalidate('ui.render')
 
     return next(e)
   })
@@ -1145,6 +1150,7 @@ export const register: Register = (on, options) => {
   on('prompt.submit', async ($, e, next) => {
     if (e.origin.kind === 'composer' && seat === 'inline' && (await $.ui.panes()).some(p => p.id === PANE)) {
       await $.ui.close({ id: PANE })
+      $.ui.invalidate('ui.render')
     }
 
     return next(e)
@@ -1176,7 +1182,11 @@ export const register: Register = (on, options) => {
     const isKeeping = keep.until !== null && keep.until > now
     const isLow = status.kind === 'warm' && status.remaining <= ttl.ms * PING_SHARE
     const sky = percent === null ? null : forecast(percent, auto)
-    const showButton = !e.props.isWorking
+    // Ctrl+X Tab moves the keyboard into the band first, then to each open pane (keybindings ›
+    // abovePrompt:focus): with the pane open its own Compact (c) does the job, and a band without a
+    // control lets the first Ctrl+X Tab reach the pane's tabs.
+    const isPaneOpen = (await $.ui.panes()).some(p => p.id === PANE && p.isPlaced)
+    const showButton = !e.props.isWorking && !isPaneOpen
 
     // Every segment's width, so the row never wraps (AbovePrompt.bodyColumns).
     const label = status.kind === 'warm' ? remainingLabel(status.remaining) : status.kind === 'empty' ? 'empty' : 'expired'
@@ -2089,13 +2099,15 @@ export const register: Register = (on, options) => {
               the pane says when it has the keyboard (Pane.isFocused): digits typed before that reach the chat. */}
           {e.props.isFocused ? (
             <Text color="claude" bold wrap="truncate-end">
-              {tier === 'narrow' ? 'keyboard here · 1–3 · esc' : `keyboard here · 1–3 tabs${isKeeping ? ' · s stop' : canKeep ? ' · w keep warm' : ''} · esc back to the prompt`}
+              {tier === 'narrow'
+                ? 'keys here · 1–3 · esc'
+                : `keys here · 1–3 switch tabs · tab + enter${isKeeping ? ' · s stop' : canKeep ? ' · w keep warm' : ''} · esc back to the prompt`}
             </Text>
           ) : (
             <Text dimColor wrap="truncate-end">
               {tier === 'narrow'
                 ? `${canClick ? 'click a tab · ' : ''}/tokens health`
-                : `${canClick ? 'click a tab or ' : ''}/tokens context | health · keys: ctrl+x tab until this pane is lit, then 1–3`}
+                : `${canClick ? 'click a tab or ' : ''}/tokens context | health · ctrl+x, then tab: keys here (again if another pane lights up)`}
             </Text>
           )}
           {/* The hint truncates; the button keeps its width and a gap (it ran into the hint at ~80 columns). */}

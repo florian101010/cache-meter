@@ -225,7 +225,7 @@ The big countdown flashes once at each new minute. Both run only while the Overv
 | `↻` | `/keepwarm` is running; after each ping it lights up for five seconds with `· ping ok · 148.0k read` |
 | `· rewrite ≈ …` | When the cache has expired: what the next request will re-write (in $ when Claude Code estimated it, otherwise in tokens) |
 | `· cold: good time to` | Before `[ Compact ]` when the cache has expired and the context is half full or more: the next prompt re-writes everything anyway, so compacting now loses no warm cache (it still reads the context once) |
-| `[ Compact ]` | Runs `/compact`; hidden while a turn is running |
+| `[ Compact ]` | Runs `/compact`; hidden while a turn is running, and while the `/tokens` pane is open (it has its own, `c`) – so <kbd>Ctrl</kbd>+<kbd>X</kbd> <kbd>Tab</kbd> goes straight to the pane |
 
 Four more places, only when there is something to say:
 
@@ -413,7 +413,11 @@ Yes: `/config` → `cache-meter.animations` → `off`. The café under the reque
 <details>
 <summary><b>A tab doesn't switch when I click it</b></summary>
 
-In the fullscreen renderer a click that moves the pointer even slightly becomes a text selection – Claude Code then copies the word (`sent … chars via OSC 52`) instead of clicking. That happens easily on a touchscreen or trackpad, for example over SSH from an iPad. Without the mouse: `/tokens context`, `/tokens health`, or the keyboard: <kbd>Ctrl</kbd>+<kbd>X</kbd>, let go, <kbd>Tab</kbd> moves the keyboard first to the band above the prompt, then to each open pane in turn, then back to the prompt ([keybindings › `abovePrompt:focus`](https://code.claude.com/docs/en/keybindings)). Repeat it until the pane's bottom line turns orange and reads *keyboard here* – then <kbd>1</kbd>–<kbd>3</kbd> switch tabs as often as you like, and <kbd>Esc</kbd> gives the keyboard back to the prompt (until then <kbd>c</kbd>, <kbd>w</kbd> and <kbd>x</kbd> press the pane's buttons). Digits typed before the line turns orange go into the chat.
+In the fullscreen renderer a click that moves the pointer even slightly becomes a text selection – Claude Code then copies the word (`sent … chars via OSC 52`) instead of clicking. That happens easily on a touchscreen or trackpad, for example over SSH from an iPad. Without the mouse: `/tokens context`, `/tokens health`, or the keyboard, no mouse needed:
+
+1. <kbd>Ctrl</kbd>+<kbd>X</kbd>, let go, then <kbd>Tab</kbd> – the pane takes the keyboard and its bottom line turns orange: *keys here*. (Claude Code moves the keyboard from the prompt to the band, then to each open pane, then back – [keybindings › `abovePrompt:focus`](https://code.claude.com/docs/en/keybindings). While the pane is open the band has no button, so the first press lands in the pane; with another mod's pane open, press it again until this one lights up.)
+2. <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> switch tabs – or <kbd>Tab</kbd> walks the tabs and buttons and <kbd>Enter</kbd> presses one.
+3. <kbd>Esc</kbd> gives the keyboard back to the prompt. Until then <kbd>c</kbd>, <kbd>w</kbd> and <kbd>x</kbd> press the pane's buttons, and digits typed before the line turns orange go into the chat.
 </details>
 
 <details>
