@@ -2,7 +2,7 @@
   "name": "cache-meter",
   "displayName": "Cache Meter",
   "version": "0.12.0",
-  "description": "Claude Code mod: /keepwarm keeps your prompt cache alive through a break – /keepwarm auto through every break; a countdown, hit rate, context fill and API value above the prompt; what each answer cost; and a /tokens dashboard with what broke the cache, what fills your context, API errors and cost per hour.",
+  "description": "Stop wasting tokens: keeps the prompt cache warm through every break, shows when it expires and what each answer costs.",
   "author": {
     "name": "Florian Grimmer",
     "url": "https://github.com/florian101010"
