@@ -34,7 +34,7 @@ Alternative without a marketplace: clone and load with `claude --plugin-dir <abs
 
 ```bash
 claude plugin validate --strict .   # must print "Validation passed"
-claude plugin test .                # must print "25 pass, 0 fail" – no session, sign-in or network needed
+claude plugin test .                # must end with "0 fail" – no session, sign-in or network needed
 ```
 
 End-to-end smoke test (one tiny model request): every `cache-meter` hook in the log must say `settled`, none `skipped` or `refused`.

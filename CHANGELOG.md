@@ -2,6 +2,25 @@
 
 All notable changes to Cache Meter, a Claude Code mod. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] – 2026-10-12
+
+### Added
+- `/tokens` has three tabs (hotkeys `1`–`3`, or click them in fullscreen):
+  - **Context** – where the context goes: categories, the heaviest memory files (CLAUDE.md and rules), MCP servers with their tool count (deferred tools apart), skills listed of total, agents. From Claude Code's free local estimate after each turn; **Count exactly** (`x`) asks the API once per tool and memory file, as `/context` does.
+  - **Health** – session age, prompts, cost at API prices per hour and per prompt, tokens per prompt; requests that ended unusually (output limit, context full, compaction, refusal); API errors (overloaded, rate limit, …, main conversation and subagents apart); server-side tool calls such as the advisor, with durations; and **Claude Code's own verdict on the cache** at model switches and resumes, checked against Cache Meter's clock.
+- The overview points at health issues (`2 API errors – see 3: Health`), and the Health tab is marked `!`.
+- Band: **`API $X`** – what the session would cost at API prices (Claude Code's own figure, as `/cost`), shown when there is room and dropped first.
+
+### Changed
+- The request chart draws the first write of a cache (session start, after `/compact`) in blue: it is not a loss.
+- Cost reads “≈ $X at API prices (as /cost)” instead of “list price”.
+- README and AGENTS.md no longer state a test count.
+- A docked pane (fullscreen sidebar) no longer closes on Esc – Esc only hands the keys back; above the prompt Esc still closes it.
+- Keepwarm buttons show one short toast; home directories show as `~`.
+
+### Fixed
+- The cache check no longer counts a difference right after `/resume`, when Cache Meter had not seen a request yet.
+
 ## [0.4.0] – 2026-10-12
 
 ### Changed
@@ -70,7 +89,8 @@ All notable changes to Cache Meter, a Claude Code mod. The format follows [Keep 
 - Pane `/tokens`: per-request token history, totals, plan limits, cost.
 - `/keepwarm`.
 
-[0.4.0]: https://github.com/florian101010/cache-meter/compare/18e9711...HEAD
+[0.5.0]: https://github.com/florian101010/cache-meter/compare/a520960...HEAD
+[0.4.0]: https://github.com/florian101010/cache-meter/compare/18e9711...a520960
 [0.3.0]: https://github.com/florian101010/cache-meter/compare/e430ab2...18e9711
 [0.2.1]: https://github.com/florian101010/cache-meter/compare/e430ab2...HEAD
 [0.2.0]: https://github.com/florian101010/cache-meter/pull/1

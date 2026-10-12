@@ -81,7 +81,7 @@ The count of running main requests is raised before the first `await` in `turn.s
 |---|---|
 | < 64 | one column; drops the header subtitle, session hit rate, TTL source, trend and long hints |
 | 64–109 | one column, everything |
-| ≥ 110 | two columns (cache + keepwarm left, context + session right), requests full width below |
+| ≥ 110 | two columns (cache + keepwarm left, context + session right), requests full width below; the subtitle shows |
 
 Every single-line text truncates (`wrap="truncate-end"`) instead of wrapping – the official mods do the same, and a wrapped line had garbled an earlier version.
 
@@ -103,7 +103,22 @@ saved = 1 − (new + read × r + written × w) ÷ (new + read + written)
 
 ### Where the pane sits
 
-The surface seats the pane, not the mod (*interface › Pick where to draw*): docked as a sidebar beside the transcript in the fullscreen renderer from 110 columns, otherwise inline above the prompt. The mod reads where it was seated (`Pane.placement`) and acts on it: inline, your next own prompt (`prompt.submit` with `origin.kind` `composer`) closes the pane, since the band already carries the summary; docked, it stays. `/tokens` toggles; `closeOnEscape` lets Esc at an empty prompt close it. No `focus` on open: a focused pane takes the keys, and its hotkeys would swallow typing.
+The surface seats the pane, not the mod (*interface › Pick where to draw*): docked as a sidebar beside the transcript in the fullscreen renderer from 110 columns, otherwise inline above the prompt. The mod reads where it was seated (`Pane.placement`) and acts on it: inline, your next own prompt (`prompt.submit` with `origin.kind` `composer`) closes the pane, since the band already carries the summary; docked, it stays. `/tokens` toggles. `closeOnEscape` (Esc at an empty prompt closes the pane) is set only when the pane will sit above the prompt: `command.run`'s `presentation` says whether the session is fullscreen and how wide the terminal is, and from 110 columns in fullscreen the pane docks – there Esc only hands the keys back. Keys reach the pane only while it has focus: click it, or ctrl+x then Tab (*interface › Keyboard focus and hotkeys*). No `focus` on open: a focused pane takes the keys, and its hotkeys would swallow typing.
+
+## Context tab
+
+After each turn the `session.measure` hook reads `$.session.usage({ breakdown: 'summary' })` – Claude Code's local estimate, which sends no request (types: `SessionUsageArgs`) – and keeps the heaviest items of `context.breakdown` (types: `SessionContextBreakdown`): categories of kind `used`, memory files, loaded MCP tools summed per `serverName` (tools with `isLoaded: false` sit behind tool search and are only counted), agents, and `skills.includedSkills` of `totalSkills`. **Count exactly** calls `breakdown: 'full'`, which sends one token-count request per tool and memory file as `/context` does – only on a press, never on a timer. The card says which one it shows (`estimate` or `exact`) and when. `ContextCategory.color` is not used: its format is undocumented, and an unknown color would make the whole tree invalid.
+
+## Health tab
+
+| Row | Source |
+|---|---|
+| Age, prompts | `$.session.usage().startedAt` (`/clear` starts it over), `$.session.turns()`, read in `session.measure` |
+| Cost, $/h, $/prompt | `cost.usd` (as `/cost`, at API prices) over age and prompts |
+| Stops | `turn.step` result `stopReason` of main requests; `end_turn`, `tool_use` and none are normal, the rest is counted (*events › Follow a turn*) |
+| Errors | settings hook event `StopFailure` (`classic.StopFailure`, observed with `next(e)`), its `error`; `agent_id` set = subagent, counted apart |
+| Server | `turn.step` result `serverToolUses` (v2.1.290+): tool calls the API ran itself, such as the advisor; no `tool.call` fires for them. Duration = `endedAt − startedAt`, `–` without `endedAt` |
+| Cache check | `PostModelSwitch.prompt_cache_warm` and, on resume/fork, `SessionStart.prompt_cache_likely_expired` – Claude Code's verdict – against Cache Meter's countdown at that moment, taken before either is acted on; skipped while Cache Meter has seen no request (its state is empty after `/resume`) |
 
 ## Band layout
 

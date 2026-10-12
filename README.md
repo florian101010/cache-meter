@@ -13,7 +13,7 @@ Claude Code re-sends your entire conversation with every message. The prompt cac
 
 - **See it** – a live countdown above the prompt: minutes until the cache expires, the hit rate of the last request, how full the context is.
 - **Keep it** – type **`/keepwarm`** before lunch or a meeting. Shortly before expiry it sends one tiny ping that keeps the cache alive – about **1/20 of the cost of a re-write**, with hard limits so it never runs away.
-- **Understand it** – **`/tokens`** opens a dashboard: every request's cache hits and misses, cold re-writes and why they happened, what caching saved you, context fill and your plan limits.
+- **Understand it** – **`/tokens`** opens a dashboard: every request's cache hits and misses, cold re-writes and why they happened, what caching saved you, context fill and your plan limits – plus a **Context** tab (which CLAUDE.md files, MCP servers and skills fill your context) and a **Health** tab (API errors, requests cut off at the output limit, the advisor's time, cost per hour at API prices).
 
 Safe by design: it never changes your prompts or tool calls, writes nothing to disk and sends nothing except the pings you start. Free and MIT-licensed.
 
@@ -126,11 +126,16 @@ In the new session the band appears above the prompt after the first answer; typ
 | `93% hit` | Cache hit rate of the last main request = read ÷ (new + read + written) |
 | `☀ context 9%` | Context fill against the model's window; the symbol tracks the distance to the auto-compact point (☀ ☁ ☂ ☇ ↯) |
 | `(auto-compact 97%)` | Where auto-compact triggers, on the same scale (`off` when disabled) |
+| `· API $1.10` | What the session would cost at API prices – Claude Code's own figure, the one `/cost` shows (dropped first on narrow terminals) |
 | `↻` | `/keepwarm` is running |
 | `· rewrite ≈ …` | When the cache has expired: what the next request will re-write (in $ when Claude Code estimated it, otherwise in tokens) |
 | `[ Compact ]` | Runs `/compact`; hidden while a turn is running |
 
 **Pane `/tokens`** – a dashboard that fits its space: two columns above the prompt from 110 columns, one column as a sidebar, a compact version in a narrow sidebar. It shows a big countdown with the expiry time and a `┃` where keepwarm would ping, what expiry would cost, a keepwarm card with one-key start (`w`), a context gauge marking the auto-compact point, **what caching saved** (share of the input cost, from the price multipliers – see [Prices](CONTRIBUTING.md#prices)), session totals for the main conversation and subagents, cost as in `/cost` (API list price), plan limits with reset times, the cold rewrites of the session, and a **column chart of every request** – its height is the share not read from the cache, so a cold re-write stands out as a tall red column. `/tokens` again or Esc at an empty prompt closes it; above the prompt it also closes when you send your next prompt.
+
+**Tab `2: Context`** – where your context goes, in tokens: categories (memory files, system tools, skills, messages …), the heaviest CLAUDE.md and rule files, MCP servers with their tool count, how many skills made it into the listing (e.g. *120 of 154*). Claude Code estimates this locally after each turn, for free – the same data `/context` shows, but always at hand. **Count exactly** (`x`) asks the API, one request per tool and memory file, only when you press it.
+
+**Tab `3: Health`** – session age, prompts, cost at API prices per hour and per prompt, tokens per prompt; requests that ended unusually (output limit, context full, compaction, refusal); API errors (overloaded, rate limit …) – Claude Code shows each one once and moves on, this keeps the tally; server-side tool calls such as the [advisor](https://code.claude.com/docs/en/advisor) with their time; and Claude Code's own verdict on the cache at model switches and resumes, checked against Cache Meter's countdown.
 
 **`/keepwarm [10m … 8h | off]`** – shortly before the cache would expire, sends one tiny request over your conversation (`$.model.fork`) so the cache stays warm while you are away. Stops by itself on a miss, at the end of the window, after 12 pings, or when the TTL is 5 minutes.
 
@@ -216,7 +221,7 @@ More in [SECURITY.md](SECURITY.md).
 
 ## Contributing
 
-Issues and pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) first – above all the rule that the **official documentation is the single source of truth** for the mods API, not memory. CI runs `claude plugin validate --strict` and the 25 tests on every push and pull request.
+Issues and pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) first – above all the rule that the **official documentation is the single source of truth** for the mods API, not memory. CI runs `claude plugin validate --strict` and every test on every push and pull request.
 
 ## Learn more
 
