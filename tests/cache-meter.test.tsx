@@ -815,3 +815,22 @@ test('/tokens: Esc closes the pane above the prompt, but not the docked sidebar'
   expect(pane.opened.map(o => o.closeOnEscape)).toEqual([undefined, true, true])
   expect(pane.opened.map(o => o.rows)).toEqual([26, 26, 36])
 })
+
+test('/tokens <tab> opens on that tab and switches an open pane instead of closing it', async ($, on) => {
+  const { pane } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  expect((await run($, 'tokens', 'health')).text).toMatch(/^Opened/)
+  let ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  expect(await ui.find({ type: 'Text', text: 'Cache check' })).toBeDefined()
+  await ui.unmount()
+  // Open: a tab name switches, a prefix is enough, and the pane stays open.
+  expect((await run($, 'tokens', 'c')).text).toBe('Switched the pane to context.')
+  expect(pane.isOpen).toBe(true)
+  ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  expect(await ui.find({ type: 'Text', text: 'Where it goes' })).toBeDefined()
+  await ui.unmount()
+  expect((await run($, 'tokens', 'nope')).text).toBe('Usage: /tokens [overview | context | health]')
+  expect(pane.isOpen).toBe(true)
+  // Without a tab /tokens still toggles.
+  expect((await run($, 'tokens', '')).text).toMatch(/^Closed/)
+})

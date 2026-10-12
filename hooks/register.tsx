@@ -110,7 +110,8 @@ let mainRequests = 0
 // Where the surface last seated the pane: beside a fullscreen transcript (dock) or above the prompt (inline).
 let seat: 'dock' | 'inline' | null = null
 // The pane's open tab; a reload starts on the overview again.
-let tab: 'overview' | 'context' | 'health' = 'overview'
+const TABS = ['overview', 'context', 'health'] as const
+let tab: (typeof TABS)[number] = 'overview'
 
 async function ttlNow($: EngineInterface) {
   const measure = await read($, measureA)
@@ -345,7 +346,11 @@ export const register: Register = (on, options) => {
       $.clock.every(TICK_MS, () => tick($))
     }
     try {
-      await $.command.register({ name: 'tokens', description: 'Show token and prompt-cache usage of this session in a pane' })
+      await $.command.register({
+        name: 'tokens',
+        description: 'Show token and prompt-cache usage of this session in a pane',
+        argumentHint: '[overview | context | health]',
+      })
       await $.command.register({
         name: 'keepwarm',
         description: 'Keep the prompt cache warm (each ping costs one cache read of the context)',
@@ -578,7 +583,17 @@ export const register: Register = (on, options) => {
   // /tokens toggles. rows: the height asked for above the prompt, default a third (types: PaneOpenArgs.rows);
   // closeOnEscape: Esc at the idle, empty prompt closes it too. No focus: hotkeys would swallow typing.
   on('command.run', { command: 'tokens' }, async ($, e) => {
-    if ((await $.ui.panes()).some(p => p.id === PANE)) {
+    // /tokens <tab> opens on that tab, or switches to it when the pane is open: no focus chord needed.
+    const asked = (e.args ?? '').trim().toLowerCase()
+    const wanted = TABS.find(t => t === asked || (asked.length > 0 && t.startsWith(asked)))
+    if (asked !== '' && wanted === undefined) return { text: 'Usage: /tokens [overview | context | health]' }
+    const isOpen = (await $.ui.panes()).some(p => p.id === PANE)
+    if (wanted !== undefined) {
+      tab = wanted
+      $.ui.invalidate('ui.render')
+      if (isOpen) return { text: `Switched the pane to ${wanted}.` }
+    }
+    if (isOpen) {
       await $.ui.close({ id: PANE })
 
       return { text: 'Closed the "Tokens & Cache" pane.' }
