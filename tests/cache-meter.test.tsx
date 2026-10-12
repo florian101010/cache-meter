@@ -918,7 +918,7 @@ test('/tokens <tab> opens on that tab and switches an open pane instead of closi
 test('pane footer: offers clicks only in the fullscreen renderer, which captures the mouse', async ($, on) => {
   world(on)
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
-  const footer = /\/tokens context \| health · keys: ctrl\+x, then tab, then 1–3/
+  const footer = /\/tokens context \| health · keys: ctrl\+x tab until this pane is lit, then 1–3/
   let ui = await $.ui.mount({ surface: 'terminal', ...PANE, viewport: { columns: 190, rows: 50, isFullscreen: false } })
   expect(await ui.find({ type: 'Text', text: footer })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^click a tab/ })).toBeUndefined()
@@ -1963,5 +1963,16 @@ test('countdown: no flash with animations = off', { options: { animations: 'off'
   const ui = await $.ui.mount({ surface: 'terminal', ...DOCK })
   await clock.advance(60_000)
   expect(await digitColor(ui as never)).toBe('success')
+  await ui.unmount()
+})
+
+test('pane footer: says when the pane has the keyboard, so digits are not typed into the chat', async ($, on) => {
+  world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  const ui = await $.ui.mount({ surface: 'terminal', ...PANE, props: { ...PANE.props, isFocused: true } })
+  const lit = await ui.find({ type: 'Text', text: /^keyboard here · 1–3 tabs/ })
+  expect(lit?.props).toMatchObject({ color: 'claude', bold: true })
+  expect(String(lit?.text)).toMatch(/esc back to the prompt$/)
+  expect(await ui.find({ type: 'Text', text: /until this pane is lit/ })).toBeUndefined()
   await ui.unmount()
 })

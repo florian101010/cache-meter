@@ -413,7 +413,7 @@ Yes: `/config` → `cache-meter.animations` → `off`. The café under the reque
 <details>
 <summary><b>A tab doesn't switch when I click it</b></summary>
 
-In the fullscreen renderer a click that moves the pointer even slightly becomes a text selection – Claude Code then copies the word (`sent … chars via OSC 52`) instead of clicking. That happens easily on a touchscreen or trackpad, for example over SSH from an iPad. Without the mouse: `/tokens context`, `/tokens health`, or the keys one after the other: <kbd>Ctrl</kbd>+<kbd>X</kbd>, let go, <kbd>Tab</kbd> – the pane now has the keyboard – then <kbd>1</kbd>–<kbd>3</kbd> as often as you like; <kbd>Esc</kbd> gives the keyboard back to the prompt (until then <kbd>c</kbd>, <kbd>w</kbd> and <kbd>x</kbd> press the pane's buttons).
+In the fullscreen renderer a click that moves the pointer even slightly becomes a text selection – Claude Code then copies the word (`sent … chars via OSC 52`) instead of clicking. That happens easily on a touchscreen or trackpad, for example over SSH from an iPad. Without the mouse: `/tokens context`, `/tokens health`, or the keyboard: <kbd>Ctrl</kbd>+<kbd>X</kbd>, let go, <kbd>Tab</kbd> moves the keyboard first to the band above the prompt, then to each open pane in turn, then back to the prompt ([keybindings › `abovePrompt:focus`](https://code.claude.com/docs/en/keybindings)). Repeat it until the pane's bottom line turns orange and reads *keyboard here* – then <kbd>1</kbd>–<kbd>3</kbd> switch tabs as often as you like, and <kbd>Esc</kbd> gives the keyboard back to the prompt (until then <kbd>c</kbd>, <kbd>w</kbd> and <kbd>x</kbd> press the pane's buttons). Digits typed before the line turns orange go into the chat.
 </details>
 
 <details>

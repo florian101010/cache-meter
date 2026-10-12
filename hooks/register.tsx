@@ -2085,11 +2085,19 @@ export const register: Register = (on, options) => {
         {tab === 'context' && contextView}
         {tab === 'health' && healthView}
         <Box flexDirection="row" justifyContent="space-between">
-          <Text dimColor wrap="truncate-end">
-            {tier === 'narrow'
-              ? `${canClick ? 'click a tab · ' : ''}/tokens health`
-              : `${canClick ? 'click a tab or ' : ''}/tokens context | health · keys: ctrl+x, then tab, then 1–3${isKeeping ? ' · s stop' : canKeep ? ' · w keep warm' : ''}`}
-          </Text>
+          {/* Ctrl+X Tab walks the focus band → each open pane → prompt (keybindings › abovePrompt:focus), so
+              the pane says when it has the keyboard (Pane.isFocused): digits typed before that reach the chat. */}
+          {e.props.isFocused ? (
+            <Text color="claude" bold wrap="truncate-end">
+              {tier === 'narrow' ? 'keyboard here · 1–3 · esc' : `keyboard here · 1–3 tabs${isKeeping ? ' · s stop' : canKeep ? ' · w keep warm' : ''} · esc back to the prompt`}
+            </Text>
+          ) : (
+            <Text dimColor wrap="truncate-end">
+              {tier === 'narrow'
+                ? `${canClick ? 'click a tab · ' : ''}/tokens health`
+                : `${canClick ? 'click a tab or ' : ''}/tokens context | health · keys: ctrl+x tab until this pane is lit, then 1–3`}
+            </Text>
+          )}
           {/* The hint truncates; the button keeps its width and a gap (it ran into the hint at ~80 columns). */}
           <Box flexShrink={0} marginLeft={2}>
             <Button key="pane-compact" plain hotkey="c" onPress={() => compactNow($)}>

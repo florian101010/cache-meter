@@ -12,7 +12,7 @@ A café that acts out the cache.
 - `ui.fault`: if the café's file fails, the pane leaves it out.
 
 ### Changed
-- The pane's key hint reads `ctrl+x, then tab, then 1–3`: two keys one after the other, not at once. The README FAQ spells the sequence out, with `Esc` to give the keyboard back.
+- The pane says when it has the keyboard: its bottom line turns orange and reads `keyboard here · 1–3 tabs · esc back to the prompt`. `Ctrl+X Tab` moves the focus through the band, then each open pane, then back to the prompt (keybindings › `abovePrompt:focus`), so the old hint `ctrl+x tab, then 1–3` sent digits into the chat when the band or another pane had the focus. The hint now reads `ctrl+x tab until this pane is lit, then 1–3`; the README FAQ explains the order.
 
 ### Docs
 - README: new screenshots – the full terminal with the docked dashboard, crops of Overview, Context and Health, the band; a section on the café; FAQ on turning animations off. PRIVACY, SECURITY, AGENTS, CONTRIBUTING, llms.txt and how-it-works describe the animation file.
