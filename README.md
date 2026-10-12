@@ -531,7 +531,7 @@ In the Claude Code terminal and the Code tab of the Desktop app. In the VS Code 
 
 ## Contributing
 
-Issues and pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) first – above all the rule that the **official documentation is the single source of truth** for the mods API, not memory. CI runs `claude plugin validate --strict` and every test on every push and pull request. The files under `.github/` (workflows and their scripts, which fetch the official docs and open issues with GitHub's own token) run only in GitHub Actions – they are not part of the mod and never run in your session.
+Issues and pull requests are welcome – under the [Code of Conduct](CODE_OF_CONDUCT.md). Read [CONTRIBUTING.md](CONTRIBUTING.md) first – above all the rule that the **official documentation is the single source of truth** for the mods API, not memory. CI runs `claude plugin validate --strict` and every test on every push and pull request. The files under `.github/` (workflows and their scripts, which fetch the official docs and open issues with GitHub's own token) run only in GitHub Actions – they are not part of the mod and never run in your session.
 
 ## Learn more
 

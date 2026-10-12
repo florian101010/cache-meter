@@ -15,6 +15,7 @@ Every break, by itself.
 - README: `/tokens report` is described as *session stats* – never the conversation – instead of *the whole session*, which read as a copy of the chat (README, banner).
 - A ping is described as 1/20 of a re-write **or less** (1/40 on Opus 5.5) – in the pane hint and the README, matching the banner.
 - `docs/how-it-works.md` ordered by topic – overview, the cache, keeping it warm, the band, the pane, notices, quality – with a contents list; `/keepwarm auto` and *Where the pane sits* have headings of their own. No statement changed.
+- A Code of Conduct (Contributor Covenant 2.1), linked from README and CONTRIBUTING.
 - The manifest names the plugin's icon for Anthropic's directory listing (field `icon`, the brand icon the plugin already carries), and the `/config` help texts of the seven options are short enough to read under a toggle.
 - The plugin's description (`plugin.json`, `marketplace.json`) is one line, as `/plugin` shows it: *Stop wasting tokens: keeps the prompt cache warm through every break, shows when it expires and what each answer costs.*
 - README: **Why you'll want it** at the top, under a new *WHY CACHE METER – Stop wasting tokens* banner ($1.20 re-write against a $0.03 ping) – each feature as the problem it solves, in the reader's words, what Cache Meter does and where.

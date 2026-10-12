@@ -1,6 +1,6 @@
 # Contributing to Cache Meter
 
-Thanks for helping. Cache Meter is a [Claude Code mod](https://code.claude.com/docs/en/plugins/mods/overview); its hooks run inside Claude Code, so a mistake costs the user's session, not just a test.
+Thanks for helping. Everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md). Cache Meter is a [Claude Code mod](https://code.claude.com/docs/en/plugins/mods/overview); its hooks run inside Claude Code, so a mistake costs the user's session, not just a test.
 
 ## The one rule: the official documentation is the single source of truth
 
