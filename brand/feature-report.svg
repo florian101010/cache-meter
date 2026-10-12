@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="240" viewBox="0 0 1280 240" role="img" aria-label="Share it: /tokens report copies the whole session as Markdown.">
+<defs>
+<radialGradient id="bg" cx="0.12" cy="0.3" r="1.1"><stop offset="0" stop-color="#2b2540"/><stop offset="0.55" stop-color="#16141f"/><stop offset="1" stop-color="#0c0b12"/></radialGradient>
+<linearGradient id="accent" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#ff9a6b"/><stop offset="1" stop-color="#d97757"/></linearGradient>
+<filter id="glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="7" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+<filter id="shadow" x="-20%" y="-30%" width="140%" height="170%"><feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#000" flood-opacity="0.45"/></filter>
+<pattern id="dots" width="22" height="22" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1.2" fill="#ffffff" opacity="0.045"/></pattern>
+</defs>
+<rect width="1280" height="240" rx="24" fill="url(#bg)"/>
+<rect width="1280" height="240" rx="24" fill="url(#dots)"/>
+<circle cx="210" cy="120" r="150" fill="#d97757" opacity="0.05"/>
+
+<g filter="url(#shadow)"><rect x="40" y="26" width="250" height="186" rx="14" fill="#1d1b29" stroke="#ffffff" stroke-opacity="0.08"/></g>
+<text x="60" y="58" font-family="'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="13" font-weight="700" fill="#f5f5f7" opacity="0"><animate attributeName="opacity" dur="9s" repeatCount="indefinite" keyTimes="0;0.05;0.10;0.92;1" values="0;0;1;1;0"/># Cache Meter – session report</text><text x="60" y="84" font-family="'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="12" font-weight="700" fill="#ff9a6b" opacity="0"><animate attributeName="opacity" dur="9s" repeatCount="indefinite" keyTimes="0;0.12;0.17;0.92;1" values="0;0;1;1;0"/>## Cost and cache</text><text x="60" y="110" font-family="'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="12" font-weight="400" fill="#cdd6f4" opacity="0"><animate attributeName="opacity" dur="9s" repeatCount="indefinite" keyTimes="0;0.19;0.24;0.92;1" values="0;0;1;1;0"/>- Cost: ≈ $4.10 API value</text><text x="60" y="136" font-family="'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="12" font-weight="400" fill="#cdd6f4" opacity="0"><animate attributeName="opacity" dur="9s" repeatCount="indefinite" keyTimes="0;0.26;0.31;0.92;1" values="0;0;1;1;0"/>- Cache hit rate: 96%</text><text x="60" y="162" font-family="'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="12" font-weight="700" fill="#ff9a6b" opacity="0"><animate attributeName="opacity" dur="9s" repeatCount="indefinite" keyTimes="0;0.33;0.38;0.92;1" values="0;0;1;1;0"/>## Context</text><text x="60" y="188" font-family="'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="12" font-weight="400" fill="#cdd6f4" opacity="0"><animate attributeName="opacity" dur="9s" repeatCount="indefinite" keyTimes="0;0.40;0.45;0.92;1" values="0;0;1;1;0"/>- Largest: Bash npm 10.0k</text>
+<path d="M 302 120 L 300 120" stroke="#7f849c" stroke-width="3" stroke-linecap="round" stroke-dasharray="4 7"/>
+<rect x="312" y="72" width="80" height="104" rx="12" fill="#2a2939" stroke="#cdd6f4" stroke-opacity="0.35" stroke-width="2"/>
+<rect x="334" y="62" width="36" height="20" rx="6" fill="#cdd6f4" opacity="0.55"/>
+<g opacity="0"><animate attributeName="opacity" dur="9s" repeatCount="indefinite" keyTimes="0;0.55;0.60;0.92;1" values="0;0;1;1;0"/><circle cx="352" cy="128" r="24" fill="#3ddc84" opacity="0.2" filter="url(#glow)"/>
+<path d="M 339 128 L 349 139 L 367 115" fill="none" stroke="#9af2b8" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/></g>
+<rect x="470" y="40" width="119" height="28" rx="14" fill="#d97757" fill-opacity="0.14" stroke="#d97757" stroke-opacity="0.55"/>
+<text x="487" y="59" font-family="'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="13" font-weight="700" letter-spacing="1.6" fill="#ff9a6b">SHARE IT</text>
+<text x="470" y="118" font-family="'Helvetica Neue', 'Segoe UI', Roboto, Arial, sans-serif" font-size="46" font-weight="700" fill="#f5f5f7" letter-spacing="-0.8">/tokens report</text>
+<text x="472" y="160" font-family="'Helvetica Neue', 'Segoe UI', Roboto, Arial, sans-serif" font-size="23" fill="#cdd6f4">The whole session as Markdown on your clipboard.</text>
+<text x="472" y="198" font-family="'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="15" fill="#7f849c">cost · cache · context · subagents · plan limits</text>
+<rect x="1" y="1" width="1278" height="238" rx="23" fill="none" stroke="#ffffff" stroke-opacity="0.06" stroke-width="2"/>
+</svg>

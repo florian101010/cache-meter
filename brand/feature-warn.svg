@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="240" viewBox="0 0 1280 240" role="img" aria-label="Before it breaks: a heads-up before a switch re-writes the cache.">
+<defs>
+<radialGradient id="bg" cx="0.12" cy="0.3" r="1.1"><stop offset="0" stop-color="#2b2540"/><stop offset="0.55" stop-color="#16141f"/><stop offset="1" stop-color="#0c0b12"/></radialGradient>
+<linearGradient id="accent" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#ff9a6b"/><stop offset="1" stop-color="#d97757"/></linearGradient>
+<filter id="glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="7" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+<filter id="shadow" x="-20%" y="-30%" width="140%" height="170%"><feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#000" flood-opacity="0.45"/></filter>
+<pattern id="dots" width="22" height="22" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1.2" fill="#ffffff" opacity="0.045"/></pattern>
+</defs>
+<rect width="1280" height="240" rx="24" fill="url(#bg)"/>
+<rect width="1280" height="240" rx="24" fill="url(#dots)"/>
+<circle cx="210" cy="120" r="150" fill="#d97757" opacity="0.05"/>
+
+<g opacity="1"><animate attributeName="opacity" dur="9s" repeatCount="indefinite" keyTimes="0;0.20;0.26;1" values="1;1;0.25;0.25"/><rect x="40" y="40" width="118" height="34" rx="17" fill="#2a2939"/><text x="99" y="62" text-anchor="middle" font-family="'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" fill="#cdd6f4">opus 5</text></g>
+<text x="176" y="63" font-family="'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="18" fill="#7f849c">→</text>
+<g opacity="0"><animate attributeName="opacity" dur="9s" repeatCount="indefinite" keyTimes="0;0.20;0.26;1" values="0;0;1;1"/><rect x="206" y="40" width="118" height="34" rx="17" fill="#d97757" fill-opacity="0.18" stroke="#d97757" stroke-opacity="0.6"/><text x="265" y="62" text-anchor="middle" font-family="'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" fill="#ff9a6b">sonnet 5</text></g>
+<g transform="rotate(0 372 64)"><animateTransform attributeName="transform" type="rotate" dur="9s" repeatCount="indefinite" keyTimes="0;0.40;0.44;0.48;0.52;0.56;1" values="0 372 64;0 372 64;-16 372 64;14 372 64;-10 372 64;0 372 64;0 372 64"/>
+<path d="M 360 70 C 360 56 364 50 372 50 C 380 50 384 56 384 70 L 388 76 L 356 76 Z" fill="#f0a050"/><circle cx="372" cy="80" r="4" fill="#f0a050"/></g>
+<g opacity="0"><animate attributeName="opacity" dur="9s" repeatCount="indefinite" keyTimes="0;0.30;0.40;0.90;1" values="0;0;1;1;0"/><g transform="translate(0 40)"><animateTransform attributeName="transform" type="translate" dur="9s" repeatCount="indefinite" keyTimes="0;0.30;0.40;0.90;1" values="0 40;0 40;0 0;0 0;0 40"/>
+<g filter="url(#shadow)"><rect x="40" y="106" width="330" height="94" rx="14" fill="#1d1b29" stroke="#f0a050" stroke-opacity="0.5"/></g>
+<text x="58" y="134" font-family="'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" font-weight="700" fill="#f0a050">Model switch re-writes</text>
+<text x="58" y="158" font-family="'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" fill="#cdd6f4">148.0k tokens (≈ $1.18)</text>
+<text x="58" y="182" font-family="'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="13" fill="#7f849c">cache warm 42m more</text>
+</g></g>
+<rect x="470" y="40" width="204" height="28" rx="14" fill="#d97757" fill-opacity="0.14" stroke="#d97757" stroke-opacity="0.55"/>
+<text x="487" y="59" font-family="'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="13" font-weight="700" letter-spacing="1.6" fill="#ff9a6b">BEFORE IT BREAKS</text>
+<text x="470" y="118" font-family="'Helvetica Neue', 'Segoe UI', Roboto, Arial, sans-serif" font-size="46" font-weight="700" fill="#f5f5f7" letter-spacing="-0.8">Warned in time</text>
+<text x="472" y="160" font-family="'Helvetica Neue', 'Segoe UI', Roboto, Arial, sans-serif" font-size="23" fill="#cdd6f4">A heads-up before a switch re-writes your cache.</text>
+<text x="472" y="198" font-family="'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="15" fill="#7f849c">model and effort switches · a reminder before it expires</text>
+<rect x="1" y="1" width="1278" height="238" rx="23" fill="none" stroke="#ffffff" stroke-opacity="0.06" stroke-width="2"/>
+</svg>

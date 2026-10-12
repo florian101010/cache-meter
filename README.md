@@ -7,6 +7,7 @@ Images for the README, the GitHub social preview and the plugin icon, with their
 | Path | What it is | Where it is used |
 |---|---|---|
 | `brand/header.svg` | Animated README header (SMIL, 9-second loop): the cup in the countdown ring drains, turns orange, pings at the marker and refills; the claim fades in | Top of the README |
+| `brand/feature-keepwarm.svg`, `feature-cost.svg`, `feature-warn.svg`, `feature-tokens.svg`, `feature-report.svg` | Animated feature banners (SMIL, 9-second loop, 1280×240) used as section dividers: the ring drains and pings (*Keep it*), an answer line types in and a budget bar fills (*See it*), a model switch raises a warning card and a bell (*Before it breaks*), request columns grow and a warm miss shows its cause (*Understand it*), a Markdown report lands on the clipboard (*Share it*) | README sections |
 | `brand/header-still.png` | Still of the header (1280×400) | Fallback, slides |
 | `brand/icon.svg`, `brand/icon.png` | Plugin icon: coffee cup in the countdown ring (1024×1024, static) | `.claude-plugin/icon.png` on `main` (directory listing) |
 | `brand/icon-60.svg`, `brand/icon-60.png` | Alternative icon: "60 MIN" in the ring | Not used |
@@ -18,9 +19,10 @@ Images for the README, the GitHub social preview and the plugin icon, with their
 ```bash
 python3 brand/gen-icon.py brand && rsvg-convert -w 1024 -h 1024 brand/icon.svg -o brand/icon.png
 python3 brand/gen-header.py brand && rsvg-convert -w 1280 brand/frame-00.svg -o brand/header-still.png && rm brand/frame-*.svg
+python3 brand/gen-features.py brand            # --stills also writes still frames to check with rsvg-convert
 ```
 
-Both scripts reproduce the committed SVGs byte for byte. `rsvg-convert` (librsvg) does not run animations and ignores `pathLength`, so lengths in the header are in user units. In an SVG shown as an image on GitHub, web fonts don't load: text uses the viewer's system font (stack: Helvetica Neue, Segoe UI, Roboto, Arial; mono: SF Mono, Menlo, Consolas).
+The scripts reproduce the committed SVGs byte for byte. `rsvg-convert` (librsvg) does not run animations and ignores `pathLength`, so lengths in the header are in user units. In an SVG shown as an image on GitHub, web fonts don't load: text uses the viewer's system font (stack: Helvetica Neue, Segoe UI, Roboto, Arial; mono: SF Mono, Menlo, Consolas).
 
 ## Look
 
