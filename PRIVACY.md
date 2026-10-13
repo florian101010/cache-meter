@@ -12,6 +12,7 @@ Only what Claude Code reports to mods within your session:
 - **Per subagent:** its type and task description, as Claude Code lists it, and its token counts.
 - **At a model switch:** Claude Code's own estimate of what re-writing the context costs, and whether it thinks the cache is warm.
 - **Per session:** context fill and its breakdown – including the paths of your memory files (CLAUDE.md, rules) and the names of MCP servers, skills and agents with their token counts – cost as `/cost` shows it, plan-limit percentages and reset times, the number of prompts, the session's start time, the kinds of API errors a turn ended on, and Claude Code's own verdict on whether the prompt cache is warm.
+- **Commands:** the names of the slash commands and which plugin added each (`$.command.list()`), only to see whether another plugin also has a `/keepwarm`. Nothing of it is kept beyond that plugin's name.
 - **Settings:** the prompt-cache TTL controls (`FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL`, `ENABLE_PROMPT_CACHING_1H`, `promptCacheTtl`) and its own seven options. Claude Code hands a mod the whole merged settings object at once (`$.settings.read`, no per-key read); Cache Meter takes only `promptCacheTtl` from it and keeps nothing else.
 - **Your prompts:** when you send one it notes only that you did (to close its pane above the prompt, and with `/keepwarm auto` on to end the break), not the text.
 

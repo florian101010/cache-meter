@@ -16,6 +16,7 @@ Every break, by itself.
 - A ping's answer may include thinking (a fork takes no output cap), so its cost is described as the cache read plus the answer; README tip for API keys: `promptCacheTtl` `1h` makes `/keepwarm` usable there (one-hour writes 2× instead of 1.25×).
 - A ping is described as 1/20 of a re-write **or less** (1/40 on Opus 5.5) – in the pane hint and the README, matching the banner.
 - `docs/how-it-works.md` ordered by topic – overview, the cache, keeping it warm, the band, the pane, notices, quality – with a contents list; `/keepwarm auto` and *Where the pane sits* have headings of their own. No statement changed.
+- **Another plugin with `/keepwarm`:** mod commands share one name, and only the first mod in the hook chain answers. Cache Meter now finds a second `/keepwarm` (`$.command.list()`), says so once, and passes `/keepwarm` words it doesn't know on to it; `/keepwarm-auto` stays its own.
 - A Code of Conduct (Contributor Covenant 2.1), linked from README and CONTRIBUTING.
 - The manifest names the plugin's icon for Anthropic's directory listing (field `icon`, the brand icon the plugin already carries), and the `/config` help texts of the seven options are short enough to read under a toggle.
 - The plugin's description (`plugin.json`, `marketplace.json`) is one line, as `/plugin` shows it: *Stop wasting tokens: keeps the prompt cache warm through every break, shows when it expires and what each answer costs.*
