@@ -40,6 +40,16 @@
       ],
       "default": "auto"
     },
+    "keepwarm": {
+      "type": "string",
+      "title": "Keepwarm",
+      "description": "on: /keepwarm and /keepwarm-auto keep the prompt cache warm through a break, when you type them. off: neither command, no ping, no keepwarm tips – Cache Meter then sends no request of its own. Switching it here applies at once; the typeahead follows from your next prompt.",
+      "options": [
+        "on",
+        "off"
+      ],
+      "default": "on"
+    },
     "autoSidebar": {
       "type": "string",
       "title": "Sidebar at start",

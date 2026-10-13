@@ -159,6 +159,9 @@ let autoNote: string | null = null
 // Another plugin that also has /keepwarm: mod commands share one name, and only the first mod in the hook
 // chain answers (events › The order mods run in). Its name once found, and whether the person was told.
 let otherKeepwarm: string | null = null
+// Option keepwarm: whether /keepwarm and /keepwarm-auto are offered. /config may switch it mid-session
+// (the config.set hook below); off at start, the two commands are not registered at all.
+let isKeepwarmOn = true
 let isOtherKeepwarmNoted = false
 let mainRequests = 0
 // The line under each answer (option turnLine), and per open turn the session cost at its start and
@@ -527,7 +530,7 @@ async function maybeNotify($: EngineInterface) {
   notifiedFor = cache.lastAt
   let reason: string | null = null
   try {
-    const sent = await $.ui.notify(expiryText(status.remaining, cache.contextTokens), { title: 'Cache Meter' })
+    const sent = await $.ui.notify(expiryText(status.remaining, cache.contextTokens, isKeepwarmOn), { title: 'Cache Meter' })
     reason = sent.isSent ? null : sent.reason
   } catch (error) {
     // Rejected by a Notification hook's deny or a failed write (types: $.ui.notify): its own words.
@@ -824,6 +827,7 @@ async function rearmAuto($: EngineInterface, isOwnPrompt = false) {
 
 // Switches /keepwarm auto on for this session; the answer says what it does and costs.
 async function startAuto($: EngineInterface, ms: number): Promise<string> {
+  if (!isKeepwarmOn) return KEEPWARM_OFF
   if (!isInteractive) return 'Keepwarm only works in an interactive session (no timer runs here). Not started.'
   const ttl = await ttlNow($)
   if (ttl.ms < HOUR) {
@@ -846,6 +850,7 @@ async function startAuto($: EngineInterface, ms: number): Promise<string> {
 
 // Starts keepwarm for `ms`; the answer text explains what happens or why it did not start.
 async function startKeepWarm($: EngineInterface, ms: number): Promise<string> {
+  if (!isKeepwarmOn) return KEEPWARM_OFF
   if (!isInteractive) return 'Keepwarm only works in an interactive session (no timer runs here). Not started.'
   const now = await $.clock.now()
   const ttl = await ttlNow($)
@@ -914,6 +919,38 @@ async function noteOtherKeepwarm($: EngineInterface, name: string) {
   $.ui.toast(`/keepwarm is also a command of ${otherKeepwarm} – which one answers depends on the load order. Cache Meter's own: /keepwarm-auto, and /keepwarm-auto off to stop it.`, { timeoutMs: 15_000 })
 }
 
+// Registers /keepwarm and /keepwarm-auto: at start with the option on, and when /config switches it on.
+// Registering a name again replaces it within one plugin (types: $.command.register), so a second call –
+// a reload after the switch, say – is harmless.
+async function registerKeepwarm($: EngineInterface) {
+  // Another plugin's /keepwarm registered before this one shows in the list now. One registering later is
+  // refused, not this one replaced – measured with 2.1.296 ("refused: the plugin … registered it already");
+  // the types' "registering a name again replaces it" holds within one plugin – so later is not looked for.
+  const otherBefore = await otherKeepwarmOwner($)
+  // Each command on its own, written out (validate then names tokens and keepwarm-auto as the mod's own –
+  // measured, not documented): one Claude Code refuses – a built-in's name (api › Add a command), or one
+  // another plugin registered first (measured) – fails only that one, and the debug log says which.
+  try {
+    await $.command.register({
+      name: 'keepwarm',
+      description: 'Keep the cache warm through a break – auto: every break (a ping costs one cache read)',
+      argumentHint: '[2h | 30m | auto | off]  (10m … 8h)',
+    })
+  } catch (error) {
+    notRegistered($, 'keepwarm', error)
+  }
+  try {
+    await $.command.register({
+      name: 'keepwarm-auto',
+      description: 'Keep the cache warm through every break, pinging by itself (each ping one cache read) – off stops it',
+      argumentHint: '[2h]  longest break covered (10m … 8h)',
+    })
+  } catch (error) {
+    notRegistered($, 'keepwarm-auto', error)
+  }
+  if (otherBefore !== null) await noteOtherKeepwarm($, otherBefore)
+}
+
 // Passes a /keepwarm on to the other plugin. Nobody answering ends in Claude Code's developer line
 // ("… no command.run hook answered it …", measured with 2.1.296; types: a run no hook answers "says so as
 // its output") or, where nothing is beneath, a rejection – either way the person gets `fallback` instead.
@@ -936,6 +973,7 @@ async function passKeepwarmOn(
 // (composer) or sent from their phone or browser (bridge) – not another mod's $.command.run, a schedule
 // or a peer session (types: PromptOrigin). Stopping it is open to anyone.
 const NOT_YOURS = 'Keepwarm starts only when you type the command yourself. Not started.'
+const KEEPWARM_OFF = 'Keepwarm is switched off in /config (Cache Meter option "Keepwarm") – switch it on there to use it.'
 function isPersonsCommand(e: { origin?: { kind: string } }): boolean {
   return e.origin?.kind === 'composer' || e.origin?.kind === 'bridge'
 }
@@ -951,6 +989,7 @@ export const register: Register = (on, options) => {
   autoNote = null
   otherKeepwarm = null
   isOtherKeepwarmNoted = false
+  isKeepwarmOn = options.keepwarm !== 'off'
   mainRequests = 0
   showTurnLine = options.turnLine !== 'off'
   expiryNotice = options.expiryNotice === 'on'
@@ -1025,13 +1064,6 @@ export const register: Register = (on, options) => {
       // Soon after start, once the band has been drawn and said whether the session is fullscreen.
       $.clock.after(2_000, () => maybeAutoOpen($))
     }
-    // Another plugin's /keepwarm registered before this one shows in the list now. One registering later is
-    // refused, not this one replaced – measured with 2.1.296 ("refused: the plugin … registered it already");
-    // the types' "registering a name again replaces it" holds within one plugin – so later is not looked for.
-    const otherBefore = await otherKeepwarmOwner($)
-    // Each command on its own, written out (validate then names tokens and keepwarm-auto as the mod's own –
-    // measured, not documented): one Claude Code refuses – a built-in's name (api › Add a command), or one
-    // another plugin registered first (measured) – fails only that one, and the debug log says which.
     try {
       await $.command.register({
         name: 'tokens',
@@ -1041,25 +1073,12 @@ export const register: Register = (on, options) => {
     } catch (error) {
       notRegistered($, 'tokens', error)
     }
-    try {
-      await $.command.register({
-        name: 'keepwarm',
-        description: 'Keep the cache warm through a break – auto: every break (a ping costs one cache read)',
-        argumentHint: '[2h | 30m | auto | off]  (10m … 8h)',
-      })
-    } catch (error) {
-      notRegistered($, 'keepwarm', error)
+    // Option keepwarm off: the two commands stay unregistered, and a keepwarm a reload left running stops.
+    if (isKeepwarmOn) await registerKeepwarm($)
+    else {
+      const keep = await read($, keepA)
+      if (keep.until !== null || keep.auto !== null) await stopKeepWarm($)
     }
-    try {
-      await $.command.register({
-        name: 'keepwarm-auto',
-        description: 'Keep the cache warm through every break, pinging by itself (each ping one cache read) – /keepwarm off stops it',
-        argumentHint: '[2h]  longest break covered (10m … 8h)',
-      })
-    } catch (error) {
-      notRegistered($, 'keepwarm-auto', error)
-    }
-    if (otherBefore !== null) await noteOtherKeepwarm($, otherBefore)
 
     return result
   })
@@ -1214,7 +1233,8 @@ export const register: Register = (on, options) => {
           // Only after a pause in this session: after a model switch or a resume, keepwarm could not have helped.
           // With /keepwarm auto on, this request has just moved its window (rearmAuto above), so no tip.
           if (cause === 'pause' && isInteractive && !(keep.until !== null && keep.until > startedAt)) {
-            $.ui.toast(`Cache was cold: ${short(u.write)} tokens re-written – try /keepwarm before your next break, or /keepwarm auto`, {
+            const tip = isKeepwarmOn ? ' – try /keepwarm before your next break, or /keepwarm auto' : ''
+            $.ui.toast(`Cache was cold: ${short(u.write)} tokens re-written${tip}`, {
               timeoutMs: 10_000,
             })
           }
@@ -1522,7 +1542,50 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
+  // Option keepwarm switched in /config: on registers the two commands now; off stops a running keepwarm
+  // and hides them, since a command cannot be unregistered (types: $.command has list, run, register).
+  // Whether a /config change also reloads the module is not documented and not measured – with a reload,
+  // register and session.start run again with the new value, which ends in the same place.
+  on('config.set', async ($, e, next) => {
+    const result = await next(e)
+    // Only this plugin's own row, and only once written. The row's owner is `provider` (types: pinned);
+    // without one – the test kit passes key and value only – the key's `<plugin>.` part names it.
+    const owner = e.provider?.plugin ?? e.key.slice(0, e.key.lastIndexOf('.'))
+    if (result.deny !== undefined || !e.key.endsWith('.keepwarm') || owner.split('@')[0] !== $.plugin.name) return result
+    try {
+      isKeepwarmOn = result.value !== 'off'
+      if (isKeepwarmOn) await registerKeepwarm($)
+      else {
+        const keep = await read($, keepA)
+        const text = await stopKeepWarm($)
+        if (keep.until !== null || keep.auto !== null) $.ui.toast(text)
+      }
+      // The typeahead's cached answers go next turn (types: $.ui.invalidate); the band and pane redraw now.
+      $.ui.invalidate('command.describe')
+      $.ui.invalidate('ui.render')
+    } catch (error) {
+      $.ui.log(`option keepwarm not applied: ${cleanLabel(error instanceof Error ? error.message : String(error))}`, { to: 'debug' })
+    }
+
+    return result
+  })
+
+  // Option keepwarm off: this plugin's two commands leave the typeahead and /help; typed in full they still
+  // reach the command.run hooks (types: CommandDescribeInput.isHidden). Another plugin's /keepwarm stays.
+  on('command.describe', ($, e, next) => {
+    const isOwn = (e.command === 'keepwarm' || e.command === 'keepwarm-auto') && e.provider?.plugin.split('@')[0] === $.plugin.name
+
+    return !isKeepwarmOn && isOwn ? next({ ...e, isHidden: true }) : next(e)
+  })
+
   on('command.run', { command: 'keepwarm' }, async ($, e, next) => {
+    if (!isKeepwarmOn) {
+      // Off: another plugin's /keepwarm is theirs alone. This one's may still be registered (switched off
+      // mid-session – a command cannot be unregistered, types: $.command), so it says how to switch it on.
+      if ((await otherKeepwarmOwner($)) !== null) return next(e)
+
+      return { text: KEEPWARM_OFF }
+    }
     const c = parseKeepCommand(e.args)
     // Another plugin's /keepwarm, still there (it may have gone since the start)?
     if (otherKeepwarm !== null) otherKeepwarm = await otherKeepwarmOwner($)
@@ -1545,6 +1608,7 @@ export const register: Register = (on, options) => {
 
   // The same as /keepwarm auto, as a command of its own so the typeahead lists it beside /keepwarm.
   on('command.run', { command: 'keepwarm-auto' }, async ($, e) => {
+    if (!isKeepwarmOn) return { text: KEEPWARM_OFF }
     // Its own name: `off` here always reaches Cache Meter, whichever mod answers /keepwarm first.
     if (e.args.trim().toLowerCase() === 'off') return { text: await stopKeepWarm($) }
     const c = parseKeepCommand(`auto ${e.args}`)
@@ -1588,7 +1652,7 @@ export const register: Register = (on, options) => {
     const rewriteText =
       status.kind === 'expired' && cache !== null && rewriteTokens > 0
         ? ` · rewrite ${cache.rewriteUsd !== null ? `≈ $${cache.rewriteUsd.toFixed(2)}` : `≈ ${short(rewriteTokens)} tok`}`
-        : isLow && !isKeeping && keep.auto === null && isInteractive
+        : isKeepwarmOn && isLow && !isKeeping && keep.auto === null && isInteractive
           ? ' · /keepwarm?'
           : ''
     const base =
@@ -1775,7 +1839,7 @@ export const register: Register = (on, options) => {
     const stake =
       cache?.rewriteUsd != null ? `$${cache.rewriteUsd.toFixed(2)} (${short(rewriteTokens)} tokens)` : `${short(rewriteTokens)} tokens`
     // Keepwarm pings once PING_SHARE of the TTL is left: the marker shows that point on the countdown.
-    const canKeep = isInteractive && isWarm && ttl.ms >= HOUR
+    const canKeep = isKeepwarmOn && isInteractive && isWarm && ttl.ms >= HOUR
     const isKeeping = keep.until !== null && keep.until > now
     const pingMarks: Mark[] = canKeep || isKeeping ? [{ at: markAt(PING_SHARE, leftIn), color: 0xd97757, theme: 'claude' }] : []
 
@@ -1885,7 +1949,9 @@ export const register: Register = (on, options) => {
               : 'Waiting for the next answer.'
             : isKeeping
             ? `${keep.pings}/${MAX_PINGS} pings · ${short(keep.readTokens)} read · next ~${remainingLabel(pingIn)}`
-            : canKeep
+            : !isKeepwarmOn
+              ? 'Off in /config (option Keepwarm).'
+              : canKeep
               ? 'Break ahead? A ping reads at ≤ 1/20 of a re-write.'
               : !isInteractive
                 ? 'Interactive sessions only.'
@@ -2013,7 +2079,7 @@ export const register: Register = (on, options) => {
                 Total {totals.coldCount}× · {short(totals.coldWritten)} tokens
               </Text>
               <Text dimColor>
-                {colds.some(c => c.cause === 'pause') ? ' · /keepwarm before a break prevents this' : ''}
+                {isKeepwarmOn && colds.some(c => c.cause === 'pause') ? ' · /keepwarm before a break prevents this' : ''}
                 {totals.coldCount > 3 ? ' · showing the last 3' : ''}
               </Text>
             </Text>

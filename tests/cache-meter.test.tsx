@@ -3072,7 +3072,7 @@ test('labels: a Bash first word with $, ; | & or a leading - anywhere in it give
   expect(toolLabel('Bash', { command: '~/bin/deploy' })).toBe('Bash deploy')
 })
 
-const OTHER_KEEPWARM = { name: 'keepwarm', description: 'Keep warm', source: 'plugin', plugin: 'cache-tax' }
+const OTHER_KEEPWARM = { name: 'keepwarm', description: 'Keep warm', source: 'plugin', plugin: 'other-keep' }
 
 test('another /keepwarm registered first: said once, at start', async ($, on) => {
   const { toasts, next, clock } = world(on)
@@ -3083,7 +3083,7 @@ test('another /keepwarm registered first: said once, at start', async ($, on) =>
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   await clock.advance(10_000)
   const notes = toasts.filter(t => t.startsWith('/keepwarm is also a command of'))
-  expect(notes).toEqual(['/keepwarm is also a command of cache-tax – which one answers depends on the load order. Cache Meter\'s own: /keepwarm-auto, and /keepwarm-auto off to stop it.'])
+  expect(notes).toEqual(['/keepwarm is also a command of other-keep – which one answers depends on the load order. Cache Meter\'s own: /keepwarm-auto, and /keepwarm-auto off to stop it.'])
 })
 
 test('no other /keepwarm, or its own entry, or no screen: no word', async ($, on) => {
@@ -3122,7 +3122,7 @@ test('with another /keepwarm: its own words it answers itself, off reaches both,
   await step($)
   const started = (await run($, 'keepwarm', '2h')).text ?? ''
   expect(started).toMatch(/^Keepwarm until/)
-  expect(started).toMatch(/This is Cache Meter's keepwarm – cache-tax has a \/keepwarm too\.\)$/)
+  expect(started).toMatch(/This is Cache Meter's keepwarm – other-keep has a \/keepwarm too\.\)$/)
   expect((await run($, 'keepwarm', 'auto')).text).toMatch(/^Keepwarm auto on/)
   const off = (await run($, 'keepwarm', 'off')).text ?? ''
   expect(off).toMatch(/^Keepwarm auto off \(0 pings/)
@@ -3137,7 +3137,7 @@ test('with another /keepwarm: its own words it answers itself, off reaches both,
 test('with another /keepwarm: nobody answering beneath gives the usage, not a developer line', async ($, on) => {
   const { next } = world(on)
   // Claude Code's own line when no hook answers (measured with 2.1.296).
-  on('command.run', () => ({ text: 'cache-tax registered /keepwarm but no command.run hook answered it: add on("command.run", …) to the plugin.' }) as never)
+  on('command.run', () => ({ text: 'other-keep registered /keepwarm but no command.run hook answered it: add on("command.run", …) to the plugin.' }) as never)
   next.commandList = [OTHER_KEEPWARM]
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   expect((await run($, 'keepwarm', 'always')).text).toMatch(/^Usage: \/keepwarm/)
@@ -3179,4 +3179,137 @@ test('labels: & and quotes in a Bash first word give just Bash; invisible charac
   expect(toolLabel('Bash', { command: 'a&&/bin/rm -rf x' })).toBe('Bash')
   expect(toolLabel('Bash', { command: '"/usr/bin/x" y' })).toBe('Bash')
   expect(cleanLabel('evil\u202eplugin\u200b')).toBe('evil plugin ')
+})
+
+// Option keepwarm (off: no keepwarm commands, no pings, no tips; /config can switch it either way mid-session).
+const OFF_TEXT = 'Keepwarm is switched off in /config (Cache Meter option "Keepwarm") – switch it on there to use it.'
+const OWN = { plugin: 'cache-meter', tier: 'user' }
+// A second mod that changes a /config row: $.config.set skips the caller's own hooks (types), so the
+// change reaches Cache Meter's config.set hook as one from the menu would.
+const SETTER = {
+  name: 'setter',
+  register(on: On) {
+    on('command.run', { command: 'set-row' }, async ($, e) => {
+      const [key, value] = (e as { args: string }).args.split(' ')
+      const result = await $.config.set({ key, value } as never)
+
+      return { text: JSON.stringify(result) }
+    })
+  },
+}
+const setRow = ($: Engine, key: string, value: string) => $.command.run({ command: 'set-row', args: `${key} ${value}` } as never) as Promise<{ text?: string }>
+
+test('option keepwarm off: only /tokens registered, no word about another /keepwarm, which passes straight on', { options: { keepwarm: 'off' } }, async ($, on) => {
+  const { commands, toasts, next } = world(on)
+  on('command.run', ($, e) => ({ text: `other plugin: ${(e as { args: string }).args}` }) as never)
+  next.commandList = [OTHER_KEEPWARM]
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  expect(commands.map(c => c.name)).toEqual(['tokens'])
+  expect(toasts.some(t => t.startsWith('/keepwarm is also'))).toBe(false)
+  expect((await run($, 'keepwarm', '2h')).text).toBe('other plugin: 2h')
+  expect((await run($, 'keepwarm-auto', '')).text).toBe(OFF_TEXT)
+})
+
+test('option keepwarm off: typed in full it says how to switch it on, and nothing pings', { options: { keepwarm: 'off' } }, async ($, on) => {
+  const { forks, clock } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  expect((await run($, 'keepwarm', '2h')).text).toBe(OFF_TEXT)
+  expect((await run($, 'keepwarm', 'auto')).text).toBe(OFF_TEXT)
+  expect((await run($, 'keepwarm-auto', '2h')).text).toBe(OFF_TEXT)
+  await clock.advance(120 * 60_000)
+  await clock.settle()
+  expect(forks).toHaveLength(0)
+})
+
+test('option keepwarm off: band, pane and cold toast suggest no /keepwarm', { options: { keepwarm: 'off' } }, async ($, on) => {
+  const { clock, toasts, next } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  await clock.advance(52 * 60_000)
+  const bandUi = await $.ui.mount({ surface: 'terminal', ...band(160) })
+  expect(await bandUi.find({ type: 'Text', text: / · \/keepwarm\?/ })).toBeUndefined()
+  await bandUi.unmount()
+  const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  expect(await ui.find({ type: 'Button', key: 'keepwarm-start' })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: 'Off in /config (option Keepwarm).' })).toBeDefined()
+  await ui.unmount()
+  // A pause past the TTL: the cold toast says what happened, without a /keepwarm tip.
+  await clock.advance(30 * 60_000)
+  next.write = 90_000
+  next.read = 0
+  await step($)
+  expect(toasts.some(t => t.startsWith('Cache was cold'))).toBe(true)
+  expect(toasts.some(t => t.includes('/keepwarm'))).toBe(false)
+})
+
+test('option keepwarm off: the expiry notice gives no /keepwarm tip', { options: { keepwarm: 'off', expiryNotice: 'on' } }, async ($, on) => {
+  const { clock, notifies } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  await clock.advance(51 * 60_000)
+  expect(notifies).toHaveLength(1)
+  expect(notifies[0]).toMatch(/^Prompt cache expires in \d+m – the next prompt would re-write 100\.5k tokens\.$/)
+})
+
+test('option keepwarm switched on in /config: both commands registered at once, the other /keepwarm named', { options: { keepwarm: 'off' }, plugins: [SETTER] }, async ($, on) => {
+  const { commands, toasts, next } = world(on)
+  on('config.set', ($, e) => ({ value: (e as { value: unknown }).value }) as never)
+  next.commandList = [OTHER_KEEPWARM]
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  expect((await setRow($, 'cache-meter.keepwarm', 'on')).text).toBe('{"value":"on"}')
+  expect(commands.map(c => c.name)).toEqual(['tokens', 'keepwarm', 'keepwarm-auto'])
+  expect(toasts.some(t => t.startsWith('/keepwarm is also a command of other-keep'))).toBe(true)
+  expect((await run($, 'keepwarm-auto', '')).text).toMatch(/^Keepwarm auto on/)
+})
+
+test('option keepwarm switched off in /config: a running auto stops, its commands hide, another plugin\'s stays', { plugins: [SETTER] }, async ($, on) => {
+  const { toasts, forks, clock } = world(on)
+  on('config.set', ($, e) => ({ value: (e as { value: unknown }).value }) as never)
+  on('command.describe', ($, e) => {
+    const d = e as { description: string; argumentHint?: string; isHidden: boolean }
+    return { description: d.description, argumentHint: d.argumentHint, isHidden: d.isHidden } as never
+  })
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  const describe = (command: string, plugin: string) =>
+    $.command.describe({ command, description: 'x', isHidden: false, immediate: false, provider: { ...OWN, plugin } } as never)
+  expect((await describe('keepwarm', 'cache-meter')).isHidden).toBe(false)
+  expect((await run($, 'keepwarm', 'auto')).text).toMatch(/^Keepwarm auto on/)
+  await setRow($, 'cache-meter.keepwarm', 'off')
+  expect(toasts.some(t => t.startsWith('Keepwarm auto off'))).toBe(true)
+  expect((await describe('keepwarm', 'cache-meter')).isHidden).toBe(true)
+  expect((await describe('keepwarm-auto', 'cache-meter@cache-meter')).isHidden).toBe(true)
+  expect((await describe('keepwarm', 'other-keep')).isHidden).toBe(false)
+  expect((await describe('tokens', 'cache-meter')).isHidden).toBe(false)
+  expect((await run($, 'keepwarm', '2h')).text).toBe(OFF_TEXT)
+  await clock.advance(120 * 60_000)
+  await clock.settle()
+  expect(forks).toHaveLength(0)
+})
+
+test('option keepwarm: another plugin\'s row of the same name, or a refused change, changes nothing', { plugins: [SETTER] }, async ($, on) => {
+  const { forks, clock } = world(on)
+  let deny = false
+  on('config.set', ($, e) => (deny ? { deny: 'locked' } : { value: (e as { value: unknown }).value }) as never)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  await run($, 'keepwarm', 'auto')
+  // A row named keepwarm that belongs to another plugin.
+  await setRow($, 'other-keep.keepwarm', 'off')
+  deny = true
+  expect((await setRow($, 'cache-meter.keepwarm', 'off')).text).toBe('{"deny":"locked"}')
+  await clock.advance(51 * 60_000)
+  await clock.settle()
+  expect(forks.length).toBeGreaterThan(0)
+})
+
+test('option keepwarm: switching it on refused – the commands stay unregistered', { options: { keepwarm: 'off' }, plugins: [SETTER] }, async ($, on) => {
+  const { commands } = world(on)
+  on('config.set', () => ({ deny: 'locked' }) as never)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  expect((await setRow($, 'cache-meter.keepwarm', 'on')).text).toBe('{"deny":"locked"}')
+  expect(commands.map(c => c.name)).toEqual(['tokens'])
+  expect((await run($, 'keepwarm-auto', '')).text).toBe(OFF_TEXT)
 })

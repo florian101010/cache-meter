@@ -17,7 +17,7 @@
 
 ## Source
 
-- [.claude-plugin/plugin.json](https://raw.githubusercontent.com/florian101010/cache-meter/main/.claude-plugin/plugin.json): manifest and its seven options
+- [.claude-plugin/plugin.json](https://raw.githubusercontent.com/florian101010/cache-meter/main/.claude-plugin/plugin.json): manifest and its eight options
 - [hooks/register.tsx](https://raw.githubusercontent.com/florian101010/cache-meter/main/hooks/register.tsx): all hooks
 - [hooks/lib.ts](https://raw.githubusercontent.com/florian101010/cache-meter/main/hooks/lib.ts): pure functions
 - [hooks/spin.tsx](https://raw.githubusercontent.com/florian101010/cache-meter/main/hooks/spin.tsx): the turning keepwarm arrow (a Client surface module, no mods API)

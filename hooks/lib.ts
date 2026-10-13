@@ -617,9 +617,9 @@ export function breakCause(i: {
   return 'not observable here: fast mode turned on, a code-intelligence plugin (LSP tool), a tool deny rule, or removed images'
 }
 
-/** The expiry notification's text. */
-export function expiryText(remainingMs: number, tokens: number): string {
-  return `Prompt cache expires in ${remainingLabel(remainingMs)} – the next prompt would re-write ${short(tokens)} tokens. Type /keepwarm to keep it.`
+/** The expiry notification's text; the /keepwarm tip only while the option offers the command. */
+export function expiryText(remainingMs: number, tokens: number, canKeep = true): string {
+  return `Prompt cache expires in ${remainingLabel(remainingMs)} – the next prompt would re-write ${short(tokens)} tokens.${canKeep ? ' Type /keepwarm to keep it.' : ''}`
 }
 
 /** A subagent's name in the Health tab: its type and task, else its id. */
