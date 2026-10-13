@@ -10,6 +10,7 @@ Guide for AI coding agents (Claude Code, Codex, Cursor, …) that were given thi
 - adds **`/tokens [overview | context | health | report]`**: a pane with three tabs – **Overview** (countdown, keepwarm, context, what caching saved, session totals, cost at API prices, plan limits, cold rewrites, a column chart of every request), **Context** (where the context goes, from Claude Code's free estimate; an exact count only on a press), **Health** (rates, unusual stop reasons, API errors, server-side tool calls, warm misses, Claude Code's cache verdict vs. the countdown); the Overview also forecasts when a plan limit is full, the Context tab counts MCP calls per server;
 - shows a line **under each answer** with what it cost and how it used the cache (option `turnLine`), a note at a model switch and before any request that splits a warm cache (never a decision), names the cause of a warm miss, lists what each subagent used and which tool results fill the conversation, forecasts auto-compact, copies a Markdown report (`/tokens report`), warns at a session budget, pulses in the last stretch and flashes a keepwarm heartbeat, shows request details on hover (fullscreen), and – option `expiryNotice` – sends a notification before the cache expires;
 - adds **`/keepwarm [10m … 8h | off]`**: pings the cache through `$.model.fork` shortly before it expires; stops itself on a miss, after 12 pings, at a 5-minute TTL or at the end of the window;
+- docked beside the chat, animates a small **café** under the request chart (a barista and a cup acting out the cache) and flashes the countdown at each new minute – option `animations`, `on` by default; the animation file gets only the cache's state word.
 - shows a hint after a cold rewrite. It never rewrites or drops prompts, never approves tool calls, writes no files, makes no network calls of its own – only the keepwarm pings and, on a press, the Context tab's exact count.
 
 Version and requirements: `.claude-plugin/plugin.json` (`version`), Claude Code ≥ 2.1.287 (terminal) or ≥ 2.1.286 (Desktop Code tab), tested with 2.1.296.
@@ -17,15 +18,15 @@ Version and requirements: `.claude-plugin/plugin.json` (`version`), Claude Code 
 ## Install it for a user
 
 1. Check the version: `claude --version` must be ≥ 2.1.287.
-2. Install from GitHub (shell, non-interactive):
+2. Install from GitHub (shell, non-interactive – this form needs Claude Code ≥ 2.1.292; below that use the in-session form underneath):
 
    ```bash
    claude plugin install cache-meter --marketplace florian101010/cache-meter --scope user
    ```
 
    In a running session the equivalent is `/plugin install cache-meter --marketplace florian101010/cache-meter`. Docs: <https://code.claude.com/docs/en/plugins/install>.
-3. Verify: `claude plugin list` lists `cache-meter@cache-meter` as enabled. Tell the user to start a new Claude Code session (or run `/reload-plugins`); `/plugin` then shows `… mods active · cache-meter`, and after the first answer the band above the prompt shows a minute value and a hit rate.
-4. Optional: the user can set `cacheTtl` (`auto` · `60m` · `5m`) with `/config` → `cache-meter.cacheTtl` – on an API key or cloud provider (5-minute default TTL) recommend `5m` – `autoSidebar` (`auto` · `off`): with `auto` the dashboard opens by itself as a sidebar in the fullscreen renderer – `turnLine` (`on` · `off`), the line under each answer – `expiryNotice` (`off` · `on`), a notification before the cache expires – and `sessionBudget` (dollars, `0` = off). The install output's note "5 userConfig options not yet set" is harmless: the defaults apply.
+3. Verify: `claude plugin list` lists `cache-meter@cache-meter` as enabled. Tell the user to start a new Claude Code session (or run `/reload-plugins`); `/plugin` then shows `… mod(s) active · cache-meter` (e.g. `1 mod active · cache-meter`), and after the first answer the band above the prompt shows a minute value and a hit rate.
+4. Optional: the user can set `cacheTtl` (`auto` · `60m` · `5m`) with `/config` → `cache-meter.cacheTtl` – on an API key or cloud provider (5-minute default TTL) recommend `5m` – `autoSidebar` (`auto` · `off`): with `auto` the dashboard opens by itself as a sidebar in the fullscreen renderer – `turnLine` (`on` · `off`), the line under each answer – `expiryNotice` (`off` · `on`), a notification before the cache expires – `sessionBudget` (dollars, `0` = off) – and `animations` (`on` · `off`), the café under the request chart and the minute flash. The install output's note "6 userConfig options not yet set" is harmless: the defaults apply.
 5. Tell the user what to try: the band above the prompt after the first answer, `/tokens` (tabs: `/tokens context`, `/tokens health`), `/keepwarm` before a break.
 
 Update: `claude plugin update cache-meter@cache-meter` (third-party marketplaces do not auto-update unless the user turns it on under `/plugin` → **Marketplaces**), then a new session or `/reload-plugins`. Remove: `claude plugin uninstall cache-meter@cache-meter`. Turn off for one session: `claude --safe-mode`.
@@ -69,7 +70,11 @@ Code conventions enforced by `validate`: helpers that take `$` are top-level fun
 | `.claude-plugin/marketplace.json` | makes the repository a one-plugin marketplace (`cache-meter@cache-meter`) |
 | `hooks/hooks.json` → `hooks/register.tsx` | every hook: data sources, band, pane, commands, keepwarm |
 | `hooks/lib.ts` | pure functions: TTL derivation, hit rate, formatting, thresholds |
+| `hooks/spin.tsx` | the turning keepwarm arrow: a surface module (`Client`), no `$`, no props. Not in `hooks.json` |
+| `hooks/cafe.tsx` | the café animation: a surface module (`Client`), no `$`, gets only the cache's state word; `sceneRows` is pure and unit-tested. Not listed in `hooks.json` – it is found through `module: "./cafe.tsx"` |
 | `types/index.d.ts` | type contract of every `$.state` value |
 | `tests/cache-meter.test.tsx` | tests for `claude plugin test` |
 | `docs/how-it-works.md` | events, state, thresholds, cold-rewrite rule, keepwarm algorithm, with doc references |
-| `README.md`, `CHANGELOG.md`, `CONTRIBUTING.md`, `SECURITY.md` | user docs, history, contribution rules, what the mod can reach |
+| `README.md`, `CHANGELOG.md`, `CONTRIBUTING.md`, `SECURITY.md`, `PRIVACY.md` | user docs, history, contribution rules, what the mod can reach, what it reads, keeps and sends |
+| `llms.txt` | machine-readable index of the repository |
+| `.github/workflows/ci.yml`, `.github/scripts/directory-checks.sh`, `.github/workflows/upstream.yml` | CI: validate, tests, parameter guard, directory file checks; weekly check against new Claude Code releases and the docs |

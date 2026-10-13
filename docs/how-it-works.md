@@ -19,8 +19,12 @@ This page describes the design of the mod for people who want to change it or ch
 | `ui.render` `AbovePrompt` | the band; puts `await next(e)` below its own row so other mods' content stays | *interface › Pick where to draw › Band above the prompt* |
 | `ui.render` `Pane` (`requestId: 'cache-meter'`) | the `/tokens` pane; sized by `e.props.bodyColumns` and `e.props.scroll.bodyRows` | *reference › Render sites* |
 | `command.run` `tokens`, `keepwarm` | the two commands | *api › Add a command* |
+| `classic.StopFailure` | an API error ends a turn: counted for the Health tab (main conversation and subagents) | types: `StopFailureHookInput` |
+| `prompt.submit` | notes that you sent a prompt (not its text) – the pane above the prompt closes then | *events › Rewrite or add to a prompt* |
+| `ui.close` | notes that you closed the pane (it does not reopen by itself) and redraws the band, which takes its Compact button back | types: `UiCloseInput` |
+| `ui.fault` | a surface module (the café or the turning keepwarm arrow, told apart by `e.module`) failed to load, draw or run: that one is left out from then on, the reason goes to the debug log (`$.ui.log`, `to: 'debug'`) | *reference › Interface* (v2.1.289+); types: `UiFaultInput` |
 
-Calls: `$.clock.now/every`, `$.command.register`, `$.env.get` (three literal names), `$.settings.read`, `$.session.usage` and `$.session.compact`, `$.model.fork`, `$.state` through `atom`/`read`/`update`, `$.ui.invalidate/open/resolve/toast`. `claude plugin validate .` prints the authoritative list.
+Calls (as `claude plugin validate` lists them): `$.agent.list`, `$.clock.after`, `$.clock.every`, `$.clock.now`, `$.command.register`, `$.env.get` (three literal names), `$.model.fork`, `$.ui.log` (the reason of a failed animation, to the debug log), `$.session.compact`, `$.session.turns`, `$.session.usage`, `$.settings.read`, `$.state` (through `atom`/`read`/`update`), `$.ui.close`, `$.ui.copy`, `$.ui.invalidate`, `$.ui.notify`, `$.ui.open`, `$.ui.panes`, `$.ui.resolve`, `$.ui.toast`. No `$.fs`, `$.store`, `$.http` or `$.process`.
 
 ## State
 
@@ -36,6 +40,7 @@ All drawn values live in `$.state`, declared in `types/index.d.ts` (*interface �
 | `coldWrites` | the last 20 cold rewrites (time, tokens, cause `pause`/`model`/`resume`, idle time) |
 | `measure` | context fill and tokens, window, auto-compact point (and whether it is off), the last 12 context sizes, plan limits, cost, start time, prompts, and per plan limit the first reading of its window (`limitStart`) |
 | `health` | unusual stops, API errors (main and subagents), server-side tool calls, MCP calls by tool (`toolCalls`), warm misses with pause and cause (`unexpected`), the expiry notice's count and last reason (`notice`), Claude Code's cache verdicts (`checks`) |
+| `contextMap` | the heaviest context items for the Context tab: memory files (paths `~`-shortened), MCP servers with their tools, skills, agents |
 | `reportedTtl` | `cache_ttl` from the last model switch |
 | `ttlConfig` | the TTL controls read at start (three environment variables, the `promptCacheTtl` setting) |
 | `keepWarm` | end of the window, pings, tokens read, last ping |
@@ -60,7 +65,7 @@ A main request counts as a cold rewrite when all of these hold:
 2. it wrote at least 10,000 tokens to the cache, and
 3. it wrote more than it read – so a wrong TTL assumption cannot turn a warm request into a "cold" one.
 
-The first request of a new session and the first after `/compact` or `/clear` find no cache at all and are not counted. The pane shows the last five with their cause; the totals cover the whole session. After a cold rewrite caused by a pause in this session, a toast suggests `/keepwarm` (10 s), unless keepwarm is already running or the session is not interactive.
+The first request of a new session and the first after `/compact` or `/clear` find no cache at all and are not counted. The pane shows the last three with their cause; the totals cover the whole session. After a cold rewrite caused by a pause in this session, a toast suggests `/keepwarm` (10 s), unless keepwarm is already running or the session is not interactive.
 
 ## `/keepwarm`
 
@@ -117,7 +122,7 @@ The surface seats the pane, not the mod (*interface › Pick where to draw*): do
 
 ## Context tab
 
-After each turn the `session.measure` hook reads `$.session.usage({ breakdown: 'summary' })` – Claude Code's local estimate, which sends no request (types: `SessionUsageArgs`) – and keeps the heaviest items of `context.breakdown` (types: `SessionContextBreakdown`): categories of kind `used`, memory files, loaded MCP tools summed per `serverName` (tools with `isLoaded: false` sit behind tool search and are only counted), agents, and `skills.includedSkills` of `totalSkills`. **Count exactly** calls `breakdown: 'full'`, which sends one token-count request per tool and memory file as `/context` does – only on a press, never on a timer. The card says which one it shows (`estimate` or `exact`) and when. `ContextCategory.color` is not used: its format is undocumented, and an unknown color would make the whole tree invalid.
+After each turn the `session.measure` hook reads `$.session.usage({ breakdown: 'summary' })` – Claude Code's local estimate, which sends no request (types: `SessionUsageArgs`) – and keeps the heaviest items of `context.breakdown` (types: `SessionContextBreakdown`): categories of kind `used`, memory files, loaded MCP tools summed per `serverName` (tools with `isLoaded: false` sit behind tool search and are only counted), agents, and `skills.includedSkills` of `totalSkills`. **Count exactly** calls `breakdown: 'full'`, which sends one token-count request per tool and memory file as `/context` does – only on a press, never on a timer. The card says which one it shows (`estimate` or `exact`) and when. `ContextCategory.color` (a theme key, types: `ContextCategory`) is not used: the pane colours by its own scale, the same in every tab.
 
 ## Health tab
 
@@ -125,7 +130,7 @@ After each turn the `session.measure` hook reads `$.session.usage({ breakdown: '
 |---|---|
 | Age, prompts | `$.session.usage().startedAt` (`/clear` starts it over), `$.session.turns()`, read in `session.measure` |
 | Cost, $/h, $/prompt | `cost.usd` (as `/cost`) over age and prompts; labelled *API value* when plan limits are reported (a subscription: `rateLimits` is empty off one, types `SessionMeasureInput`), *spent* otherwise |
-| Stops | `turn.step` result `stopReason` of main requests; `end_turn`, `tool_use` and none are normal, the rest is counted (*events › Follow a turn*) |
+| Stops | `turn.step` result `stopReason` of main requests; `end_turn`, `tool_use` and none are normal, the rest is counted (types: `TurnStopReason`) |
 | Errors | settings hook event `StopFailure` (`classic.StopFailure`, observed with `next(e)`), its `error`; `agent_id` set = subagent, counted apart |
 | Server | `turn.step` result `serverToolUses` (v2.1.290+): tool calls the API ran itself, such as the advisor; no `tool.call` fires for them. Duration = `endedAt − startedAt`, `–` without `endedAt` |
 | Warm miss | a main request warm by the countdown (cache seen, not expired) that wrote ≥ 10k tokens and read less than it wrote: model, effort, fast mode or the tool definitions changed (prompt-caching › *Actions that invalidate the cache*; editing CLAUDE.md mid-session keeps the cache, › *Actions that keep the cache*), or the real TTL is shorter than the one assumed. The pause before the last one is shown to tell the two apart; the prompt sections are not compared |
@@ -136,7 +141,7 @@ After each turn the `session.measure` hook reads `$.session.usage({ breakdown: '
 
 ## Band layout
 
-The band is one row sized to `e.props.bodyColumns`. The width of every segment is computed first; on a narrow terminal the re-write hint goes first, then the auto-compact note, then the bar (minimum six cells). The cost segment (`API value $X` on a subscription, `spent $X` otherwise, hidden at $0) is dropped first, before the auto-compact note. The `[ Compact ]` button is hidden while `e.props.isWorking`. The weather symbols are single-width characters, not emoji, so the row lines up in every terminal font.
+The band is one row sized to `e.props.bodyColumns`. The width of every segment is computed first; on a narrow terminal it drops, in order: the ping heartbeat (`· ping ok · … read`) and the `cold: good time to` note – each shown only when cost and the auto-compact point fit beside it – then the cost segment (`API value $X` on a subscription, `spent $X` otherwise, hidden at $0), the re-write hint (or `· /keepwarm?` in the last stretch), the auto-compact note, then the bar (minimum six cells). The `[ Compact ]` button is hidden while `e.props.isWorking` and while the `/tokens` pane is placed (`$.ui.panes()`), so the first Ctrl+X Tab reaches the pane; opening and closing the pane redraws the band. The weather symbols are single-width characters, not emoji, so the row lines up in every terminal font.
 
 ## Tests
 
@@ -151,7 +156,7 @@ With the option `cacheTtl` set to `auto`, the TTL is derived in this order, foll
 3. `CLAUDE_CODE_PROMPT_CACHE_TTL` (`5m` / `1h`)
 4. the `promptCacheTtl` setting (`5m` / `1h`)
 5. `ENABLE_PROMPT_CACHING_1H=1` → 1h
-6. a plan limit at 100 % or more – Claude Code then draws usage credits and drops to 5m → 5m
+6. a plan limit at 100 % or more → 5m – an assumption: Claude Code drops to 5m once it draws usage credits beyond the limit (*prompt caching › Which TTL each request gets*), which a mod cannot see; the limit stands in for it
 7. the value Claude Code reported on the last model switch
 8. otherwise 60m (subscription within plan usage)
 
@@ -165,7 +170,7 @@ With the option `cacheTtl` set to `auto`, the TTL is derived in this order, foll
 | Countdown after `--resume` | `seconds_since_last_response` counts from the end of the last response, so the countdown is optimistic by that response's duration. If Claude Code reports `prompt_cache_likely_expired`, the cache is shown cold |
 | Dollar amounts | only Claude Code's own estimates and the `/cost` total – no price table of its own |
 | Other invalidations | a model switch, an MCP or plugin change can invalidate the cache before the TTL ends ([actions that invalidate the cache](https://code.claude.com/docs/en/prompt-caching#actions-that-invalidate-the-cache)) – visible as a low hit rate |
-| Subagents | have their own caches with a five-minute TTL; counted in the totals, not in the countdown |
+| Subagents | have their own caches, with a five-minute TTL by default (one hour with `ENABLE_PROMPT_CACHING_1H`); counted in the totals, not in the countdown |
 
 ## Limit forecast
 
@@ -202,3 +207,24 @@ Option `sessionBudget` (dollars, `0` = off) against `cost.usd`, checked after ev
 ## Live during a turn
 
 `session.measure` fires after each turn (*reference › Session*), so a long first turn used to show no context fill and no cost. After every main request `turn.step` now reads the plain `$.session.usage()` – "the plain call costs nothing" (types: `$.session.usage`) – and updates `measure`'s fill, tokens, cost, plan limits and their window starts, then checks the session budget. An empty limit list ("empty when none has a reading", types) keeps the last limits and window starts instead of wiping them. The context history, the prompt count and the auto-compact point stay per turn, from `session.measure`, so the auto-compact forecast keeps counting prompts. Whether Claude Code has already added the newest response's cost at that moment is not documented; at the latest the next request or the end of the turn brings it.
+
+## Animations: the café, the minute flash and the short ones
+
+Option `animations` (default `on`). All of them live in the Overview only; none in the band.
+
+**The café** is a `Client` (interface › *Build a tree from elements*): `hooks/cafe.tsx`, a surface module the engine reads off the `module: "./cafe.tsx"` literal – it is not a hooks module and is not listed in `hooks.json`. It runs on the drawing side with its own frame clock (`surface.every`, 250 ms, started once while its state is still undefined) and gets no mods API; the pane hands it one word as props, from `cafeState` in `lib.ts`: `ping` while a keepwarm heartbeat shows, `brewing` for 12 s after a request wrote a fresh cache, `working` while a turn is open, then `cold`, `empty`, `last` or `warm` from the countdown. A new word reaches the running instance with its state kept (`ClientProps.props`). It is drawn only when the pane is docked (`placement: 'dock'`), where the outer Box takes the room's height (`minHeight` = `scroll.bodyRows`) and the café grows into what the cards leave (`flexGrow: 1`). It reads its own size (`surface.rows`, `surface.columns`): with fewer than 7 rows or 20 columns it draws a single line, so the region never shows half a figure; with no room left it is that one line. A tab switch, closing the pane or `animations: off` removes the Client, which ends its timer. Its redraws are its own region's (`setState`), not the pane hook's; whether they count against the pane's redraw limit is undocumented (reference › *Limits* names only `$.ui.invalidate`). If the file fails to load, draw or run, `ui.fault` marks it broken and the pane leaves it out from then on; the engine draws the pane again by itself.
+
+**The minute flash:** when the Overview draws a different minute than it last drew, the digits take the theme's `text` colour for 450 ms, and the shared redraw train below (which also carries the shine) draws them in the state colour again. Not on the first draw, after a reload (the module's memory starts empty), on another tab, or while the last minute counts seconds. The change is noticed where the digits are drawn, so it flashes whatever redraw shows the new minute.
+
+The test kit drives a `Client`'s frame clock and size but does not report what the module draws, so `sceneRows` (pure) and the module function (with stand-in elements) are tested directly; how the scene looks docked is checked by hand.
+
+**The short ones** share one redraw train: `animate(until)` asks for a redraw every 100 ms until the latest end any of them asked for, one `$.clock.after` chain at a time, so overlapping animations never stack timers – at most 10 redraws a second: the general limit, which the terminal raises to 30 for the shown pane (reference › *Limits*). A train without a frame for three frame lengths past its end – a refused timer runs never (types: `$.clock.after`) – is taken as gone, so the next animation starts a new one. Each animation keeps only its start time; the drawing reads its eased progress off the clock (`progress`, `tween` in `lib.ts`). None starts on the first draw, after a reload or after a tab switch, because each compares with the value the Overview last drew (kept only while the Overview is drawn):
+
+| Animation | When | Length |
+|---|---|---|
+| Shine over the countdown bar | with the minute flash, a lightened cell (and its neighbours, a little less) runs across the bar (`shineCells`) | 600 ms |
+| New request column | the newest column's height grows from 0 to its share; only the height, so the hover areas stay | 450 ms |
+| Cost and cache saving | count from the figure on screen – mid-count too – to the new one | 600 ms |
+| Turning keepwarm arrow | while keepwarm runs: `hooks/spin.tsx`, a `Client` with its own 200 ms frame clock (◜◝◞◟), so hours of keepwarm cost the pane no redraws; without `Client` (or with `animations` off) a still `↻` | while it runs |
+
+The test kit advances the mock clock and reads the drawing in between, so each animation is tested at a midpoint as well as at its end.

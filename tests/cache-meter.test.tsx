@@ -5,9 +5,14 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
+import Cafe, { FRAME_MS, SCENE_ROWS, sceneRows } from '../hooks/cafe'
+import Spin, { SPIN_FRAMES, SPIN_MS } from '../hooks/spin'
+import type { CafeState } from '../hooks/cafe'
 import {
   FIVE_MIN,
   HOUR,
+  cafeState,
+  faultTarget,
   cacheSaving,
   columnCells,
   forecast,
@@ -660,8 +665,11 @@ test('pane: the keepwarm button starts and stops keepwarm', async ($, on) => {
   await ui.press({ key: 'keepwarm-start' })
   // The toast box is narrow: one short line.
   expect(toasts.some(t => /^Keepwarm on until \d\d:\d\d · pings at ≤ 10 min left$/.test(t))).toBe(true)
-  expect(await ui.find({ type: 'Text', text: '↻ Keepwarm on' })).toBeDefined()
+  // The arrow turns in a Client of its own while keepwarm runs.
+  expect((await ui.find({ key: 'keep-spin' }))?.props).toMatchObject({ module: 'hooks/spin.tsx' })
+  expect(await ui.find({ type: 'Text', text: ' Keepwarm on' })).toBeDefined()
   await ui.press({ key: 'keepwarm-stop' })
+  expect(await ui.find({ key: 'keep-spin' })).toBeUndefined()
   expect(toasts.some(t => t.startsWith('Keepwarm off'))).toBe(true)
   expect(await ui.find({ type: 'Button', key: 'keepwarm-start' })).toBeDefined()
   await ui.unmount()
@@ -915,7 +923,7 @@ test('/tokens <tab> opens on that tab and switches an open pane instead of closi
 test('pane footer: offers clicks only in the fullscreen renderer, which captures the mouse', async ($, on) => {
   world(on)
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
-  const footer = /\/tokens context \| health · keys: ctrl\+x tab, then 1–3/
+  const footer = /\/tokens context \| health · ctrl\+x, then tab: keys here \(again if another pane lights up\)/
   let ui = await $.ui.mount({ surface: 'terminal', ...PANE, viewport: { columns: 190, rows: 50, isFullscreen: false } })
   expect(await ui.find({ type: 'Text', text: footer })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^click a tab/ })).toBeUndefined()
@@ -1838,4 +1846,518 @@ test('Health: a resume without Claude Code\'s verdict is named, not "no resume y
   await $.classic.SessionStart({ source: 'resume', seconds_since_last_response: 60, context_tokens: 100_000 } as never)
   expect(await healthText($, /^Resumed \d\d:\d\d – Claude Code gave no verdict on the cache then/)).toBeDefined()
   expect(await healthText($, /No model switch or resume yet/)).toBeUndefined()
+})
+
+
+const DOCK = { ...PANE, props: { ...PANE.props, placement: 'dock' as const } }
+
+test('café: docked on the Overview, a Client with the cache state grows into the room left', async ($, on) => {
+  world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  const ui = await $.ui.mount({ surface: 'terminal', ...DOCK })
+  const cafe = await ui.find({ key: 'cafe' })
+  expect(cafe?.props).toMatchObject({ module: 'hooks/cafe.tsx', flexGrow: 1 })
+  expect((cafe?.props.props as { state: CafeState }).state).toBe('brewing')
+  await ui.unmount()
+})
+
+test('café: not above the prompt, not on another tab', async ($, on) => {
+  world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  let ui = await $.ui.mount({ surface: 'terminal', ...PANE, props: { ...PANE.props, placement: 'inline' as const } })
+  expect(await ui.find({ key: 'cafe' })).toBeUndefined()
+  await ui.unmount()
+  await run($, 'tokens', 'context')
+  ui = await $.ui.mount({ surface: 'terminal', ...DOCK })
+  expect(await ui.find({ key: 'cafe' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('café: off with animations = off', { options: { animations: 'off' } }, async ($, on) => {
+  world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  const ui = await $.ui.mount({ surface: 'terminal', ...DOCK })
+  expect(await ui.find({ key: 'cafe' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('café state: a ping first, then brewing, work, cold, empty, the last stretch, warm', () => {
+  expect(cafeState('warm', false, true, true, true)).toBe('ping')
+  expect(cafeState('warm', false, true, false, true)).toBe('brewing')
+  expect(cafeState('expired', false, true, false, false)).toBe('working')
+  expect(cafeState('expired', false, false, false, false)).toBe('cold')
+  expect(cafeState('empty', false, false, false, false)).toBe('empty')
+  expect(cafeState('warm', true, false, false, false)).toBe('last')
+  expect(cafeState('warm', false, false, false, false)).toBe('warm')
+})
+
+test('café scene: steam while warm, z\'s while cold, a clock in the last stretch, a cup that fills while brewing', () => {
+  const text = (state: CafeState, f: number) => sceneRows(state, f).map(r => r.map(s => s.t).join(''))
+  expect(sceneRows('warm', 1)).toHaveLength(SCENE_ROWS - 1)
+  // The barista wears a cap: the top two rows start with it, not with the face.
+  expect(text('warm', 1)[0]).toMatch(/^  ▄▄▄  /)
+  expect(text('warm', 1)[1]).toMatch(/^▄█████▄/)
+  expect(text('warm', 1).slice(0, 2).join('')).toMatch(/[()]/)
+  expect(text('cold', 1).slice(0, 2).join('')).not.toMatch(/[()]/)
+  expect(text('cold', 1).slice(0, 2).join('')).toMatch(/z/i)
+  expect(text('last', 1)[0]).toMatch(/[◷◶◵◴]/)
+  expect(text('empty', 1)[3]).toContain('│     ├')
+  const fill = (f: number) => (text('brewing', f)[3]!.match(/▓/g) ?? []).length
+  expect(fill(4)).toBeGreaterThan(fill(0))
+  // Every row of the art keeps the cup in the same columns.
+  const cup = text('warm', 1).slice(2).map(r => r.search(/[╭│╰]/))
+  expect(new Set(cup).size).toBe(1)
+  // It moves: two frames apart, the steam differs.
+  expect(text('warm', 1).slice(0, 2)).not.toEqual(text('warm', 2).slice(0, 2))
+})
+
+test('café module: one frame timer, a one-line fallback without room', async () => {
+  // Stand-ins for the surface's element table: each element becomes plain data the test can read.
+  const tag = (type: string) => (props: object) => ({ type, props })
+  const elements = { Box: tag('Box'), Text: tag('Text') }
+  let timers = 0
+  let sets = 0
+  let tick: () => void = () => {}
+  const surface = (rows: number) => ({
+    elements,
+    state: undefined,
+    setState: () => (sets += 1),
+    columns: 40,
+    rows,
+    every: (ms: number, fn: () => void) => {
+      expect(ms).toBe(FRAME_MS)
+      timers += 1
+      tick = fn
+
+      return () => {}
+    },
+    onPointer: () => () => {},
+    onKey: () => () => {},
+    post: () => {},
+  })
+  const small = JSON.stringify(Cafe({ state: 'cold' }, surface(3) as never))
+  expect(small).toContain('cache cold · napping')
+  expect(small).not.toContain('╭─────╮')
+  expect(timers).toBe(1)
+  expect(sets).toBe(1)
+  // The one-line fallback does not animate: a frame tick asks for no redraw.
+  tick()
+  expect(sets).toBe(1)
+  const full = JSON.stringify(Cafe({ state: 'warm' }, surface(SCENE_ROWS) as never))
+  expect(full).toContain('╭─────╮')
+  expect(full).toContain('cache warm · sipping')
+})
+
+async function digitColor(ui: { find: (q: never) => Promise<{ props: Record<string, unknown> } | undefined> }) {
+  return (await ui.find({ type: 'Text', text: /[█▀▄]{2}/ } as never))?.props.color
+}
+
+test('countdown: a new minute flashes the digits once, then they return to the state colour', async ($, on) => {
+  const { clock } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  const ui = await $.ui.mount({ surface: 'terminal', ...DOCK })
+  // The first draw does not flash.
+  expect(await digitColor(ui as never)).toBe('success')
+  await clock.advance(60_000)
+  expect(await digitColor(ui as never)).toBe('text')
+  await clock.advance(500)
+  expect(await digitColor(ui as never)).toBe('success')
+  await ui.unmount()
+})
+
+test('countdown: no flash with animations = off', { options: { animations: 'off' } }, async ($, on) => {
+  const { clock } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  const ui = await $.ui.mount({ surface: 'terminal', ...DOCK })
+  await clock.advance(60_000)
+  expect(await digitColor(ui as never)).toBe('success')
+  await ui.unmount()
+})
+
+test('pane footer: says when the pane has the keyboard, so digits are not typed into the chat', async ($, on) => {
+  world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  const ui = await $.ui.mount({ surface: 'terminal', ...PANE, props: { ...PANE.props, isFocused: true } })
+  const lit = await ui.find({ type: 'Text', text: /^keys here · 1–3 switch tabs · ↓ pgdn end scroll · tab \+ enter/ })
+  expect(lit?.props).toMatchObject({ color: 'claude', bold: true })
+  expect(String(lit?.text)).toMatch(/esc back to the prompt$/)
+  expect(await ui.find({ type: 'Text', text: /again if another pane lights up/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('band: no Compact button while the pane is open, so the first Ctrl+X Tab reaches the pane', async ($, on) => {
+  world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  let ui = await $.ui.mount({ surface: 'terminal', ...band(120) })
+  expect(await ui.find({ type: 'Button', key: 'compact' })).toBeDefined()
+  await ui.unmount()
+  await run($, 'tokens', '')
+  ui = await $.ui.mount({ surface: 'terminal', ...band(120) })
+  expect(await ui.find({ type: 'Button', key: 'compact' })).toBeUndefined()
+  await ui.unmount()
+  await run($, 'tokens', '')
+  ui = await $.ui.mount({ surface: 'terminal', ...band(120) })
+  expect(await ui.find({ type: 'Button', key: 'compact' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('pane header: the key hint stays visible when a tall tab cuts the footer off', async ($, on) => {
+  world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  let ui = await $.ui.mount({ surface: 'terminal', ...PANE, props: { ...PANE.props, bodyColumns: 140 } })
+  expect(await ui.find({ type: 'Text', text: 'ctrl+x, tab: keys here' })).toBeDefined()
+  await ui.unmount()
+  ui = await $.ui.mount({ surface: 'terminal', ...PANE, props: { ...PANE.props, bodyColumns: 140, isFocused: true } })
+  expect((await ui.find({ type: 'Text', text: /^keys here · ↓ scroll · esc$/ }))?.props).toMatchObject({ color: 'claude', bold: true })
+  await ui.unmount()
+  ui = await $.ui.mount({ surface: 'terminal', ...PANE, props: { ...PANE.props, bodyColumns: 90 } })
+  expect(await ui.find({ type: 'Text', text: 'ctrl+x tab: keys' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('pane footer: a narrow sidebar (iPad) still names the key to reach the pane', async ($, on) => {
+  world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  const ui = await $.ui.mount({ surface: 'terminal', ...PANE, props: { ...PANE.props, bodyColumns: 50 } })
+  expect(await ui.find({ type: 'Text', text: /ctrl\+x tab: keys$/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('pane header: narrow docks keep every tab – the title shrinks to its mark, then the names shorten', async ($, on) => {
+  world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  const header = async (bodyColumns: number) => {
+    const ui = await $.ui.mount({ surface: 'terminal', ...PANE, props: { ...PANE.props, bodyColumns } })
+    const title = (await ui.find({ type: 'Text', text: /^◉/ }))?.text
+    const names = [await ui.find({ key: 'tab-overview' }), await ui.find({ key: 'tab-context' }), await ui.find({ key: 'tab-health' })].map(b => b !== undefined)
+    const over = (await ui.find({ type: 'Text', text: /^(Overview|Over)$/ }))?.text
+    await ui.unmount()
+
+    return { title, names, over }
+  }
+  expect(await header(90)).toEqual({ title: '◉ Cache Meter', names: [true, true, true], over: 'Overview' })
+  expect(await header(44)).toEqual({ title: '◉', names: [true, true, true], over: 'Overview' })
+  expect(await header(30)).toEqual({ title: '◉', names: [true, true, true], over: 'Over' })
+})
+
+test('pane footer: names the two other tabs, not the one on screen', async ($, on) => {
+  world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  const footer = async (tabName: string) => {
+    await run($, 'tokens', tabName)
+    const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+    const text = (await ui.find({ type: 'Text', text: /\/tokens \w+ \| \w+ · / }))?.text
+    await ui.unmount()
+
+    return String(text).match(/\/tokens \w+ \| \w+/)?.[0]
+  }
+  expect(await footer('overview')).toBe('/tokens context | health')
+  expect(await footer('context')).toBe('/tokens overview | health')
+  expect(await footer('health')).toBe('/tokens overview | context')
+})
+
+test('Health tab: the session card names the Markdown report', async ($, on) => {
+  world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  expect(await healthText($, /^copy as Markdown: \/tokens report$/)).toBeDefined()
+})
+
+test('keepwarm card: a still arrow with animations = off', { options: { animations: 'off' } }, async ($, on) => {
+  world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  await ui.press({ key: 'keepwarm-start' })
+  expect(await ui.find({ type: 'Text', text: '↻ Keepwarm on' })).toBeDefined()
+  expect(await ui.find({ key: 'keep-spin' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('spin module: one timer, and each tick turns the arrow a quarter', () => {
+  const tag = (type: string) => (props: object) => ({ type, props })
+  let state: { f: number } | undefined
+  let tick: () => void = () => {}
+  let timers = 0
+  const surface = {
+    elements: { Box: tag('Box'), Text: tag('Text') },
+    get state() {
+      return state
+    },
+    setState: (next: { f: number }) => {
+      state = next
+    },
+    columns: 1,
+    rows: 1,
+    every: (ms: number, fn: () => void) => {
+      expect(ms).toBe(SPIN_MS)
+      timers += 1
+      tick = fn
+
+      return () => {}
+    },
+    onPointer: () => () => {},
+    onKey: () => () => {},
+    post: () => {},
+  }
+  const frame = () => JSON.stringify(Spin({}, surface as never))
+  expect(frame()).toContain(SPIN_FRAMES[0])
+  tick()
+  expect(frame()).toContain(SPIN_FRAMES[1])
+  tick()
+  tick()
+  tick()
+  expect(frame()).toContain(SPIN_FRAMES[0])
+  expect(timers).toBe(1)
+})
+
+// Decodes a Raster's cells: per cell the code point and the foreground colour.
+function rasterOf(cells: unknown): { cp: number; fg: number }[] {
+  const bytes = Array.from(atob(String(cells)), c => c.charCodeAt(0))
+  const words: number[] = []
+  for (let i = 0; i < bytes.length; i += 4) words.push(bytes[i]! | (bytes[i + 1]! << 8) | (bytes[i + 2]! << 16) | (bytes[i + 3]! << 24))
+  const out: { cp: number; fg: number }[] = []
+  for (let i = 0; i < words.length; i += 3) out.push({ cp: words[i]!, fg: words[i + 1]! })
+
+  return out
+}
+
+test('animation: cost counts to its new value – a figure in between, then the new one', async ($, on) => {
+  const { clock, next } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  next.usd = 1
+  await step($)
+  const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  const cost = async () => Number(String((await ui.find({ type: 'Text', text: /^≈? ?\$\d+\.\d\d$/ }))?.text).replace(/[^\d.]/g, ''))
+  expect(await cost()).toBe(1)
+  next.usd = 2
+  await step($)
+  await clock.advance(200)
+  const mid = await cost()
+  expect(mid).toBeGreaterThan(1)
+  expect(mid).toBeLessThan(2)
+  await clock.advance(700)
+  expect(await cost()).toBe(2)
+  await ui.unmount()
+})
+
+test('animation: a new request column grows in from below', async ($, on) => {
+  const { clock, next } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  // A request that reads nothing from the cache: a full-height column.
+  next.write = 150_000
+  next.read = 0
+  await step($)
+  const ink = async () =>
+    rasterOf((await ui.find({ type: 'Raster', key: 'requests-1' }))?.props.cells)
+      .filter(c => c.cp >= 0x2581 && c.cp <= 0x2588)
+      .reduce((sum, c) => sum + (c.cp - 0x2580), 0)
+  await clock.advance(50)
+  const mid = await ink()
+  await clock.advance(600)
+  const full = await ink()
+  expect(mid).toBeGreaterThan(0)
+  expect(mid).toBeLessThan(full)
+  await ui.unmount()
+})
+
+test('animation: a shine passes over the countdown bar with the minute flash', async ($, on) => {
+  const { clock } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  const colours = async () => new Set(rasterOf((await ui.find({ type: 'Raster', key: 'countdown' }))?.props.cells).map(c => c.fg))
+  await clock.advance(60_000)
+  await clock.advance(250)
+  const mid = await colours()
+  await clock.advance(800)
+  const after = await colours()
+  // While it passes, the bar holds lighter colours it does not hold before or after.
+  expect([...mid].some(c => !after.has(c))).toBe(true)
+  await ui.unmount()
+})
+
+test('animation: off with animations = off – the new figure at once, no shine', { options: { animations: 'off' } }, async ($, on) => {
+  const { clock, next } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  next.usd = 1
+  await step($)
+  const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  next.usd = 2
+  await step($)
+  await clock.advance(200)
+  expect(await ui.find({ type: 'Text', text: /^≈? ?\$2\.00$/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('animation: a new column still grows in past the 80 kept requests', async ($, on) => {
+  const { clock, next } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  for (let i = 0; i < 81; i++) await step($)
+  const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  next.write = 150_000
+  next.read = 0
+  await step($)
+  const lastKey = async () => {
+    for (let i = 79; i >= 0; i--) if (await ui.find({ type: 'Raster', key: `requests-${i}` })) return `requests-${i}`
+
+    return ''
+  }
+  const key = await lastKey()
+  const ink = async () =>
+    rasterOf((await ui.find({ type: 'Raster', key }))?.props.cells)
+      .filter(c => c.cp >= 0x2581 && c.cp <= 0x2588)
+      .reduce((sum, c) => sum + (c.cp - 0x2580), 0)
+  await clock.advance(50)
+  const mid = await ink()
+  await clock.advance(600)
+  expect(mid).toBeLessThan(await ink())
+  await ui.unmount()
+})
+
+test('animation: no flash and no count after a tab switch – only changes seen on the Overview', async ($, on) => {
+  const { clock, next } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  next.usd = 1
+  await step($)
+  const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  await ui.press({ key: 'tab-context' })
+  next.usd = 2
+  await step($)
+  await clock.advance(60_000)
+  await ui.press({ key: 'tab-overview' })
+  expect(await digitColor(ui as never)).toBe('success')
+  expect(await ui.find({ type: 'Text', text: /^≈? ?\$2\.00$/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('animation: no shine with animations = off', { options: { animations: 'off' } }, async ($, on) => {
+  const { clock } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  const colours = async () => [...new Set(rasterOf((await ui.find({ type: 'Raster', key: 'countdown' }))?.props.cells).map(c => c.fg))].sort()
+  const before = await colours()
+  await clock.advance(60_250)
+  // The bar is a cell shorter after a minute, so its track colour may appear; a shine would add a
+  // lightened fill colour, which must not.
+  const TRACK_COLOUR = 0x45475a
+  expect((await colours()).filter(c => !before.includes(c) && c !== TRACK_COLOUR)).toEqual([])
+  await ui.unmount()
+})
+
+test('café wiring: the state follows the cache – working, warm, cold', async ($, on) => {
+  const { clock } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  await clock.advance(13_000)
+  const ui = await $.ui.mount({ surface: 'terminal', ...DOCK })
+  const state = async () => ((await ui.find({ key: 'cafe' }))?.props.props as { state: CafeState } | undefined)?.state
+  expect(await state()).toBe('warm')
+  await $.turn.start({ turnId: 't1' } as never)
+  expect(await state()).toBe('working')
+  await $.turn.complete({ turnId: 't1', isAborted: false } as never)
+  await clock.advance(61 * 60_000)
+  expect(await state()).toBe('cold')
+  await ui.unmount()
+})
+
+test('café module: the full scene advances its frames; 19 columns are the one-line fallback', () => {
+  const tag = (type: string) => (props: object) => ({ type, props })
+  let sets = 0
+  let tick: () => void = () => {}
+  const surface = (columns: number) => ({
+    elements: { Box: tag('Box'), Text: tag('Text') },
+    state: undefined,
+    setState: () => (sets += 1),
+    columns,
+    rows: SCENE_ROWS,
+    every: (ms: number, fn: () => void) => {
+      tick = fn
+
+      return () => {}
+    },
+    onPointer: () => () => {},
+    onKey: () => () => {},
+    post: () => {},
+  })
+  expect(JSON.stringify(Cafe({ state: 'warm' }, surface(19) as never))).not.toContain('╭─────╮')
+  sets = 0
+  Cafe({ state: 'warm' }, surface(40) as never)
+  tick()
+  expect(sets).toBe(2)
+})
+
+test('band: the Compact button leaves and comes back on a mounted band', async ($, on) => {
+  world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  const ui = await $.ui.mount({ surface: 'terminal', ...band(120) })
+  expect(await ui.find({ type: 'Button', key: 'compact' })).toBeDefined()
+  await run($, 'tokens', '')
+  expect(await ui.find({ type: 'Button', key: 'compact' })).toBeUndefined()
+  await run($, 'tokens', '')
+  expect(await ui.find({ type: 'Button', key: 'compact' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('pane header: the boundaries – 50 and 36 columns', async ($, on) => {
+  world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  const title = async (bodyColumns: number) => {
+    const ui = await $.ui.mount({ surface: 'terminal', ...PANE, props: { ...PANE.props, bodyColumns } })
+    const t = (await ui.find({ type: 'Text', text: /^◉/ }))?.text
+    const over = (await ui.find({ type: 'Text', text: /^(Overview|Over)$/ }))?.text
+    await ui.unmount()
+
+    return `${t}|${over}`
+  }
+  expect(await title(50)).toBe('◉ Cache Meter|Overview')
+  expect(await title(49)).toBe('◉|Overview')
+  expect(await title(36)).toBe('◉|Overview')
+  expect(await title(35)).toBe('◉|Over')
+})
+
+test('ui.fault: which animation a failed module is', () => {
+  expect(faultTarget('hooks/cafe.tsx')).toBe('cafe')
+  expect(faultTarget('hooks/spin.tsx')).toBe('spin')
+  expect(faultTarget('cafe.tsx')).toBe('cafe')
+  expect(faultTarget('hooks/notcafe.tsx')).toBeNull()
+  expect(faultTarget('hooks/register.tsx')).toBeNull()
+})
+
+test('café: brewing ends by itself after BREW_MS', async ($, on) => {
+  const { clock } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await clock.advance(1_000)
+  const ui = await $.ui.mount({ surface: 'terminal', ...DOCK })
+  const state = async () => ((await ui.find({ key: 'cafe' }))?.props.props as { state: CafeState } | undefined)?.state
+  await step($)
+  expect(await state()).toBe('brewing')
+  await clock.advance(12_200)
+  expect(await state()).toBe('warm')
+  await ui.unmount()
+})
+
+test('café module: an unknown state word shows the empty cup', () => {
+  const tag = (type: string) => (props: object) => ({ type, props })
+  const surface = { elements: { Box: tag('Box'), Text: tag('Text') }, state: { f: 0 }, setState: () => {}, columns: 19, rows: 3, every: () => () => {}, onPointer: () => () => {}, onKey: () => () => {}, post: () => {} }
+  const out = JSON.stringify(Cafe({ state: 'bogus' as CafeState }, surface as never))
+  expect(out).toContain('◌')
+  expect(out).toContain('cup empty')
+})
+
+test('labels: a Bash first word with $, ; | & or a leading - anywhere in it gives just Bash', () => {
+  expect(toolLabel('Bash', { command: '$HOME/bin/tool --x' })).toBe('Bash')
+  expect(toolLabel('Bash', { command: 'x;/bin/ls' })).toBe('Bash')
+  expect(toolLabel('Bash', { command: 'echo|/usr/bin/curl' })).toBe('Bash')
+  expect(toolLabel('Bash', { command: '-x/foo' })).toBe('Bash')
+  expect(toolLabel('Bash', { command: '/usr/bin/git status' })).toBe('Bash git')
+  expect(toolLabel('Bash', { command: './scripts/run.sh --fast' })).toBe('Bash run.sh')
+  expect(toolLabel('Bash', { command: '~/bin/deploy' })).toBe('Bash deploy')
 })

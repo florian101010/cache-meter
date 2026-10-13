@@ -9,7 +9,7 @@
     {
       "name": "cache-meter",
       "source": "./",
-      "description": "Claude Code mod: /keepwarm keeps your prompt cache alive through a break; a countdown, hit rate, context fill and API value above the prompt; and a /tokens dashboard with what caching saved, what fills your context, API errors and cost per hour.",
+      "description": "Claude Code mod: /keepwarm keeps your prompt cache alive through a break; a countdown, hit rate, context fill and API value above the prompt; what each answer cost; and a /tokens dashboard with what broke the cache, what fills your context, API errors and cost per hour.",
       "category": "productivity",
       "tags": [
         "claude-code-mod",

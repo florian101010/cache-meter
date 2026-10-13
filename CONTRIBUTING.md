@@ -22,6 +22,8 @@ Every push to `main` is a new version for Anthropic's plugin directory: it is sc
 4. **Merge only when the directory may take a new version** – not while the first version is with a reviewer – with `version` raised and auto-publish as the owner chose.
 
 
+## Keeping up with Claude Code
+
 The mods API is early access and changes between Claude Code releases. Three things keep this mod current:
 
 1. **CI is pinned.** `ci.yml` installs exactly `CLAUDE_CODE_VERSION` (now 2.1.296), so a new release never breaks a pull request by surprise. Raise it on purpose, after the steps below, and update *Tested with* in the README and AGENTS.md.
@@ -111,12 +113,14 @@ Fill in the template. CI must be green. Describe what a user sees differently, a
 Images (README screenshots, header, icon and social preview sources) live on the [`assets` branch](https://github.com/florian101010/cache-meter/tree/assets), not on `main`: the directory scans `main`, and image files there hold every version for review. Its README says how to regenerate them.
 
 ```text
-.claude-plugin/plugin.json        manifest: name, version, type contract, the cacheTtl, autoSidebar, turnLine, expiryNotice and sessionBudget options
+.claude-plugin/plugin.json        manifest: name, version, type contract, the cacheTtl, autoSidebar, turnLine, expiryNotice, sessionBudget and animations options
                                   (the folder also holds the listing icon, a static PNG; its source is on the assets branch)
 .claude-plugin/marketplace.json   makes this repository a one-plugin marketplace
 hooks/hooks.json                  points to the hooks module
 hooks/register.tsx                all hooks: data sources, band, pane, commands, keepwarm
 hooks/lib.ts                      pure functions without $ (TTL derivation, formatting) – unit-testable
+hooks/spin.tsx                    the turning keepwarm arrow, a surface module (Client) without $ – not in hooks.json
+hooks/cafe.tsx                    the café animation, a surface module (Client) without $ – not in hooks.json
 types/index.d.ts                  type contract of every $.state value
 tests/cache-meter.test.tsx        tests run by `claude plugin test`
 docs/how-it-works.md              design and data flow

@@ -1,8 +1,8 @@
 // cache-meter: what the prompt cache and the token budget are doing, at a glance.
 //
-// Band above the prompt:  ● cache 42m ■■■■■■■□□□ 93% hit · ☀ context 9% (auto-compact 97%) [Compact]
-// Pane /tokens:           every main-thread request as a stacked bar (read / written / new), session
-//                         sums, subagents, rate limits, cost, keepwarm.
+// Band above the prompt:  ● cache 42m ■■■■■■■■■■ 93% hit · ☀ context 9% (auto-compact 97%) [Compact]
+// Pane /tokens:           every main-thread request as a column (its share not read from the cache),
+//                         session sums, subagents, rate limits, cost, keepwarm; Context and Health tabs.
 // /keepwarm [2h|off]:     pings the cache through $.model.fork shortly before it lapses.
 //
 // Single source of truth for every API fact below: the official Claude Code mods documentation and
@@ -70,7 +70,6 @@ import {
   right,
   short,
   sparkline,
-  stack,
   tall,
   contextMapOf,
   isNormalStop,
@@ -78,6 +77,11 @@ import {
   tally,
   stopLabel,
   errorLabel,
+  cafeState,
+  faultTarget,
+  progress,
+  shineCells,
+  tween,
 } from './lib'
 import type { BreakdownLike, Mark } from './lib'
 
@@ -165,6 +169,41 @@ let lastResumeAt: number | null = null
 let openTurns: Record<string, { usd: number | null; requests: number }> = {}
 // Where the surface last seated the pane: beside a fullscreen transcript (dock) or above the prompt (inline).
 let seat: 'dock' | 'inline' | null = null
+// Option animations: the café under the request chart and the countdown's flash at each new minute.
+let animations = true
+// The café's Client failed on a surface (ui.fault): left out from then on, the pane drawn without it.
+let isCafeBroken = false
+// The same for the turning keepwarm arrow: a still ↻ from then on.
+let isSpinBroken = false
+// When a request last wrote a fresh cache (first or cold): the café brews for a moment.
+let brewedAt: number | null = null
+// The countdown's minute as last drawn, and until when its digits flash after it changed.
+let shownMinute: string | null = null
+let flashUntil = 0
+// Short animations on the Overview (option animations): one redraw train for all of them, every
+// ANIM_FRAME_MS until the last one ends – 10 redraws a second at most: the general limit, raised to 30
+// for the shown pane in the terminal (reference › Limits). Each animation keeps only its start; the drawing reads progress off the clock.
+let animEnd = 0
+let isAnimPending = false
+// The shine over the countdown bar, started with the minute flash.
+let shineStart = 0
+// The newest request column grows in: how many requests the Overview last drew, and when one came.
+let shownSteps: number | null = null
+let growStart = 0
+// Cost and the cache saving count to a new value: the value last drawn, where the count started.
+let shownUsd: number | null = null
+let usdFrom = 0
+let usdStart = 0
+let shownSaving: number | null = null
+let savingFrom = 0
+let savingStart = 0
+const FLASH_MS = 450
+const ANIM_FRAME_MS = 100
+const SHINE_MS = 600
+const GROW_MS = 450
+const COUNT_MS = 600
+// How long the café brews after a request wrote a fresh cache.
+const BREW_MS = 12_000
 // Opening the dashboard as a sidebar by itself (option autoSidebar): only once the band has been drawn
 // fullscreen, once per load, and never again after the person closed it.
 let autoSidebar = 'auto'
@@ -282,6 +321,7 @@ async function maybeAutoOpen($: EngineInterface) {
   hasAutoOpened = true
   if ((await $.ui.panes()).some(p => p.id === PANE)) return
   await $.ui.open({ id: PANE, title: 'Tokens & Cache' })
+  $.ui.invalidate('ui.render')
 }
 
 async function tick($: EngineInterface) {
@@ -628,8 +668,8 @@ async function compactNow($: EngineInterface) {
 
       return
     }
-    // $.session.compact runs every hook but the caller's, so the session.compact hook below may
-    // not see this one; resetting here too is idempotent.
+    // The session.compact hook below sees this compaction too ($.session.compact skips only the calling
+    // hook, types – this is a button's handler); resetting the countdown here as well is idempotent.
     await resetCache($)
   } catch (error) {
     $.ui.toast(`Compact is not possible right now: ${error instanceof Error ? error.message : String(error)}`)
@@ -697,6 +737,23 @@ export const register: Register = (on, options) => {
   historySince = null
   lastResumeAt = null
   openTurns = {}
+  animations = options.animations !== 'off'
+  isCafeBroken = false
+  isSpinBroken = false
+  brewedAt = null
+  shownMinute = null
+  flashUntil = 0
+  animEnd = 0
+  isAnimPending = false
+  shineStart = 0
+  shownSteps = null
+  growStart = 0
+  shownUsd = null
+  usdFrom = 0
+  usdStart = 0
+  shownSaving = null
+  savingFrom = 0
+  savingStart = 0
 
   on('session.start', async ($, e, next) => {
     const result = await next(e)
@@ -819,6 +876,11 @@ export const register: Register = (on, options) => {
         // start, after /compact or /clear) writes the cache for the first time: not a loss.
         const isCold = wasCold && before !== null && u.write >= COLD_MIN && u.read < u.write
         const kind = isCold ? ('cold' as const) : before === null ? ('first' as const) : undefined
+        if (kind !== undefined) {
+          brewedAt = await $.clock.now()
+          // The café brews for BREW_MS; one redraw then, not the next 15-second tick.
+          if (animations) $.clock.after(BREW_MS + 50, () => $.ui.invalidate('ui.render'))
+        }
         await update($, stepsA, list => [...list, { ...u, at: startedAt, model: usage.model, ...(kind ? { kind } : {}) }].slice(-STEPS_KEPT))
         await update($, totalsA, t => ({ ...t, main: add(t.main, u), mainSteps: t.mainSteps + 1 }))
         // A warm cache re-written anyway: counted with the pause before it and its most likely cause, in
@@ -911,6 +973,8 @@ export const register: Register = (on, options) => {
       usd = null
     }
     openTurns = { ...openTurns, [e.turnId]: { usd, requests: 0 } }
+    // The café shows Claude at work.
+    if (animations) $.ui.invalidate('ui.render')
 
     return next(e)
   })
@@ -925,6 +989,7 @@ export const register: Register = (on, options) => {
     const open = openTurns[e.turnId]
     const { [e.turnId]: _done, ...rest } = openTurns
     openTurns = rest
+    if (animations) $.ui.invalidate('ui.render')
     const result = await next(e)
     // Only where a person reads it: under -p and the SDK nothing of Cache Meter's is drawn (README › Requirements).
     if (!isMain || !showTurnLine || !isInteractive || e.isAborted || !e.usage || open === undefined || open.requests === 0) return result
@@ -1083,6 +1148,7 @@ export const register: Register = (on, options) => {
     if (isOpen) {
       isDismissed = true
       await $.ui.close({ id: PANE })
+      $.ui.invalidate('ui.render')
 
       return { text: 'Closed the "Tokens & Cache" pane.' }
     }
@@ -1093,6 +1159,7 @@ export const register: Register = (on, options) => {
     // sidebar: Esc only hands the keys back. Above the prompt Esc closes it (closeOnEscape takes only true).
     const isDock = e.presentation?.isFullscreen === true && columns >= 110
     await $.ui.open(isDock ? pane : { ...pane, closeOnEscape: true })
+    $.ui.invalidate('ui.render')
 
     return {
       text: isDock
@@ -1101,9 +1168,24 @@ export const register: Register = (on, options) => {
     }
   })
 
+  // A surface module failed (did not load, draw or run): the engine draws the pane again by itself,
+  // and the pane leaves that Client out from then on (reference › ui.fault).
+  on('ui.fault', async ($, e, next) => {
+    // Per module (types: UiFaultInput.module, the path under the plugin's folder): a failed arrow
+    // leaves the café alone and the other way round. Each fault's reason goes to the debug log.
+    const target = faultTarget(e.module)
+    if (target === 'cafe') isCafeBroken = true
+    if (target === 'spin') isSpinBroken = true
+    $.ui.log(`${e.module} failed (${e.phase}): ${e.reason}`, { to: 'debug' })
+
+    return next(e)
+  })
+
   // The person closed the dashboard (its close mark or ctrl+x x): it stays closed this session.
   on('ui.close', async ($, e, next) => {
     if (e.id === PANE && e.origin.kind === 'person') isDismissed = true
+    // The band takes its Compact button back once the pane is gone.
+    if (e.id === PANE) $.ui.invalidate('ui.render')
 
     return next(e)
   })
@@ -1113,6 +1195,7 @@ export const register: Register = (on, options) => {
   on('prompt.submit', async ($, e, next) => {
     if (e.origin.kind === 'composer' && seat === 'inline' && (await $.ui.panes()).some(p => p.id === PANE)) {
       await $.ui.close({ id: PANE })
+      $.ui.invalidate('ui.render')
     }
 
     return next(e)
@@ -1144,7 +1227,11 @@ export const register: Register = (on, options) => {
     const isKeeping = keep.until !== null && keep.until > now
     const isLow = status.kind === 'warm' && status.remaining <= ttl.ms * PING_SHARE
     const sky = percent === null ? null : forecast(percent, auto)
-    const showButton = !e.props.isWorking
+    // Ctrl+X Tab moves the keyboard into the band first, then to each open pane (keybindings ›
+    // abovePrompt:focus): with the pane open its own Compact (c) does the job, and a band without a
+    // control lets the first Ctrl+X Tab reach the pane's tabs.
+    const isPaneOpen = (await $.ui.panes()).some(p => p.id === PANE && p.isPlaced)
+    const showButton = !e.props.isWorking && !isPaneOpen
 
     // Every segment's width, so the row never wraps (AbovePrompt.bodyColumns).
     const label = status.kind === 'warm' ? remainingLabel(status.remaining) : status.kind === 'empty' ? 'empty' : 'expired'
@@ -1189,7 +1276,8 @@ export const register: Register = (on, options) => {
     const minBar = 6
     const showRewrite = rewriteText !== '' && base + rewriteText.length + autoText.length + minBar < cols
     const showAuto = autoText !== '' && base + autoText.length + (showRewrite ? rewriteText.length : 0) + minBar < cols
-    // Dropped first when the row gets narrow: after it the auto-compact point, then the bar.
+    // Dropped early when the row gets narrow – only the heartbeat and the compact note go before it; after it
+    // the re-write hint, the auto-compact point, then the bar.
     const showCost =
       costText !== '' && base + costText.length + (showAuto ? autoText.length : 0) + (showRewrite ? rewriteText.length : 0) + minBar < cols
     const showBeat =
@@ -1266,6 +1354,8 @@ export const register: Register = (on, options) => {
     seat = e.props.placement
     // Raster (colored cells) is drawn by the terminal only (reference › Elements); elsewhere text.
     const Raster = 'Raster' in elements ? elements.Raster : null
+    // Client (a surface module's region) is drawn by the terminal and the Desktop app (reference › Elements).
+    const Client = 'Client' in elements ? elements.Client : null
     const steps = await read($, stepsA)
     const totals: Totals = await read($, totalsA)
     const measure = await read($, measureA)
@@ -1292,11 +1382,12 @@ export const register: Register = (on, options) => {
     const fullIn = Math.max(16, cols - 4)
 
     // A one-row meter: Raster cells in the terminal, the same runs as colored text elsewhere.
-    const gauge = (key: string, width: number, fraction: number, fill: number, theme: string, marks: readonly Mark[] = []) => {
+    const gauge = (key: string, width: number, fraction: number, fill: number, theme: string, marks: readonly Mark[] = [], shineAt: number | null = null) => {
       const runs = meterRuns(width, fraction, marks)
+      const cells = meterCells(runs, fill, marks)
 
       return Raster ? (
-        <Raster key={key} columns={width} rows={1} cells={rasterCells(meterCells(runs, fill, marks))} />
+        <Raster key={key} columns={width} rows={1} cells={rasterCells(shineAt === null ? cells : shineCells(cells, shineAt))} />
       ) : (
         <Text wrap="truncate-end">
           {runs.map(r => (
@@ -1312,7 +1403,18 @@ export const register: Register = (on, options) => {
     const stateColor = isWarm ? (isLow ? 'warning' : 'success') : 'error'
     const remaining = isWarm ? status.remaining : 0
     const isSeconds = isWarm && remaining < 60_000
-    const digits = tall(isWarm ? String(Math.ceil(remaining / (isSeconds ? 1000 : 60_000))) : '--')
+    const number = isWarm ? String(Math.ceil(remaining / (isSeconds ? 1000 : 60_000))) : '--'
+    const digits = tall(number)
+    // A new minute on the Overview flashes the digits once (option animations): not on the first
+    // draw, after a reload, on another tab, nor while the last minute counts seconds.
+    const minuteNow = animations && tab === 'overview' && isWarm && !isSeconds ? number : null
+    if (minuteNow !== null && shownMinute !== null && minuteNow !== shownMinute) {
+      flashUntil = now + FLASH_MS
+      shineStart = now
+      animate($, now + Math.max(FLASH_MS, SHINE_MS) + 50, now)
+    }
+    shownMinute = minuteNow
+    const isFlash = minuteNow !== null && now < flashUntil
     const lastAt = cache !== null && cache.lastAt > 0 ? cache.lastAt : null
     const stateWord = isWarm ? 'WARM' : status.kind === 'empty' ? 'EMPTY' : 'EXPIRED'
     const stateNote = isWarm
@@ -1336,7 +1438,7 @@ export const register: Register = (on, options) => {
         <Box flexDirection="row">
           <Box flexDirection="column">
             {digits.map(row => (
-              <Text color={stateColor} bold>
+              <Text color={isFlash ? 'text' : stateColor} bold>
                 {row}
               </Text>
             ))}
@@ -1367,7 +1469,16 @@ export const register: Register = (on, options) => {
             </Text>
           </Box>
         </Box>
-        {gauge('countdown', leftIn, isWarm ? remaining / ttl.ms : 0, isWarm ? (isLow ? FILL.low : FILL.warm) : FILL.cold, stateColor, pingMarks)}
+        {gauge(
+          'countdown',
+          leftIn,
+          isWarm ? remaining / ttl.ms : 0,
+          isWarm ? (isLow ? FILL.low : FILL.warm) : FILL.cold,
+          stateColor,
+          pingMarks,
+          // The shine runs once across the bar with the minute flash.
+          minuteNow !== null && now < shineStart + SHINE_MS ? Math.floor(progress(shineStart, now, SHINE_MS) * (leftIn + 2)) - 1 : null,
+        )}
         {status.kind === 'expired' && rewriteTokens > 0 && (
           <Text color="warning" wrap="truncate-end">
             next message re-writes ≈ {stake}
@@ -1384,17 +1495,22 @@ export const register: Register = (on, options) => {
 
     // --- keepwarm -----------------------------------------------------------------------------
     const pingIn = isWarm ? Math.max(0, remaining - ttl.ms * PING_SHARE) : 0
+    const isSpinning = isKeeping && animations && Client !== null && !isSpinBroken
     const keepCard = (
       <Box borderStyle="round" borderColor="claude" borderDimColor={!isKeeping} paddingX={1} flexDirection="column">
         <Box flexDirection="row" justifyContent="space-between">
-          <Text wrap="truncate-end">
-            <Text color="claude" bold>
-              {isKeeping ? '↻ Keepwarm on' : '↻ Keepwarm'}
+          {/* While keepwarm runs the arrow turns (option animations), in a Client of its own. */}
+          <Box flexDirection="row" flexShrink={1}>
+            {isSpinning && Client !== null && <Client key="keep-spin" module="./spin.tsx" width={1} />}
+            <Text wrap="truncate-end">
+              <Text color="claude" bold>
+                {isSpinning ? ' Keepwarm on' : isKeeping ? '↻ Keepwarm on' : '↻ Keepwarm'}
+              </Text>
+              <Text dimColor>
+                {isKeeping && keep.until !== null ? ` until ${hhmm(keep.until)}` : ` off${keep.pings > 0 && tier !== 'narrow' ? ` · last run ${keep.pings} pings` : ''}`}
+              </Text>
             </Text>
-            <Text dimColor>
-              {isKeeping && keep.until !== null ? ` until ${hhmm(keep.until)}` : ` off${keep.pings > 0 && tier !== 'narrow' ? ` · last run ${keep.pings} pings` : ''}`}
-            </Text>
-          </Text>
+          </Box>
           {isKeeping ? (
             <Button key="keepwarm-stop" plain hotkey="s" onPress={() => pressKeepWarm($, null)}>
               <Text color="claude" bold>
@@ -1463,6 +1579,27 @@ export const register: Register = (on, options) => {
     // What caching saved: every input token at the base price against what reads and writes cost,
     // with the last request's model and the current TTL for the whole session (README › Pane).
     const saving = cacheSaving(totals.main, readMultiplier(steps.at(-1)?.model ?? ''), writeMultiplier(ttl.ms))
+    // Cost and saving count to a new value on the Overview (option animations): from what was on screen
+    // – mid-count too – to the new figure; not on the first draw, after a reload or on another tab.
+    const isCounting = animations && tab === 'overview'
+    const usdNow = measure?.usd ?? null
+    if (isCounting && usdNow !== null && shownUsd !== null && usdNow !== shownUsd) {
+      usdFrom = tween(usdFrom, shownUsd, progress(usdStart, now, COUNT_MS))
+      usdStart = now
+      animate($, now + COUNT_MS + 50, now)
+    }
+    shownUsd = isCounting ? usdNow : null
+    const usdShown = usdNow === null || !isCounting || now >= usdStart + COUNT_MS ? usdNow : tween(usdFrom, usdNow, progress(usdStart, now, COUNT_MS))
+    if (!isCounting || usdNow === null) usdFrom = usdNow ?? 0
+    if (isCounting && saving !== null && shownSaving !== null && saving !== shownSaving) {
+      savingFrom = tween(savingFrom, shownSaving, progress(savingStart, now, COUNT_MS))
+      savingStart = now
+      animate($, now + COUNT_MS + 50, now)
+    }
+    shownSaving = isCounting ? saving : null
+    const savingShown =
+      saving === null || !isCounting || now >= savingStart + COUNT_MS ? saving : Math.round(tween(savingFrom, saving, progress(savingStart, now, COUNT_MS)))
+    if (!isCounting || saving === null) savingFrom = saving ?? 0
     const errorCount = Object.values(health.errors).reduce((a, n) => a + n, 0)
     const stopCount = Object.values(health.stops).reduce((a, n) => a + n, 0)
     const issues = [
@@ -1482,9 +1619,9 @@ export const register: Register = (on, options) => {
               Session
             </Text>
           </Box>
-          {saving !== null && (
-            <Text bold color={saving >= 0 ? 'success' : 'warning'} wrap="truncate-end">
-              {saving >= 0 ? `cache saved ${saving}%${tier === 'narrow' ? '' : ' of input cost'}` : `cache cost +${-saving}%`}
+          {saving !== null && savingShown !== null && (
+            <Text bold color={savingShown >= 0 ? 'success' : 'warning'} wrap="truncate-end">
+              {savingShown >= 0 ? `cache saved ${savingShown}%${tier === 'narrow' ? '' : ' of input cost'}` : `cache cost +${-savingShown}%`}
             </Text>
           )}
         </Box>
@@ -1495,7 +1632,7 @@ export const register: Register = (on, options) => {
           <Text dimColor>
             {totals.mainSteps} requests{historySince === null ? '' : ` since ${hhmm(historySince)}`} ·{' '}
           </Text>
-          <Text bold>{measure?.usd == null ? '–' : `${isPlan(measure) ? '≈ ' : ''}$${measure.usd.toFixed(2)}`}</Text>
+          <Text bold>{usdShown === null ? '–' : `${isPlan(measure) ? '≈ ' : ''}$${usdShown.toFixed(2)}`}</Text>
           <Text dimColor>{measure?.usd == null ? '' : costLabel(measure, tier !== 'narrow')}</Text>
         </Text>
         {totals.subSteps > 0 && (
@@ -1570,14 +1707,25 @@ export const register: Register = (on, options) => {
     const shown = steps.slice(-slots)
     const last = steps.at(-1)
     const lastHit = last === undefined ? null : hitPct(last)
-    const columns = shown.map(s => {
+    // The newest request column grows in on the Overview (option animations); not on the first draw.
+    const isGrowing = animations && tab === 'overview'
+    if (isGrowing && shownSteps !== null && totals.mainSteps > shownSteps) {
+      growStart = now
+      animate($, now + GROW_MS + 50, now)
+    }
+    // The request count, not the kept history (capped at STEPS_KEPT): it keeps growing past 80.
+    shownSteps = isGrowing ? totals.mainSteps : null
+    const grow = isGrowing && now < growStart + GROW_MS ? progress(growStart, now, GROW_MS) : 1
+    const columns = shown.map((s, i) => {
       const all = s.input + s.read + s.write
       const hit = hitPct(s) ?? 100
 
       // The first write of a cache (session start, after /compact) is not a loss: drawn in blue.
       const color = s.kind === 'first' ? FILL.context : hit >= 80 ? HEALTH.good : hit >= 50 ? HEALTH.fair : HEALTH.poor
 
-      return { share: all > 0 ? (s.input + s.write) / all : 0, color }
+      const share = all > 0 ? (s.input + s.write) / all : 0
+
+      return { share: i === shown.length - 1 ? share * grow : share, color }
     })
     const requestsCard = (
       <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="column">
@@ -1805,9 +1953,17 @@ export const register: Register = (on, options) => {
     const healthView = (
       <Box flexDirection="column">
         <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="column">
-          <Text color="claude" bold>
-            Session
-          </Text>
+          {/* The one place in the pane that names the report: the session as Markdown on your own clipboard. */}
+          <Box flexDirection="row" justifyContent="space-between">
+            <Box flexShrink={0} marginRight={1}>
+              <Text color="claude" bold>
+                Session
+              </Text>
+            </Box>
+            <Text dimColor wrap="truncate-end">
+              {tier === 'narrow' ? '/tokens report' : 'copy as Markdown: /tokens report'}
+            </Text>
+          </Box>
           <Text wrap="truncate-end">
             {label('Age')}
             <Text bold>{age === null ? '–' : duration(age)}</Text>
@@ -1988,19 +2144,34 @@ export const register: Register = (on, options) => {
       </Button>
     )
 
+    // The café under the request chart (option animations): only docked, where the pane has the room's
+    // height; the outer Box takes it, and the café grows into what the cards leave (BoxProps.flexGrow).
+    const showCafe = animations && !isCafeBroken && Client !== null && e.props.placement === 'dock' && tab === 'overview'
+
     return (
-      <Box flexDirection="column">
+      <Box flexDirection="column" minHeight={showCafe ? e.props.scroll.bodyRows : undefined}>
         <Box flexDirection="row" justifyContent="space-between">
-          <Box flexDirection="row" columnGap={2}>
+          {/* The header needs about 47 columns: below 50 the title shrinks to its mark and the gaps to
+              one, below 36 the tab names shorten – measured in tmux, the title wrapped at 48 and a tab
+              was cut at 30. */}
+          <Box flexDirection="row" columnGap={cols < 50 ? 1 : 2} flexShrink={0}>
             <Text color="claude" bold>
-              ◉ Cache Meter
+              {cols < 50 ? '◉' : '◉ Cache Meter'}
             </Text>
-            {tabButton('overview', 'Overview', '1')}
-            {tabButton('context', 'Context', '2')}
+            {tabButton('overview', cols < 36 ? 'Over' : 'Overview', '1')}
+            {tabButton('context', cols < 36 ? 'Ctx' : 'Context', '2')}
             {tabButton('health', 'Health', '3', issues !== '')}
           </Box>
-          <Text dimColor wrap="truncate-end">
-            {tier === 'wide' ? 'prompt cache · tokens' : ''}
+          {/* The key hint sits in the header too: the footer is the first row a too-tall tab cuts off. */}
+          <Text wrap="truncate-end">
+            {tier === 'wide' && <Text dimColor>prompt cache · tokens · </Text>}
+            {tier === 'narrow' ? null : e.props.isFocused ? (
+              <Text color="claude" bold>
+                {tier === 'wide' ? 'keys here · ↓ scroll · esc' : '↓ scroll · esc'}
+              </Text>
+            ) : (
+              <Text dimColor>{tier === 'wide' ? 'ctrl+x, tab: keys here' : 'ctrl+x tab: keys'}</Text>
+            )}
           </Text>
         </Box>
         {tab === 'overview' &&
@@ -2024,14 +2195,32 @@ export const register: Register = (on, options) => {
             </Box>
           ))}
         {tab === 'overview' && requestsCard}
+        {showCafe && Client !== null && (
+          <Client
+            key="cafe"
+            module="./cafe.tsx"
+            props={{ state: cafeState(status.kind, isLow, Object.keys(openTurns).length > 0, heartbeat !== null && heartbeat.until > now, brewedAt !== null && now - brewedAt < BREW_MS) }}
+            flexGrow={1}
+          />
+        )}
         {tab === 'context' && contextView}
         {tab === 'health' && healthView}
         <Box flexDirection="row" justifyContent="space-between">
-          <Text dimColor wrap="truncate-end">
-            {tier === 'narrow'
-              ? `${canClick ? 'click a tab · ' : ''}/tokens health`
-              : `${canClick ? 'click a tab or ' : ''}/tokens context | health · keys: ctrl+x tab, then 1–3${isKeeping ? ' · s stop' : canKeep ? ' · w keep warm' : ''}`}
-          </Text>
+          {/* Ctrl+X Tab walks the focus band → each open pane → prompt (keybindings › abovePrompt:focus), so
+              the pane says when it has the keyboard (Pane.isFocused): digits typed before that reach the chat. */}
+          {e.props.isFocused ? (
+            <Text color="claude" bold wrap="truncate-end">
+              {tier === 'narrow'
+                ? 'keys here · 1–3 · ↓ · esc'
+                : `keys here · 1–3 switch tabs · ↓ pgdn end scroll · tab + enter${isKeeping ? ' · s stop' : canKeep ? ' · w keep warm' : ''} · esc back to the prompt`}
+            </Text>
+          ) : (
+            <Text dimColor wrap="truncate-end">
+              {tier === 'narrow'
+                ? `${canClick ? 'click a tab · ' : ''}ctrl+x tab: keys`
+                : `${canClick ? 'click a tab or ' : ''}/tokens ${TABS.filter(t => t !== tab).join(' | ')} · ctrl+x, then tab: keys here (again if another pane lights up)`}
+            </Text>
+          )}
           {/* The hint truncates; the button keeps its width and a gap (it ran into the hint at ~80 columns). */}
           <Box flexShrink={0} marginLeft={2}>
             <Button key="pane-compact" plain hotkey="c" onPress={() => compactNow($)}>
@@ -2125,3 +2314,29 @@ function columnDetail(s: Step, width: number): string {
 
   return text.padEnd(width)
 }
+
+// Keeps the Overview redrawing every ANIM_FRAME_MS until `until` (the latest end asked for); one train
+// at a time, so animations that overlap share it instead of stacking timers.
+function animate($: EngineInterface, until: number, now: number) {
+  if (!animations) return
+  // A train that went quiet – a refused timer runs never (types: $.clock.after) – would block every
+  // later animation: one without a frame for three frame lengths past its end is taken as gone.
+  if (isAnimPending && now > animEnd + 3 * ANIM_FRAME_MS) isAnimPending = false
+  animEnd = Math.max(animEnd, until)
+  if (isAnimPending) return
+  isAnimPending = true
+  $.clock.after(ANIM_FRAME_MS, () => animTick($))
+}
+
+async function animTick($: EngineInterface) {
+  let isGoing = false
+  try {
+    $.ui.invalidate('ui.render')
+    const now = await $.clock.now()
+    isGoing = now < animEnd
+    if (isGoing) $.clock.after(ANIM_FRAME_MS, () => animTick($))
+  } finally {
+    if (!isGoing) isAnimPending = false
+  }
+}
+

@@ -1,7 +1,7 @@
 {
   "name": "cache-meter",
   "displayName": "Cache Meter",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "description": "Claude Code mod: /keepwarm keeps your prompt cache alive through a break; a countdown, hit rate, context fill and API value above the prompt; what each answer cost; and a /tokens dashboard with what broke the cache, what fills your context, API errors and cost per hour.",
   "author": {
     "name": "Florian Grimmer",
@@ -68,6 +68,16 @@
         "on"
       ],
       "default": "off"
+    },
+    "animations": {
+      "type": "string",
+      "title": "Animations",
+      "description": "on: in the docked dashboard (fullscreen renderer) a small café under the request chart acts out the cache – a barista sips while it is warm, watches the clock in the last stretch, naps once it is cold and tops up on a keepwarm ping. On the Overview the countdown flashes and its bar shines at each new minute, new request columns grow in, cost and saving count up, and the keepwarm arrow turns while it runs – each a fraction of a second, the café four frames a second, only while the Overview is on screen. The animation files get nothing but the cache's state. off: none of it.",
+      "options": [
+        "on",
+        "off"
+      ],
+      "default": "on"
     },
     "sessionBudget": {
       "type": "number",

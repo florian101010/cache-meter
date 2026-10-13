@@ -1,5 +1,6 @@
 // Pure helpers of cache-meter: no `$`, so the tests call them directly.
 
+import type { CafeState } from './cafe'
 import type { CacheInfo, ContextMap, Limit, LimitStart, ToolResults, Usage4 } from '../types'
 
 export const HOUR = 3_600_000
@@ -116,13 +117,6 @@ export function hhmm(ms: number): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
-/** Cells of each segment of a stacked bar whose full width stands for `top` tokens. */
-export function stack(u: Usage4, top: number, width: number): { read: number; write: number; input: number } {
-  if (top <= 0 || width <= 0) return { read: 0, write: 0, input: 0 }
-  const cell = (n: number) => (n > 0 ? Math.max(1, Math.round((n / top) * width)) : 0)
-
-  return { read: cell(u.read), write: cell(u.write), input: cell(u.input) }
-}
 
 /** `/keepwarm` argument → milliseconds of warming; `null` turns it off, `undefined` is unreadable. */
 export function parseKeepWarm(args: string): number | null | undefined {
@@ -649,8 +643,9 @@ export function toolLabel(tool: string, input: Readonly<Record<string, unknown>>
     // the first word left must look like a program name, else just "Bash": never a guess.
     const rest = input.command.replace(/^[ \t\n]+/, '').replace(/^(?:[A-Za-z_][A-Za-z0-9_]*=(?:"[^"$`\\]*"|'[^']*'|[A-Za-z0-9_.,:/@%+=-]*)[ \t\n]+)*/, '')
     const program = rest.split(/[ \t\n]+/)[0] ?? ''
-    // A home directory itself is no program name (it would show the user name).
-    if (homePath(program) === '~') return tool
+    // A home directory itself is no program name (it would show the user name). The whole first word must
+    // be a plain path – no $, quotes, ; | & or a leading - anywhere in it – before its last part is shown.
+    if (homePath(program) === '~' || !/^[A-Za-z0-9_.+~/][A-Za-z0-9_.+~/-]*$/.test(program)) return tool
     const name = program.split('/').pop() ?? ''
     const isProgram = /^[A-Za-z0-9_.+][A-Za-z0-9_.+-]*$/.test(name) && name.length <= 32 && !SECRET_LIKE.test(name) && !/\d{8}/.test(name)
 
@@ -754,4 +749,67 @@ export function reportMarkdown(r: ReportData): string {
   lines.push('', '_Made with [Cache Meter](https://github.com/florian101010/cache-meter)._')
 
   return lines.join('\n')
+}
+
+/** The café's word for the cache: what the barista and the cup act out. */
+export function cafeState(
+  kind: 'empty' | 'warm' | 'expired',
+  isLow: boolean,
+  isWorking: boolean,
+  isBeating: boolean,
+  isBrewing: boolean,
+): CafeState {
+  if (isBeating) return 'ping'
+  if (isBrewing) return 'brewing'
+  if (isWorking) return 'working'
+  if (kind === 'expired') return 'cold'
+  if (kind === 'empty') return 'empty'
+
+  return isLow ? 'last' : 'warm'
+}
+
+/** Ease-out (cubic) of a progress 0…1: fast first, gentle at the end. */
+export function easeOut(t: number): number {
+  const c = Math.max(0, Math.min(1, t))
+
+  return 1 - (1 - c) ** 3
+}
+
+/** How far an animation that started at `start` and lasts `ms` has come at `now`: 0…1, eased. */
+export function progress(start: number, now: number, ms: number): number {
+  return ms <= 0 ? 1 : easeOut((now - start) / ms)
+}
+
+/** A value on its way from `from` to `to`, at an eased progress `p` (0…1). */
+export function tween(from: number, to: number, p: number): number {
+  return from + (to - from) * Math.max(0, Math.min(1, p))
+}
+
+/** A 24-bit colour mixed towards white by `amount` (0…1); the terminal-default marker stays as it is. */
+export function lighten(color: number, amount: number): number {
+  if (color === DEFAULT_COLOR) return color
+  const mix = (v: number) => Math.round(v + (255 - v) * amount)
+
+  return (mix((color >> 16) & 0xff) << 16) | (mix((color >> 8) & 0xff) << 8) | mix(color & 0xff)
+}
+
+/**
+ * A shine passing over a one-row meter: the cell at `at` (and its neighbours, a little less) drawn
+ * lighter. `at` outside the row leaves it unchanged.
+ */
+export function shineCells(cells: readonly Cell[], at: number): Cell[] {
+  return cells.map((cell, x) => {
+    const d = Math.abs(x - at)
+    if (d > 1) return cell
+
+    return [cell[0], lighten(cell[1], d === 0 ? 0.6 : 0.3), cell[2]]
+  })
+}
+
+/** Which animation a failed surface module is (types: UiFaultInput.module, its path under the plugin's folder). */
+export function faultTarget(module: string): 'cafe' | 'spin' | null {
+  if (/(^|\/)cafe\.tsx$/.test(module)) return 'cafe'
+  if (/(^|\/)spin\.tsx$/.test(module)) return 'spin'
+
+  return null
 }

@@ -2,6 +2,27 @@
 
 All notable changes to Cache Meter, a Claude Code mod. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] – 2026-10-12
+
+A café that acts out the cache.
+
+### Added
+- **The café** (option `animations`, on by default): docked beside the chat, the room under the request chart shows a pixel barista (orange, with a brown cap and a white apron – a figure of its own) and a cup – stirring while Claude works, coffee dripping into the cup when a fresh cache is written, steam and a sip while it is warm, thin steam and a watched clock in the last stretch, a puff on a keepwarm ping, a grey cup and a nap once it is cold. A separate surface module (`hooks/cafe.tsx`, a `Client`) with its own frame clock at four frames a second, only while the Overview is on screen; it gets nothing but the cache's state word. With too little room, one line.
+- **Minute flash:** the big countdown lights up once at each new minute, and a shine runs across its bar.
+- **Short animations on the Overview:** a new request column grows in from below, cost and the cache saving count up to a new figure, and the keepwarm arrow turns while keepwarm runs (`hooks/spin.tsx`, a `Client` of its own). One redraw train for all of them, at most 10 redraws a second; none on the first draw, after a reload or a tab switch; all off with `animations: off`.
+- `ui.fault`: if the café's or the arrow's file fails, the pane leaves that one out and writes the reason to the debug log.
+- With too little room the café's one-line fallback stands still: its frame clock asks for no redraw, so terminal apps that repaint badly see no traffic there.
+
+### Changed
+- The Health tab's Session card names the report: `copy as Markdown: /tokens report` – the pane mentioned it nowhere before. README: the section is now *Copy the session as Markdown*, and says the report only goes to your own clipboard.
+- The pane footer names the two other tabs (`/tokens overview | health` on the Context tab, …), not always `context | health` – it said `/tokens health` on the Health tab itself.
+- **Narrow docks keep every tab:** below 50 columns the header shows only `◉` and tighter gaps, below 36 `Over` and `Ctx` – measured in tmux from 30 to 200 columns, every card frame intact; before, the title wrapped at 48, vanished at 40 and a tab was cut at 30.
+- **Keyboard in the pane, in one step:** while the `/tokens` pane is open the band leaves out its Compact button (the pane has its own, `c`), so the first `Ctrl+X Tab` lands in the pane instead of on that button. The pane says when it has the keyboard: its bottom line turns orange and reads `keys here · 1–3 switch tabs · ↓ pgdn end scroll · tab + enter · esc back to the prompt` (with `· w keep warm` or `· s stop` before the last part when they apply). `Ctrl+X Tab` moves the focus through the band, then each open pane, then back to the prompt (keybindings › `abovePrompt:focus`), so the old hint `ctrl+x tab, then 1–3` sent digits into the chat when the band or another pane had the focus. Without the keyboard the hint reads `ctrl+x, then tab: keys here (again if another pane lights up)`. In a narrow sidebar (an iPad) the footer reads `ctrl+x tab: keys`. The header repeats the hint (`ctrl+x, tab: keys here`, orange `keys here · ↓ scroll · esc` with the keys), because a tab taller than the pane cuts the footer off; the footer names the scroll keys.
+- README: the usage table has rows for the keyboard (incl. scrolling a tall tab) and the mouse (fullscreen only: click, wheel, hover); *Where it shows* and the FAQ say both.
+
+### Docs
+- README: new screenshots of the 0.9 state (`assets/screenshots/v0.9/`; the café and the new hints are not in them yet) – the full terminal with the docked dashboard, crops of Overview, Context and Health, the band; a section on the café; FAQ on turning animations off. PRIVACY, SECURITY, AGENTS, CONTRIBUTING, llms.txt and how-it-works describe the animation file.
+
 ## [0.9.0] – 2026-10-12
 
 Alive: the band moves when it matters, and a budget keeps a session in check.
@@ -16,6 +37,7 @@ Alive: the band moves when it matters, and a budget keeps a session in check.
 - **Keeping up with Claude Code:** a weekly workflow runs the tests on the newest Claude Code and compares the official pages the mod relies on with stored content hashes (`.github/scripts/upstream-docs.sh`, `docs/upstream-docs.txt`); a change opens an issue. CONTRIBUTING lists every official page and what it settles here.
 
 ### Changed
+- The line under an answer and the budget toasts appear only in interactive sessions – none under `-p` or the SDK, where nothing is drawn.
 - Health: after a resume or relaunch without Claude Code's verdict on the cache, Cache check says `Resumed <time> – Claude Code gave no verdict …` instead of `No model switch or resume yet`.
 - Health: with no request measured, Warm miss reads `no request measured yet` (dim) instead of a green `none`.
 
@@ -35,6 +57,7 @@ Context under control: what fills the conversation, when it compacts, and a repo
 
 ### Changed
 - Privacy: Cache Meter now reads the name, a short label and the result length of each tool call (not the result's text, not a command's arguments). README, PRIVACY.md and SECURITY.md say so.
+- Privacy hardening of the labels: a Bash command shows only a word that looks like a program name (a pattern check, credential-like names excluded), split at shell whitespace; file labels only for the file tools (Read, Write, Edit, MultiEdit, NotebookEdit), never a URL, with query and fragment cut; token-like path parts appear as `…`; labels are one line of at most 80 characters.
 - Plugin description names what each answer costs and what broke the cache.
 
 ## [0.7.0] – 2026-10-12
@@ -188,6 +211,7 @@ Changes for Anthropic's plugin directory, whose validation blocked 0.5.1.
 - Pane `/tokens`: per-request token history, totals, plan limits, cost.
 - `/keepwarm`.
 
+[0.10.0]: https://github.com/florian101010/cache-meter/compare/edf5849...c88d13f
 [0.9.0]: https://github.com/florian101010/cache-meter/compare/e830ded...edf5849
 [0.8.0]: https://github.com/florian101010/cache-meter/compare/899ec58...e830ded
 [0.7.0]: https://github.com/florian101010/cache-meter/compare/b0b9980...899ec58
@@ -199,7 +223,7 @@ Changes for Anthropic's plugin directory, whose validation blocked 0.5.1.
 [0.5.0]: https://github.com/florian101010/cache-meter/compare/a520960...cache-meter--v0.5.0
 [0.4.0]: https://github.com/florian101010/cache-meter/compare/18e9711...a520960
 [0.3.0]: https://github.com/florian101010/cache-meter/compare/e430ab2...18e9711
-[0.2.1]: https://github.com/florian101010/cache-meter/compare/e430ab2...HEAD
+[0.2.1]: https://github.com/florian101010/cache-meter/pull/3
 [0.2.0]: https://github.com/florian101010/cache-meter/pull/1
 [0.1.1]: https://github.com/florian101010/cache-meter/commit/3217bf4
 [0.1.0]: https://github.com/florian101010/cache-meter/commit/b436f27

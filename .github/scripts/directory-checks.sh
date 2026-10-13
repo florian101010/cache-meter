@@ -29,6 +29,13 @@ done
 if printf '%s\n' "$files" | grep -qE '(^|/)(package-lock\.json|npm-shrinkwrap\.json|bun\.lockb?)$'; then
   echo "lockfile: Claude Code would install packages (held for a reviewer)"; fail=1
 fi
+# Leftover merge-conflict markers in any tracked file (a conflicted merge once got committed).
+# git grep: 0 = found, 1 = none, anything else = could not search – that must fail, not pass.
+rc=0
+conflicts=$(git grep -lE '^(<<<<<<<|>>>>>>>)( |$)') || rc=$?
+if ((rc == 0)); then echo "merge-conflict markers in: $conflicts"; fail=1; fi
+if ((rc > 1)); then echo "could not search for merge-conflict markers"; fail=1; fi
+
 # grep: 0 = found, 1 = none, 2 = could not read – the last must fail, not pass.
 rc=0
 grep -rEn '\b(npx|bunx|uvx|pnpm dlx|yarn dlx|pipx run|uv run)\b' hooks/ .claude-plugin/plugin.json || rc=$?
