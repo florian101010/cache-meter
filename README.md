@@ -29,7 +29,7 @@ A live countdown above the prompt: minutes until the cache expires, the hit rate
 
 ### ☕ Keep it
 
-Type **`/keepwarm`** before lunch or a meeting. Shortly before expiry one ping – your conversation sent once more and billed as a cache read – keeps the cache alive – about **1/20 of a re-write or less** (1/40 on Opus 5.5), with hard limits so it never runs away. Every ping flashes a heartbeat in the band, so you see it working. **Never think about it again:** `/keepwarm auto` once, and every break of the session stays warm by itself. Forgot? An optional **notification** from your terminal reminds you ten minutes before the cache expires.
+Type **`/keepwarm`** before lunch or a meeting. Shortly before expiry one ping – your conversation sent once more and billed as a cache read – keeps the cache alive – its cache read about **1/20 of a re-write or less** (1/40 on Opus 5.5), with hard limits so it never runs away. Every ping flashes a heartbeat in the band, so you see it working. **Never think about it again:** `/keepwarm auto` once, and every break of the session stays warm by itself. Forgot? An optional **notification** from your terminal reminds you ten minutes before the cache expires.
 
 </td>
 <td width="33%" valign="top">
@@ -48,7 +48,7 @@ Type **`/keepwarm`** before lunch or a meeting. Shortly before expiry one ping �
 
 | | The problem | What Cache Meter does | How |
 |:-:|---|---|---|
-| ☕ | **“Back from lunch, the first answer takes ages – and re-writes everything.”** | Keeps the cache warm through the break – one ping costs **1/20 of a re-write or less** | [`/keepwarm`](#keep-the-cache-warm-with-keepwarm) |
+| ☕ | **“Back from lunch, the first answer takes ages – and re-writes everything.”** | Keeps the cache warm through the break – a ping reads the cache for **1/20 of a re-write or less** | [`/keepwarm`](#keep-the-cache-warm-with-keepwarm) |
 | 🔁 | **“I always forget to type it before a break.”** | Covers **every** break of the session by itself – only while you are away | [`/keepwarm auto`](#every-break-by-itself-keepwarm-auto) · opt-in |
 | ⏱️ | **“When does my cache run out?”** | A live **countdown**, the hit rate and the context fill, always in view | [band above the prompt](#what-you-see) |
 | 💸 | **“What did that answer just cost?”** | The cost **under every answer**, the session total, a warning at your budget | [automatic](#every-answer-priced) · `sessionBudget` |
@@ -166,7 +166,7 @@ Before you step away, type:
 /keepwarm off      # stop early – also stops auto
 ```
 
-The band shows `↻` while it runs. Whenever 10 minutes or less of the one-hour TTL are left and no request is running, Cache Meter sends one request over your conversation – billed as a cache read, with a one-word answer – (`$.model.fork`, answer: `warm`). It reads the cached context, and a cache read keeps the entry alive for the duration of the original write – one hour for the main conversation ([pricing › prompt caching](https://platform.claude.com/docs/en/about-claude/pricing): cache read, *"same duration as the preceding write"*). That is roughly one ping every 50 minutes.
+The band shows `↻` while it runs. Whenever 10 minutes or less of the one-hour TTL are left and no request is running, Cache Meter sends one request over your conversation – billed as a cache read, plus its short answer – (`$.model.fork`, answer: `warm`). It reads the cached context, and a cache read keeps the entry alive for the duration of the original write – one hour for the main conversation ([pricing › prompt caching](https://platform.claude.com/docs/en/about-claude/pricing): cache read, *"same duration as the preceding write"*). That is roughly one ping every 50 minutes.
 
 **What it costs, compared with letting the cache expire** (multipliers of the base input price, from the [pricing page](https://platform.claude.com/docs/en/about-claude/pricing)):
 
@@ -176,7 +176,7 @@ The band shows `↻` while it runs. Whenever 10 minutes or less of the one-hour 
 | Claude Opus 5.5, Claude Sonnet 5.5 | 2× | 0.05× | ≈ 40 |
 | Claude Fable 5.1, Claude Mythos 5.1 | 2× | 0.025× | ≈ 80 |
 
-Each ping also pays for its few uncached tokens and its one-word answer. On a subscription these are shares of your plan limits rather than dollars; how cache reads count towards the 5-hour and weekly limits is not documented, so watch the limits in `/tokens`.
+Each ping also pays for its few uncached tokens and its answer – one word, plus any thinking the model does first: a fork repeats the main thread's last request (model, system prompt, tools) and takes no output cap (types: `ModelForkRequest` has only a prompt), so at a high effort level that thinking is billed as output. The table's break-even is therefore an upper bound. On a subscription these are shares of your plan limits rather than dollars; how cache reads count towards the 5-hour and weekly limits is not documented, so watch the limits in `/tokens`.
 
 **Safety limits** – keepwarm switches itself off, with a toast, when:
 
@@ -396,7 +396,7 @@ Seven options. Set them with `/config` → `cache-meter.<option>`, or in `~/.cla
 | `limitNotice` | `off` (default), `on` | `on`: a terminal notification through your own channel when a plan limit (5 hours, 7 days, spend limit) is at least half used and would be full before it resets at the pace since its window started (measured over at least 10 minutes) – once per window. The toast in Claude Code comes either way |
 | `animations` | `on` (default), `off` | `on`: in the docked dashboard a small café under the request chart acts out the cache; on the Overview the countdown flashes and its bar shines at each new minute, new request columns grow in, cost and saving count up, and the keepwarm arrow turns while it runs. `off`: none of it – for a calm screen, or a terminal app that leaves traces when parts of the screen redraw |
 
-With `auto`, Cache Meter follows Claude Code's own TTL controls and your plan state ([full order](docs/how-it-works.md#how-the-ttl-is-derived)). On an API key or a cloud provider Claude Code's default is five minutes: set `cacheTtl` to `5m`, or set `promptCacheTtl`.
+With `auto`, Cache Meter follows Claude Code's own TTL controls and your plan state ([full order](docs/how-it-works.md#how-the-ttl-is-derived)). On an API key or a cloud provider Claude Code's default is five minutes: set `cacheTtl` to `5m` – or set Claude Code's `promptCacheTtl` to `1h` to give the main conversation a one-hour cache ([prompt caching › Choose the TTL yourself](https://code.claude.com/docs/en/prompt-caching#choose-the-ttl-yourself)); then `/keepwarm` works there too. One-hour cache writes cost 2× the input price instead of 1.25× ([pricing](https://platform.claude.com/docs/en/about-claude/pricing#prompt-caching)).
 
 ## Privacy, cost and permissions
 
