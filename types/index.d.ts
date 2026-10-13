@@ -49,7 +49,17 @@ export type Measure = {
 /** Session sums; the cold-rewrite count and tokens are kept apart from the (capped) list of cold rewrites. */
 export type Totals = { main: Usage4; sub: Usage4; mainSteps: number; subSteps: number; coldCount: number; coldWritten: number }
 
-export type KeepWarm = { until: number | null; pings: number; readTokens: number; lastPingAt: number | null }
+export type KeepWarm = {
+  until: number | null
+  /** Pings and tokens read in this run – for /keepwarm auto, since it was switched on (restarted from 0 after /clear, /resume, /branch). */
+  pings: number
+  readTokens: number
+  lastPingAt: number | null
+  /** /keepwarm auto: the break it covers in ms (the window moves on with every prompt and answer); null = a fixed run or off. */
+  auto: number | null
+  /** /keepwarm auto: pings in the current break, capped at MAX_PINGS. */
+  pausePings: number
+}
 
 /** A main request that found the cache expired and wrote it anew: after a pause, a model switch, or a resume. */
 export type ColdWrite = { at: number; written: number; cause: 'pause' | 'model' | 'resume'; idleMs: number | null }

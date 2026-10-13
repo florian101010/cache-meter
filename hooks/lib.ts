@@ -132,6 +132,33 @@ export function parseKeepWarm(args: string): number | null | undefined {
   return ms
 }
 
+/**
+ * `/keepwarm` arguments: a fixed run (`2h`, `30m`, nothing = 2h), `auto` with an optional break length
+ * (`auto`, `auto 3h`; 2h when left out), or `off`. Undefined = unreadable.
+ */
+export function parseKeepCommand(args: string): { mode: 'run' | 'auto'; ms: number } | { mode: 'off' } | undefined {
+  const a = args.trim().toLowerCase()
+  const auto = /^auto(?:\s+(.*))?$/.exec(a)
+  if (auto) {
+    const ms = parseKeepWarm(auto[1] ?? '')
+    return typeof ms === 'number' ? { mode: 'auto', ms } : undefined
+  }
+  const ms = parseKeepWarm(a)
+  if (ms === undefined) return undefined
+
+  return ms === null ? { mode: 'off' } : { mode: 'run', ms }
+}
+
+/** A length for the person: `2h`, `45m`, `1h 30m`. */
+export function durationLabel(ms: number): string {
+  const min = Math.round(ms / 60_000)
+  const h = Math.floor(min / 60)
+  const m = min % 60
+  if (h === 0) return `${m}m`
+
+  return m === 0 ? `${h}h` : `${h}h ${m}m`
+}
+
 /** When to ping: once this share of the TTL or less is left (≈ 10 min of 60m). */
 export const PING_SHARE = 0.17
 
@@ -590,9 +617,9 @@ export function breakCause(i: {
   return 'not observable here: fast mode turned on, a code-intelligence plugin (LSP tool), a tool deny rule, or removed images'
 }
 
-/** The expiry notification's text. */
-export function expiryText(remainingMs: number, tokens: number): string {
-  return `Prompt cache expires in ${remainingLabel(remainingMs)} – the next prompt would re-write ${short(tokens)} tokens. Type /keepwarm to keep it.`
+/** The expiry notification's text; the /keepwarm tip only while the option offers the command. */
+export function expiryText(remainingMs: number, tokens: number, canKeep = true): string {
+  return `Prompt cache expires in ${remainingLabel(remainingMs)} – the next prompt would re-write ${short(tokens)} tokens.${canKeep ? ' Type /keepwarm to keep it.' : ''}`
 }
 
 /** A subagent's name in the Health tab: its type and task, else its id. */
@@ -637,7 +664,8 @@ export function isSecretLikePart(part: string): boolean {
 
 /** A label as it is stored and shown: one line, no control characters, at most 80 characters (the end kept). */
 export function cleanLabel(label: string): string {
-  const one = label.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, ' ')
+  // Control characters, line breaks, and the invisible ones that could reorder or hide text (bidi, zero width).
+  const one = label.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2066-\u2069\ufeff]/g, ' ')
 
   return one.length > 80 ? `…${one.slice(-79)}` : one
 }
@@ -731,7 +759,7 @@ export type ReportData = {
   toolsByTool: { tool: string; count: number; tokens: number }[]
   largest: { label: string; tokens: number }[]
   agents: { label: string; steps: number; tokens: number; hit: number | null }[]
-  keepwarm: { pings: number; readTokens: number }
+  keepwarm: { pings: number; readTokens: number; auto?: number | null }
 }
 
 /** A label as inline code in the report, so a crafted path or task cannot add Markdown. */
@@ -750,7 +778,8 @@ export function reportMarkdown(r: ReportData): string {
   lines.push(`- Cache hit rate: ${r.hit === null ? '–' : `${r.hit}%`}${r.saving === null ? '' : ` · cache saved ${r.saving}% of input cost`}`)
   lines.push(`- Cold re-writes: ${r.cold.count}${r.cold.count > 0 ? ` (${short(r.cold.written)} tokens)` : ''}`)
   lines.push(`- Warm misses: ${r.warmMiss.count}${r.warmMiss.cause === null ? '' : ` – last: ${r.warmMiss.cause}`}`)
-  if (r.keepwarm.pings > 0) lines.push(`- Keepwarm: ${r.keepwarm.pings} pings, ${short(r.keepwarm.readTokens)} tokens read`)
+  if (r.keepwarm.auto != null) lines.push(`- Keepwarm auto (breaks up to ${durationLabel(r.keepwarm.auto)}): ${r.keepwarm.pings} pings, ${short(r.keepwarm.readTokens)} tokens read`)
+  else if (r.keepwarm.pings > 0) lines.push(`- Keepwarm: ${r.keepwarm.pings} pings, ${short(r.keepwarm.readTokens)} tokens read`)
   lines.push('', '## Context', '')
   lines.push(
     `- Fill: ${r.context.percent === null ? '–' : `${r.context.percent}%`}${r.context.tokens === null ? '' : ` (${short(r.context.tokens)} tokens)`}${r.context.autoCompactPct === null ? '' : ` · auto-compact at ${r.context.autoCompactPct}%`}${r.context.promptsLeft === null ? '' : ` · in ≈ ${r.context.promptsLeft} prompts at this pace`}`,

@@ -1,6 +1,6 @@
 # Contributing to Cache Meter
 
-Thanks for helping. Cache Meter is a [Claude Code mod](https://code.claude.com/docs/en/plugins/mods/overview); its hooks run inside Claude Code, so a mistake costs the user's session, not just a test.
+Thanks for helping. Everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md). Cache Meter is a [Claude Code mod](https://code.claude.com/docs/en/plugins/mods/overview); its hooks run inside Claude Code, so a mistake costs the user's session, not just a test.
 
 ## The one rule: the official documentation is the single source of truth
 
@@ -113,7 +113,7 @@ Fill in the template. CI must be green. Describe what a user sees differently, a
 Images (README screenshots, header, icon and social preview sources) live on the [`assets` branch](https://github.com/florian101010/cache-meter/tree/assets), not on `main`: the directory scans `main`, and image files there hold every version for review. Its README says how to regenerate them.
 
 ```text
-.claude-plugin/plugin.json        manifest: name, version, type contract, the cacheTtl, autoSidebar, turnLine, expiryNotice, sessionBudget, animations and limitNotice options
+.claude-plugin/plugin.json        manifest: name, version, type contract, the cacheTtl, keepwarm, autoSidebar, turnLine, expiryNotice, sessionBudget, animations and limitNotice options
                                   (the folder also holds the listing icon, a static PNG; its source is on the assets branch)
 .claude-plugin/marketplace.json   makes this repository a one-plugin marketplace
 hooks/hooks.json                  points to the hooks module

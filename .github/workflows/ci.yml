@@ -61,6 +61,11 @@ jobs:
           printf '<<<<<<< HEAD\nx\n' > "$tmp/conflicted.md" && git -C "$tmp" add conflicted.md
           if bash "$tmp/.github/scripts/directory-checks.sh" > "$tmp/out.txt"; then echo "directory-checks.sh passed a planted conflict marker"; exit 1; fi
           grep -q "merge-conflict markers" "$tmp/out.txt"
+          # …and an icon path to a file that isn't there.
+          git -C "$tmp" rm -q -f --cached conflicted.md
+          python3 -c "import json,sys; p=sys.argv[1]; d=json.load(open(p)); d['icon']='./.claude-plugin/missing.png'; open(p,'w').write(json.dumps(d))" "$tmp/.claude-plugin/plugin.json"
+          if bash "$tmp/.github/scripts/directory-checks.sh" > "$tmp/out.txt" 2>&1; then echo "directory-checks.sh passed a missing icon"; exit 1; fi
+          grep -q "icon file missing" "$tmp/out.txt"
       # Manifest, marketplace, hooks module and state contract; warnings fail the build.
       - run: claude plugin validate --strict .
       # The mod's tests run against the engine with no session, sign-in or network.
