@@ -484,6 +484,16 @@ export function turnLine(u: Usage4, requests: number, usd: number | null, isPlan
   return `◉ Cache Meter · ${cost}${parts.filter(Boolean).join(' · ')}`
 }
 
+/** Two reset times of one limit window: under a minute apart (a reading may move by seconds). */
+export function isSameReset(a: string, b: string): boolean {
+  return Math.abs(Date.parse(a) - Date.parse(b)) < 60_000
+}
+
+/** Whether a limit window was already warned about: the same kind, and the same reset within a minute. */
+export function isWarnedWindow(warned: readonly { kind: string; resetsAt: string }[], kind: string, resetsAt: string): boolean {
+  return warned.some(w => w.kind === kind && isSameReset(w.resetsAt, resetsAt))
+}
+
 /**
  * Where each plan limit's pace starts: its first reading, renewed when the window reset (the
  * percentage fell, or the reset time moved), so the forecast does not die after the first reset.
@@ -497,7 +507,9 @@ export function nextLimitStarts(
   for (const l of limits) {
     const old = prev[l.kind]
     const resetsAt = l.resetsAt ?? null
-    const isNewWindow = old === undefined || l.percentUsed < old.pct || (old.resetsAt !== null && resetsAt !== null && resetsAt !== old.resetsAt)
+    // A reset time that moves by a minute or more is a new window; under a minute, the same one read again.
+    const isMoved = old?.resetsAt != null && resetsAt !== null && !isSameReset(resetsAt, old.resetsAt)
+    const isNewWindow = old === undefined || l.percentUsed < old.pct || isMoved
     next[l.kind] = isNewWindow ? { at: now, pct: l.percentUsed, resetsAt } : old
   }
 
@@ -609,8 +621,19 @@ export function homePath(path: string): string {
 /** The tools whose `file_path` / `notebook_path` is a file on disk (types: claude-code-tools). */
 const FILE_TOOLS = new Set(['Read', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit'])
 
-/** Words that look like a credential, never shown as a program name. */
-const SECRET_LIKE = /^(gh[poursa]_|github_pat_|sk-|sk_|xox[abprs]-|akia|asia|aiza|glpat-|hf_|npm_|pypi-|dop_v1_|shpat_)/i
+/** How credentials begin (GitHub, OpenAI/Stripe, Slack, AWS, Google, GitLab, Hugging Face, npm, PyPI, DigitalOcean, Shopify, Tailscale, Docker, Linear, Vault, age): never shown in a label. */
+const SECRET_PREFIXES = 'gh[poursa]_|github_pat_|sk-|sk_|rk_(?:live|test)_|xox[abprs]-|xapp-|akia|asia|aiza|ya29\\.|glpat-|glrt-|glptt-|hf_|npm_|pypi-|dop_v1_|shpat_|tskey-|dckr_pat_|lin_api_|hvs\\.|age-secret-key-'
+/** The same prefixes anywhere after a separator ("backup-ghp_…"), or a long run of letters and digits
+ * mixed, as tokens and keys are: a path part like that is shown as "…" – masking a harmless name is the
+ * cheaper mistake. */
+const SECRET_INSIDE = new RegExp(`(^|[^A-Za-z0-9])(${SECRET_PREFIXES})`, 'i')
+
+/** True for a path part that may hold a credential. */
+export function isSecretLikePart(part: string): boolean {
+  if (SECRET_INSIDE.test(part)) return true
+  // base64 and dotted tokens too: + = . do not end a run.
+  return (part.match(/[A-Za-z0-9_+=.-]{32,}/g) ?? []).some(run => /[A-Za-z]/.test(run) && /\d/.test(run))
+}
 
 /** A label as it is stored and shown: one line, no control characters, at most 80 characters (the end kept). */
 export function cleanLabel(label: string): string {
@@ -629,10 +652,10 @@ export function toolLabel(tool: string, input: Readonly<Record<string, unknown>>
     // A path, not a URL: anything with a scheme gives just the tool; a query or fragment is cut off.
     if (/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(path)) return tool
 
-    // A path segment that looks like a credential (a file named after a token) is shown as "…".
+    // A path segment that may hold a credential (a file named after a token) is shown as "…".
     const shown = homePath(path.split(/[?#]/)[0] ?? '')
       .split(/([\\/])/)
-      .map(part => (SECRET_LIKE.test(part) ? '…' : part))
+      .map(part => (isSecretLikePart(part) ? '…' : part))
       .join('')
 
     return cleanLabel(`${tool} ${shown}`)
@@ -647,7 +670,7 @@ export function toolLabel(tool: string, input: Readonly<Record<string, unknown>>
     // be a plain path – no $, quotes, ; | & or a leading - anywhere in it – before its last part is shown.
     if (homePath(program) === '~' || !/^[A-Za-z0-9_.+~/][A-Za-z0-9_.+~/-]*$/.test(program)) return tool
     const name = program.split('/').pop() ?? ''
-    const isProgram = /^[A-Za-z0-9_.+][A-Za-z0-9_.+-]*$/.test(name) && name.length <= 32 && !SECRET_LIKE.test(name) && !/\d{8}/.test(name)
+    const isProgram = /^[A-Za-z0-9_.+][A-Za-z0-9_.+-]*$/.test(name) && name.length <= 32 && !isSecretLikePart(name) && !/\d{8}/.test(name)
 
     return isProgram ? `${tool} ${name}` : tool
   }
@@ -804,6 +827,71 @@ export function shineCells(cells: readonly Cell[], at: number): Cell[] {
 
     return [cell[0], lighten(cell[1], d === 0 ? 0.6 : 0.3), cell[2]]
   })
+}
+
+/** A single tool result this large, or larger, in the main conversation is worth a word. */
+export const HOG_MIN = 10_000
+export const HOG_SHARE = 0.02
+
+/** Whether one tool result fills enough of the context to mention: max(10k, 2 % of the window) tokens. */
+export function isContextHog(tokens: number, window: number): boolean {
+  return tokens >= Math.max(HOG_MIN, window > 0 ? window * HOG_SHARE : 0)
+}
+
+/** The toast for a large tool result: what put how much into the context (an estimate), and why it matters. */
+export function hogNote(label: string, tool: string, tokens: number): string {
+  return `${label === '' ? tool : label} put ≈ ${short(tokens)} tokens into the context – sent again with every request until /compact`
+}
+
+/** A part of the context as a share of every request's context: "6%", "<1%", or '' when unknown. */
+export function shareOfRequest(tokens: number, contextTokens: number | null): string {
+  if (contextTokens === null || contextTokens <= 0 || tokens <= 0) return ''
+  const pct = (tokens / contextTokens) * 100
+
+  return pct < 1 ? '<1%' : `${Math.round(pct)}%`
+}
+
+/** The conversation's messages are worth a /compact note from this size and share of the context on. */
+export const COMPACT_NOTE_MIN = 20_000
+export const COMPACT_NOTE_SHARE = 0.25
+
+/**
+ * The Context tab's note on /compact, or null: only measured figures – the messages' size as Claude Code
+ * counts it – and what /compact does by the docs (commands: "Free up context by summarizing the
+ * conversation so far"; costs: compacting a large context "is itself a large request"). No saving is
+ * promised: what the summary keeps is not known before.
+ */
+export function compactNote(messages: number | null, context: number | null): string | null {
+  if (messages === null || context === null || context <= 0) return null
+  if (messages < COMPACT_NOTE_MIN || messages < context * COMPACT_NOTE_SHARE) return null
+
+  return `Messages ${short(messages)} (${Math.round((messages / context) * 100)}% of the context) are sent again with every request – /compact summarizes them to free space, itself one large request`
+}
+
+/** A plan limit worth a warning: half used or more, and full before it resets at this pace. */
+export const LIMIT_NOTE_PCT = 50
+
+/** The terminal width from which the fullscreen layout docks a pane beside the transcript (types: Pane.placement). */
+export const DOCK_COLUMNS = 110
+
+/**
+ * Why the pane sits above the prompt and how it gets beside the chat, for a terminal only: on the main
+ * screen `/tui fullscreen` (it saves the setting and relaunches with the conversation – fullscreen ›
+ * Enable fullscreen rendering – so the mod's in-memory figures start over), in fullscreen a wider window. Null when it already
+ * docks or nothing is known.
+ */
+export function dockTip(isFullscreen: boolean | undefined, columns: number | undefined, size: 'sentence' | 'line' | 'short'): string | null {
+  if (isFullscreen === false) {
+    if (size === 'short') return 'tip: /tui fullscreen puts this beside the chat'
+    if (size === 'line') return `tip: /tui fullscreen puts this beside the chat as a sidebar (${DOCK_COLUMNS}+ columns; relaunches, figures start over)`
+
+    return `tip: /tui fullscreen puts this beside the chat as a sidebar (from ${DOCK_COLUMNS} columns; Claude Code relaunches with the conversation, the meter starts over)`
+  }
+  if (isFullscreen === true && columns !== undefined && columns < DOCK_COLUMNS) {
+    return size === 'short' ? `tip: ${DOCK_COLUMNS}+ columns put this beside the chat` : `tip: a window ${DOCK_COLUMNS} columns or wider puts this beside the chat as a sidebar`
+  }
+
+  return null
 }
 
 /** Which animation a failed surface module is (types: UiFaultInput.module, its path under the plugin's folder). */

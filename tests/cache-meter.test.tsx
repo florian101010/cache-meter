@@ -12,6 +12,10 @@ import {
   FIVE_MIN,
   HOUR,
   cafeState,
+  compactNote,
+  hogNote,
+  isContextHog,
+  shareOfRequest,
   faultTarget,
   cacheSaving,
   columnCells,
@@ -39,6 +43,10 @@ import {
   tall,
   toolDiff,
   toolLabel,
+  isSecretLikePart,
+  isSameReset,
+  isWarnedWindow,
+  dockTip,
   turnLine,
   writeMultiplier,
 } from '../hooks/lib'
@@ -135,6 +143,10 @@ function world(on: On, opts: { env?: Record<string, string>; forkRead?: number; 
     notify: { isSent: true, channel: 'terminal' } as Record<string, unknown>,
     // What $.session.turns() answers (prompts in the transcript).
     turns: 4,
+    // The rate-limit windows $.session.usage reports.
+    rateLimits: [] as unknown[],
+    // What $.session.surfaces() answers.
+    surfaces: ['terminal'] as string[],
     // Whether the next tool call is refused (a deny from a hook beneath).
     deny: false,
     server: [] as { id: string; name: string; input: unknown; startedAt: number; endedAt?: number }[],
@@ -168,11 +180,12 @@ function world(on: On, opts: { env?: Record<string, string>; forkRead?: number; 
   on('settings.read', () => ({ value: {} }))
   on('session.usage', ($, e) => {
     usageDetails.push((e as { breakdown?: string }).breakdown)
-    const v = usageValue(next.contextTokens, 1_000_000, 970_000) as { value: { context: { breakdown: Record<string, unknown> } } & Record<string, unknown> }
+    const v = usageValue(next.contextTokens, 1_000_000, 970_000, next.rateLimits) as { value: { context: { breakdown: Record<string, unknown> } } & Record<string, unknown> }
     const context = next.tools === null ? v.value.context : { ...v.value.context, breakdown: { ...v.value.context.breakdown, mcpTools: next.tools } }
     return { value: { ...v.value, context, cost: { usd: next.usd } } } as never
   })
   on('turn.start', ($, e) => ({ turnId: e.turnId }))
+  on('session.surfaces', () => ({ value: next.surfaces }) as never)
   // As core answers: `text` is the result as the model reads it (types: ToolCallResult); or a deny from beneath.
   on('tool.call', () => (next.deny ? { deny: 'refused' } : { result: 'ok', ...(next.toolText === null ? {} : { text: next.toolText }) }) as never)
   on('classic.PreModelSwitch', () => ({}))
@@ -1050,7 +1063,7 @@ test('MCP servers: calls counted per server, idle ones marked after a few prompt
   await $.session.measure({ context: { tokens: 100_000, window: 1_000_000, percent: 10 }, rateLimits: [], changed: ['context'] })
   const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
   await ui.press({ key: 'tab-context' })
-  expect(await ui.find({ type: 'Text', text: / · 2 tools · 3 calls$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: / · 2 tools · (\d+%|<1%) of each request · 3 calls$/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /unused so far/ })).toBeUndefined()
   await ui.unmount()
 })
@@ -1127,13 +1140,13 @@ test('MCP servers: unused only after three prompts since the start or a /resume'
   await $.session.measure({ context: { tokens: 100_000, window: 1_000_000, percent: 10 }, rateLimits: [], changed: ['context'] })
   let ui = await $.ui.mount({ surface: 'terminal', ...PANE })
   await ui.press({ key: 'tab-context' })
-  expect(await ui.find({ type: 'Text', text: / · 2 tools · 0 calls$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: / · 2 tools · (\d+%|<1%) of each request · 0 calls$/ })).toBeDefined()
   await ui.unmount()
   next.turns = 7
   await $.session.measure({ context: { tokens: 100_000, window: 1_000_000, percent: 10 }, rateLimits: [], changed: ['context'] })
   ui = await $.ui.mount({ surface: 'terminal', ...PANE })
   await ui.press({ key: 'tab-context' })
-  expect(await ui.find({ type: 'Text', text: / · 2 tools · 0 calls – unused so far$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: / · 2 tools · (\d+%|<1%) of each request · 0 calls – unused so far$/ })).toBeDefined()
   await ui.unmount()
   // /resume or /branch: counted from there again.
   await $.classic.SessionStart({ source: 'resume', seconds_since_last_response: 60, context_tokens: 100_000 })
@@ -2196,6 +2209,255 @@ test('animation: off with animations = off – the new figure at once, no shine'
   await ui.unmount()
 })
 
+test('context hog: max(10k, 2 % of the window) tokens; share of each request', () => {
+  expect(isContextHog(9_999, 0)).toBe(false)
+  expect(isContextHog(10_000, 0)).toBe(true)
+  expect(isContextHog(10_000, 200_000)).toBe(true)
+  expect(isContextHog(19_999, 1_000_000)).toBe(false)
+  expect(isContextHog(20_000, 1_000_000)).toBe(true)
+  expect(hogNote('src/big.ts', 'Read', 42_000)).toBe('src/big.ts put ≈ 42.0k tokens into the context – sent again with every request until /compact')
+  expect(hogNote('', 'WebFetch', 12_000)).toMatch(/^WebFetch put ≈ 12\.0k tokens/)
+  expect(shareOfRequest(6_000, 100_000)).toBe('6%')
+  expect(shareOfRequest(500, 100_000)).toBe('<1%')
+  expect(shareOfRequest(6_000, null)).toBe('')
+  expect(shareOfRequest(0, 100_000)).toBe('')
+})
+
+test('context hog: a toast for one large result in the main conversation – not for small ones, subagents or -p', async ($, on) => {
+  const { next, toasts } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  // 4,000 characters ≈ 1k tokens: no word.
+  next.toolText = 'x'.repeat(4_000)
+  await $.tool.call({ tool: 'Read', file_path: '/Users/u/project/a.ts' } as never)
+  expect(toasts.some(t => /into the context/.test(t))).toBe(false)
+  // 200,000 characters ≈ 50k tokens: one toast, with the short label.
+  next.toolText = 'y'.repeat(200_000)
+  await $.tool.call({ tool: 'Read', file_path: '/Users/u/project/big.ts' } as never)
+  expect(toasts.filter(t => /into the context/.test(t))).toEqual(['Read ~/project/big.ts put ≈ 50.0k tokens into the context – sent again with every request until /compact'])
+  // A subagent's result stays in its own context.
+  await $.tool.call({ tool: 'Read', file_path: '/Users/u/other.ts', agentId: 'agent-1' } as never)
+  expect(toasts.filter(t => /into the context/.test(t))).toHaveLength(1)
+})
+
+test('context hog: the window counts (15k of 1M is no word); one toast per 20 seconds', async ($, on) => {
+  const { next, toasts, clock } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  // 60,000 characters ≈ 15k tokens: over 10k, but under 2 % of the measured 1M window.
+  next.toolText = 'z'.repeat(60_000)
+  await $.tool.call({ tool: 'Read', file_path: '/Users/u/project/mid.ts' } as never)
+  expect(toasts.some(t => /into the context/.test(t))).toBe(false)
+  next.toolText = 'y'.repeat(200_000)
+  await $.tool.call({ tool: 'Read', file_path: '/Users/u/project/a.ts' } as never)
+  await clock.advance(5_000)
+  await $.tool.call({ tool: 'Read', file_path: '/Users/u/project/b.ts' } as never)
+  expect(toasts.filter(t => /into the context/.test(t))).toHaveLength(1)
+  await clock.advance(20_000)
+  await $.tool.call({ tool: 'Read', file_path: '/Users/u/project/c.ts' } as never)
+  expect(toasts.filter(t => /into the context/.test(t))).toHaveLength(2)
+})
+
+test('context hog: no toast without a screen', async ($, on) => {
+  const { next, toasts } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
+  next.toolText = 'y'.repeat(200_000)
+  await $.tool.call({ tool: 'Read', file_path: '/Users/u/project/big.ts' } as never)
+  expect(toasts.some(t => /into the context/.test(t))).toBe(false)
+})
+
+test('compact note: only measured figures, from 20k messages and a quarter of the context', () => {
+  expect(compactNote(null, 100_000)).toBeNull()
+  expect(compactNote(19_999, 40_000)).toBeNull()
+  expect(compactNote(30_000, 200_000)).toBeNull()
+  expect(compactNote(60_000, 200_000)).toBe(
+    'Messages 60.0k (30% of the context) are sent again with every request – /compact summarizes them to free space, itself one large request',
+  )
+})
+
+test('compact note: shown in the Context tab when the messages fill the context', async ($, on) => {
+  world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  await run($, 'tokens', 'context')
+  const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  expect(await ui.find({ type: 'Text', text: /^Messages \d+\.\dk \(\d+% of the context\) are sent again with every request/ })).toBeDefined()
+  await ui.unmount()
+})
+
+const limitAt = (pct: number) => ({ context: { tokens: 100_000, window: 1_000_000, percent: 10 }, rateLimits: [{ kind: 'five_hour', percentUsed: pct, resetsAt: '2026-10-12T20:00:00Z' }], changed: ['rateLimits'] })
+
+test('limit warning: once per window, from half used, only when full before the reset', async ($, on) => {
+  const { clock, toasts, notifies } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await $.session.measure(limitAt(20) as never)
+  await clock.advance(HOUR)
+  // 40 %: full before the reset at this pace, but not half used yet – no word.
+  await $.session.measure(limitAt(40) as never)
+  expect(toasts.some(t => /limit at/.test(t))).toBe(false)
+  await clock.advance(HOUR / 2)
+  await $.session.measure(limitAt(60) as never)
+  const warned = toasts.filter(t => /limit at/.test(t))
+  expect(warned).toHaveLength(1)
+  expect(warned[0]).toMatch(/^5 hours limit at 60% – full ≈ \d\d:\d\d at this pace \(resets \w{3} \d\d:\d\d\)$/)
+  // Off by default: no notification.
+  expect(notifies).toHaveLength(0)
+  await clock.advance(HOUR / 4)
+  await $.session.measure(limitAt(70) as never)
+  expect(toasts.filter(t => /limit at/.test(t))).toHaveLength(1)
+})
+
+test('limit warning: a notification too with limitNotice = on', { options: { limitNotice: 'on' } }, async ($, on) => {
+  const { clock, notifies } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await $.session.measure(limitAt(20) as never)
+  await clock.advance(HOUR)
+  await $.session.measure(limitAt(60) as never)
+  expect(notifies.filter(n => /^5 hours limit at 60%/.test(n))).toHaveLength(1)
+})
+
+test('limit warning: a reload in the same window stays quiet', async ($, on) => {
+  const { clock, toasts, next } = world(on)
+  // Requests and readings before this load (the session state keeps them over a reload) …
+  await step($)
+  await $.session.measure(limitAt(20) as never)
+  await clock.advance(HOUR)
+  await $.session.measure(limitAt(60) as never)
+  // … then the load itself, measuring the same window at 60 %.
+  next.rateLimits = limitAt(60).rateLimits
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await clock.advance(HOUR / 12)
+  await $.session.measure(limitAt(65) as never)
+  expect(toasts.some(t => /limit at/.test(t))).toBe(false)
+})
+
+test('limit warning: again in a new window; none when full only after the reset', async ($, on) => {
+  const { clock, toasts } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  // 49 → 51 % in an hour: half used, but at that pace full long after the reset – no word.
+  await $.session.measure(limitAt(49) as never)
+  await clock.advance(HOUR)
+  await $.session.measure(limitAt(51) as never)
+  expect(toasts.some(t => /limit at/.test(t))).toBe(false)
+  // A new window (another reset time), fast again: a word for it.
+  const next = (pct: number) => ({ ...limitAt(pct), rateLimits: [{ kind: 'five_hour', percentUsed: pct, resetsAt: '2026-10-13T01:00:00Z' }] })
+  await $.session.measure(next(10) as never)
+  await clock.advance(HOUR)
+  await $.session.measure(next(55) as never)
+  expect(toasts.filter(t => /limit at/.test(t))).toHaveLength(1)
+})
+
+test('limit warning: a reset time that drifts by seconds is the same window', async ($, on) => {
+  const { clock, toasts } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  const at = (pct: number, resetsAt: string) => ({ ...limitAt(pct), rateLimits: [{ kind: 'five_hour', percentUsed: pct, resetsAt }] })
+  await $.session.measure(at(20, '2026-10-12T20:00:00Z') as never)
+  await clock.advance(HOUR)
+  await $.session.measure(at(60, '2026-10-12T20:00:00Z') as never)
+  await clock.advance(HOUR / 12)
+  await $.session.measure(at(65, '2026-10-12T20:00:07Z') as never)
+  // Taken for a new window, the pace would start over and warn again a quarter of an hour later.
+  await clock.advance(HOUR / 4)
+  await $.session.measure(at(80, '2026-10-12T20:00:07Z') as never)
+  expect(toasts.filter(t => /limit at/.test(t))).toHaveLength(1)
+})
+
+test('limit warning: a refused notification leaves the toast', { options: { limitNotice: 'on' } }, async ($, on) => {
+  const { clock, toasts, next } = world(on)
+  next.notifyDeny = 'no notifications here'
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await $.session.measure(limitAt(20) as never)
+  await clock.advance(HOUR)
+  await $.session.measure(limitAt(60) as never)
+  expect(toasts.filter(t => /^5 hours limit at 60%/.test(t))).toHaveLength(1)
+})
+
+test('limit warning: none without a screen', async ($, on) => {
+  const { clock, toasts } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
+  await $.session.measure(limitAt(20) as never)
+  await clock.advance(HOUR)
+  await $.session.measure(limitAt(60) as never)
+  expect(toasts.some(t => /limit at/.test(t))).toBe(false)
+})
+
+test('after /clear: what the conversation came to, from figures it measured', async ($, on) => {
+  const { toasts, next } = world(on)
+  // Core's own answer beneath the mod (types: SessionEndResult).
+  on('session.end', ($, e) => ({ sessionId: e.sessionId }))
+  // The session had cost $0.50 before this conversation began; /cost counts on.
+  next.usd = 0.5
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  next.usd = 2
+  await step($)
+  await step($)
+  await $.session.end({ reason: 'clear', sessionId: 's1', resume: {} } as never)
+  await $.classic.SessionStart({ source: 'clear' } as never)
+  let summary = toasts.filter(t => t.startsWith('Conversation cleared'))
+  expect(summary).toHaveLength(1)
+  expect(summary[0]).toMatch(/^Conversation cleared – it came to \$1\.50 spent · 2 requests · \d+% from cache$/)
+  // The next conversation counts from its own start: one request, $0.25.
+  next.usd = 2.25
+  await step($)
+  await $.session.end({ reason: 'clear', sessionId: 's1', resume: {} } as never)
+  await $.classic.SessionStart({ source: 'clear' } as never)
+  summary = toasts.filter(t => t.startsWith('Conversation cleared'))
+  expect(summary[1]).toMatch(/^Conversation cleared – it came to \$0\.25 spent · 1 request · \d+% from cache$/)
+})
+
+test('after /clear: a resumed conversation counts from the resume, a cold re-write is named', async ($, on) => {
+  const { toasts, next, clock } = world(on)
+  on('session.end', ($, e) => ({ sessionId: e.sessionId }))
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await $.classic.SessionStart({ source: 'resume', seconds_since_last_response: 30 } as never)
+  await step($)
+  // An hour later: the next request writes the context again.
+  await clock.advance(61 * 60_000)
+  next.write = 150_000
+  next.read = 0
+  await step($)
+  await $.session.end({ reason: 'clear', sessionId: 's1', resume: {} } as never)
+  await $.classic.SessionStart({ source: 'clear' } as never)
+  const summary = toasts.filter(t => t.startsWith('Conversation cleared'))
+  expect(summary).toHaveLength(1)
+  expect(summary[0]).toMatch(/^Conversation cleared – since you resumed it, it came to \$0\.00 spent · 2 requests · \d+% from cache · 1 cold re-write \(150\.0k tokens\)$/)
+})
+
+test('after /clear: a reload mid-conversation keeps the requests but names no cost', async ($, on) => {
+  const { toasts } = world(on)
+  on('session.end', ($, e) => ({ sessionId: e.sessionId }))
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  // A reload: register again is not part of the kit, session.start again is – with requests in the state.
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  await $.session.end({ reason: 'clear', sessionId: 's1', resume: {} } as never)
+  await $.classic.SessionStart({ source: 'clear' } as never)
+  expect(toasts.filter(t => t.startsWith('Conversation cleared'))).toEqual([expect.stringMatching(/^Conversation cleared – it came to 2 requests · \d+% from cache$/)])
+})
+
+test('after /clear: no word without a screen', async ($, on) => {
+  const { toasts } = world(on)
+  on('session.end', ($, e) => ({ sessionId: e.sessionId }))
+  await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
+  await step($)
+  await $.session.end({ reason: 'clear', sessionId: 's1', resume: {} } as never)
+  await $.classic.SessionStart({ source: 'clear' } as never)
+  expect(toasts.some(t => t.startsWith('Conversation cleared'))).toBe(false)
+})
+
+test('after /clear: nothing when the conversation held no request, and nothing at a real exit', async ($, on) => {
+  const { toasts } = world(on)
+  // Core's own answer beneath the mod (types: SessionEndResult).
+  on('session.end', ($, e) => ({ sessionId: e.sessionId }))
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await $.session.end({ reason: 'clear', sessionId: 's1', resume: {} } as never)
+  await $.classic.SessionStart({ source: 'clear' } as never)
+  await step($)
+  await $.session.end({ reason: 'prompt_input_exit', sessionId: 's2', resume: {} } as never)
+  // Only a /clear's end is kept for the next start: an exit's is not, even if a clear-start followed.
+  await $.classic.SessionStart({ source: 'clear' } as never)
+  expect(toasts.some(t => t.startsWith('Conversation cleared'))).toBe(false)
+})
+
 test('animation: a new column still grows in past the 80 kept requests', async ($, on) => {
   const { clock, next } = world(on)
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
@@ -2323,6 +2585,48 @@ test('pane header: the boundaries – 50 and 36 columns', async ($, on) => {
   expect(await title(35)).toBe('◉|Over')
 })
 
+test('labels: a credential inside a path part or a long key-like run is masked; ordinary names stay', () => {
+  expect(isSecretLikePart('backup-ghp_abc.txt')).toBe(true)
+  expect(isSecretLikePart('ghp_abc')).toBe(true)
+  expect(isSecretLikePart('a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8.json')).toBe(true)
+  expect(isSecretLikePart('register.tsx')).toBe(false)
+  expect(isSecretLikePart('fantasia.md')).toBe(false)
+  expect(isSecretLikePart('a-very-long-but-plain-file-name-without-digits.md')).toBe(false)
+  expect(toolLabel('Read', { file_path: '/srv/keys/backup-ghp_abc.txt' })).toBe('Read /srv/keys/…')
+})
+
+test('dock tip: why the pane is above the prompt and how it gets beside the chat', () => {
+  expect(dockTip(false, 200, 'sentence')).toMatch(/^tip: \/tui fullscreen puts this beside the chat as a sidebar \(from 110 columns; Claude Code relaunches with the conversation, the meter starts over\)$/)
+  expect(dockTip(false, 60, 'short')).toBe('tip: /tui fullscreen puts this beside the chat')
+  expect(dockTip(false, 120, 'line')).toBe('tip: /tui fullscreen puts this beside the chat as a sidebar (110+ columns; relaunches, figures start over)')
+  expect(dockTip(true, 100, 'line')).toBe('tip: a window 110 columns or wider puts this beside the chat as a sidebar')
+  expect(dockTip(true, 110, 'line')).toBeNull()
+  expect(dockTip(undefined, 80, 'line')).toBeNull()
+})
+
+test('dock tip: in the /tokens reply and on the Overview above the prompt – not docked, not on Desktop', async ($, on) => {
+  const { next } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  const run1 = await $.command.run({ command: 'tokens', args: '', presentation: { isFullscreen: false, columns: 120 } } as never)
+  expect((run1 as { text: string }).text).toMatch(/above the prompt\. Esc at an empty prompt or \/tokens again closes it\. Tip: \/tui fullscreen puts this beside the chat/)
+  const inline = { ...PANE, viewport: { columns: 120, rows: 40, isFullscreen: false }, props: { ...PANE.props, placement: 'inline' as const } }
+  let ui = await $.ui.mount({ surface: 'terminal', ...inline })
+  expect(await ui.find({ type: 'Text', text: /^tip: \/tui fullscreen/ })).toBeDefined()
+  await ui.press({ key: 'tab-context' })
+  expect(await ui.find({ type: 'Text', text: /^tip:/ })).toBeUndefined()
+  await ui.unmount()
+  ui = await $.ui.mount({ surface: 'terminal', ...DOCK, viewport: { columns: 200, rows: 50, isFullscreen: true } })
+  expect(await ui.find({ type: 'Text', text: /^tip:/ })).toBeUndefined()
+  await ui.unmount()
+  const desk = await $.ui.mount({ surface: 'desktop', ...inline })
+  expect(await desk.find({ type: 'Text', text: /^tip:/ })).toBeUndefined()
+  await desk.unmount()
+  await run($, 'tokens', '')
+  next.surfaces = ['desktop']
+  const run2 = await $.command.run({ command: 'tokens', args: '', presentation: { isFullscreen: false, columns: 120 } } as never)
+  expect((run2 as { text: string }).text).not.toMatch(/Tip/)
+})
+
 test('ui.fault: which animation a failed module is', () => {
   expect(faultTarget('hooks/cafe.tsx')).toBe('cafe')
   expect(faultTarget('hooks/spin.tsx')).toBe('spin')
@@ -2350,6 +2654,51 @@ test('café module: an unknown state word shows the empty cup', () => {
   const out = JSON.stringify(Cafe({ state: 'bogus' as CafeState }, surface as never))
   expect(out).toContain('◌')
   expect(out).toContain('cup empty')
+})
+
+test('limit windows: told apart by the reset time within a minute – not by the start /clear resets', () => {
+  expect(isSameReset('2026-10-12T20:00:00Z', '2026-10-12T20:00:40Z')).toBe(true)
+  expect(isSameReset('2026-10-12T20:00:00Z', '2026-10-12T20:02:00Z')).toBe(false)
+  const warned = [{ kind: 'five_hour', resetsAt: '2026-10-12T20:00:00Z' }]
+  expect(isWarnedWindow(warned, 'five_hour', '2026-10-12T20:00:07Z')).toBe(true)
+  expect(isWarnedWindow(warned, 'seven_day', '2026-10-12T20:00:00Z')).toBe(false)
+  expect(isWarnedWindow(warned, 'five_hour', '2026-10-13T01:00:00Z')).toBe(false)
+})
+
+test('limit warning: the spend limit reads "Spend limit at", not "Spend limit limit"', async ($, on) => {
+  const { clock, toasts } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  const spend = (pct: number) => ({ ...limitAt(pct), rateLimits: [{ kind: 'spend_limit', percentUsed: pct, resetsAt: '2026-10-12T20:00:00Z' }] })
+  await $.session.measure(spend(20) as never)
+  await clock.advance(HOUR)
+  await $.session.measure(spend(60) as never)
+  expect(toasts.filter(t => /^Spend limit at 60% – full/.test(t))).toHaveLength(1)
+})
+
+test('labels: more token formats are masked – base64 runs, newer prefixes, and in a Bash program name', () => {
+  expect(isSecretLikePart('Zm9vYmFyYmF6cXV4+Zm9vYmFyYmF6cXV4/Zm9vYmFy==')).toBe(true)
+  expect(isSecretLikePart('tskey-auth-abc')).toBe(true)
+  expect(isSecretLikePart('token-ya29.a0Af')).toBe(true)
+  expect(isSecretLikePart('dckr_pat_abc')).toBe(true)
+  expect(isSecretLikePart('package.json')).toBe(false)
+  expect(toolLabel('Bash', { command: 'tskey-auth-abc123 --x' })).toBe('Bash')
+  expect(toolLabel('Bash', { command: 'aB3dE5fG7hJ9kL1mN3pQ5rS7tU9vW1xY --x' })).toBe('Bash')
+  expect(toolLabel('Bash', { command: 'git status' })).toBe('Bash git')
+})
+
+test('after /clear: a branch says so; a cost reading that went back names no cost; /compact keeps the count', async ($, on) => {
+  const { toasts, next } = world(on)
+  on('session.end', ($, e) => ({ sessionId: e.sessionId }))
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  next.usd = 1
+  await $.classic.SessionStart({ source: 'fork' } as never)
+  await step($)
+  await $.classic.SessionStart({ source: 'compact' } as never)
+  await step($)
+  next.usd = 0.5
+  await $.session.end({ reason: 'clear', sessionId: 's1', resume: {} } as never)
+  await $.classic.SessionStart({ source: 'clear' } as never)
+  expect(toasts.filter(t => t.startsWith('Conversation cleared'))).toEqual([expect.stringMatching(/^Conversation cleared – since the branch, it came to 2 requests · \d+% from cache$/)])
 })
 
 test('labels: a Bash first word with $, ; | & or a leading - anywhere in it gives just Bash', () => {

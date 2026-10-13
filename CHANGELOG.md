@@ -2,6 +2,22 @@
 
 All notable changes to Cache Meter, a Claude Code mod. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] – 2026-10-12
+
+Words when they matter – only measured figures, no guessed savings.
+
+### Added
+- **One tool result floods the context:** a toast when a single result in the main conversation is at least 10k tokens and 2 % of the window – with its short label and the estimated size; at most one such toast per 20 seconds.
+- **Plan limits filling up:** a toast once per limit window when a limit is half used and, at the pace since the window started, full before it resets; with the new option `limitNotice` also a notification through your own channel.
+- **/compact note** in the Context tab when the conversation's messages are 20k tokens or more and a quarter of the context – what is re-sent, and that `/compact` summarizes it as one large request; no saving is promised.
+- **MCP servers:** each server's share of every request's context, beside its tools and calls.
+- **After /clear:** what the ended conversation came to – cost, requests, share from the cache, cold re-writes – from the mod's own figures (after `/resume` counted from there; after a reload without the cost).
+- **Quickstart** at the top of the README, and a tip where the pane opens above the prompt: the `/tokens` reply and a line on the Overview say that `/tui fullscreen` puts it beside the chat as a sidebar (from 110 columns; in fullscreen, a wider window) – in a terminal only.
+
+### Changed
+- **Labels:** a credential prefix inside a path part (`backup-ghp_…`), more prefixes (`tskey-`, `ya29.`, `dckr_pat_`, `hvs.` …) and long runs of letters and digits mixed (also base64 with `+ = .`) are masked as `…` in file paths too; a Bash program name like that gives just `Bash`.
+- **Plan limits:** a reset time that moves by under a minute is the same window – the pace no longer starts over, and a `/clear` does not warn about the same window twice.
+
 ## [0.10.0] – 2026-10-12
 
 A café that acts out the cache.
@@ -211,6 +227,7 @@ Changes for Anthropic's plugin directory, whose validation blocked 0.5.1.
 - Pane `/tokens`: per-request token history, totals, plan limits, cost.
 - `/keepwarm`.
 
+[0.11.0]: https://github.com/florian101010/cache-meter/compare/5c80825...feat/v0.11-insights
 [0.10.0]: https://github.com/florian101010/cache-meter/compare/edf5849...c88d13f
 [0.9.0]: https://github.com/florian101010/cache-meter/compare/e830ded...edf5849
 [0.8.0]: https://github.com/florian101010/cache-meter/compare/899ec58...e830ded

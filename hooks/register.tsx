@@ -78,6 +78,14 @@ import {
   stopLabel,
   errorLabel,
   cafeState,
+  isWarnedWindow,
+  dockTip,
+  DOCK_COLUMNS,
+  compactNote,
+  LIMIT_NOTE_PCT,
+  hogNote,
+  isContextHog,
+  shareOfRequest,
   faultTarget,
   progress,
   shineCells,
@@ -195,6 +203,21 @@ let shownUsd: number | null = null
 let usdFrom = 0
 let usdStart = 0
 let shownSaving: number | null = null
+// Option limitNotice, and the plan-limit windows already warned about (kind@resetsAt).
+let limitNotice = false
+let warnedLimits: { kind: string; resetsAt: string }[] = []
+// What ended at a /clear, read at session.end while the session's state may still hold it; shown once
+// the new conversation starts.
+let pendingSummary: string | null = null
+// The conversation's own figures, kept beside $.state so they survive whatever /clear resets first:
+// main requests, their four token counts, cold re-writes; and the session cost when it began (null when
+// unknown – after a reload in a running conversation – then the summary names no cost).
+let convo = { steps: 0, main: { input: 0, read: 0, write: 0, output: 0 } as Usage4, coldCount: 0, coldWritten: 0 }
+let convoUsdBase: number | null = null
+// A resumed or branched conversation is counted from there on: its earlier requests are not in this session.
+let convoFrom: 'start' | 'resume' | 'fork' = 'start'
+// The last large-tool-result toast, so ten large reads in a row raise one word, not ten.
+let lastHogAt = 0
 let savingFrom = 0
 let savingStart = 0
 const FLASH_MS = 450
@@ -204,6 +227,8 @@ const GROW_MS = 450
 const COUNT_MS = 600
 // How long the café brews after a request wrote a fresh cache.
 const BREW_MS = 12_000
+// The shortest gap between two large-tool-result toasts.
+const HOG_GAP_MS = 20_000
 // Opening the dashboard as a sidebar by itself (option autoSidebar): only once the band has been drawn
 // fullscreen, once per load, and never again after the person closed it.
 let autoSidebar = 'auto'
@@ -582,6 +607,7 @@ async function refreshMeasure($: EngineInterface) {
         },
   )
   await checkBudget($)
+  await checkLimits($)
 }
 
 // Option sessionBudget: a toast when the session's cost (Claude Code's figure, as in the band) passes
@@ -591,6 +617,74 @@ async function refreshMeasure($: EngineInterface) {
 async function settleBudget($: EngineInterface) {
   const usd = (await read($, measureA))?.usd ?? null
   budgetWarned = budget <= 0 || usd === null ? 0 : usd >= budget ? 100 : usd >= budget * 0.8 ? 80 : 0
+}
+
+// Option limitNotice: the same words as the toast, as a terminal notification. Not sent ('disabled',
+// 'no-channel', 'no-surface', 'refused') or rejected by a hook: the toast stays the word, and the debug
+// log says why (types: UiNotifyResult).
+async function notify($: EngineInterface, text: string, what: string) {
+  try {
+    const sent = await $.ui.notify(text, { title: 'Cache Meter' })
+    if (!sent.isSent) $.ui.log(`${what} notification not sent: ${sent.reason}`, { to: 'debug' })
+  } catch (error) {
+    // A hook's deny or a failed write (types: $.ui.notify); its words, one cleaned line.
+    $.ui.log(`${what} notification failed: ${cleanLabel(error instanceof Error ? error.message : String(error))}`, { to: 'debug' })
+  }
+}
+
+// A plan limit that fills up before it resets: one toast per limit window (and, with limitNotice, a
+// notification), from the same pace forecast the Overview shows. Only where a person reads it. `quiet`
+// takes the windows that already qualify without a word – after a reload in a running session.
+async function checkLimits($: EngineInterface, quiet = false) {
+  if (!isInteractive) return
+  const measure = await read($, measureA)
+  const now = await $.clock.now()
+  for (const l of measure?.limits ?? []) {
+    if (l.percentUsed < LIMIT_NOTE_PCT || l.resetsAt === undefined) continue
+    const full = limitForecast(measure?.limitStart?.[l.kind], l.percentUsed, now, l.resetsAt)
+    // The window by its reset time, within a minute (as nextLimitStarts tells windows apart) – not by its
+    // start in the session state, which /clear resets while this list (a module variable) stays.
+    if (full === null || isWarnedWindow(warnedLimits, l.kind, l.resetsAt)) continue
+    warnedLimits = [...warnedLimits, { kind: l.kind, resetsAt: l.resetsAt }]
+    if (quiet) continue
+    const name = l.kind === 'spend_limit' ? 'Spend limit' : `${limitName(l.kind)} limit`
+    const text = `${name} at ${l.percentUsed}% – full ≈ ${hhmm(full)} at this pace (resets ${resetLabel(l.resetsAt)})`
+    $.ui.toast(text, { timeoutMs: 10_000 })
+    if (limitNotice) await notify($, text, 'limit')
+  }
+}
+
+// A conversation begins (a fresh session, /clear, /resume, /branch): its figures start at zero, its
+// cost is counted from the session cost now.
+function startConversation(usd: number | null, from: 'start' | 'resume' | 'fork') {
+  convo = { steps: 0, main: { input: 0, read: 0, write: 0, output: 0 }, coldCount: 0, coldWritten: 0 }
+  convoUsdBase = usd
+  convoFrom = from
+}
+
+// What the conversation that just ended came to – only figures it measured, kept in module variables
+// so they do not depend on what /clear resets first (undocumented): its main requests, the share read
+// from the cache, cold re-writes, and its cost as /cost counts it minus the cost when it began. The cost
+// is left out when that start is not known (a reload mid-conversation) or the reading went back.
+async function conversationSummary($: EngineInterface): Promise<string | null> {
+  if (convo.steps === 0) return null
+  const measure = await read($, measureA)
+  let usd: number | null = null
+  if (convoUsdBase !== null) {
+    const now = (await $.session.usage()).cost?.usd ?? null
+    if (now !== null && now >= convoUsdBase) usd = now - convoUsdBase
+  }
+  const hit = hitPct(convo.main)
+  const parts = [
+    usd === null ? null : `${isPlan(measure) ? '≈ ' : ''}$${usd.toFixed(2)}${costLabel(measure, false)}`,
+    `${convo.steps} request${convo.steps === 1 ? '' : 's'}`,
+    hit === null ? null : `${hit}% from cache`,
+    convo.coldCount > 0 ? `${convo.coldCount} cold re-write${convo.coldCount === 1 ? '' : 's'} (${short(convo.coldWritten)} tokens)` : null,
+  ].filter((p): p is string => p !== null)
+
+  const since = convoFrom === 'resume' ? 'since you resumed it, it' : convoFrom === 'fork' ? 'since the branch, it' : 'it'
+
+  return `Conversation cleared – ${since} came to ${parts.join(' · ')}`
 }
 
 async function checkBudget($: EngineInterface) {
@@ -752,11 +846,20 @@ export const register: Register = (on, options) => {
   usdFrom = 0
   usdStart = 0
   shownSaving = null
+  limitNotice = options.limitNotice === 'on'
+  warnedLimits = []
+  pendingSummary = null
+  convo = { steps: 0, main: { input: 0, read: 0, write: 0, output: 0 }, coldCount: 0, coldWritten: 0 }
+  convoUsdBase = null
+  convoFrom = 'start'
+  lastHogAt = 0
   savingFrom = 0
   savingStart = 0
 
   on('session.start', async ($, e, next) => {
     const result = await next(e)
+    // First: everything below that only speaks where a person reads it (checkLimits) asks this.
+    isInteractive = e.isInteractive
     await loadTtlConfig($)
     await measureNow($)
     promptBase = await turnsNow($)
@@ -764,9 +867,17 @@ export const register: Register = (on, options) => {
     // session.start is the first event of every load: a fresh session warns from 0; a reload in a running
     // one (requests already counted, state kept) takes the level reached without a toast.
     budgetWarned = 0
-    if ((await read($, stepsA)).length > 0) await settleBudget($)
+    if ((await read($, stepsA)).length > 0) {
+      await settleBudget($)
+      await checkLimits($, true)
+      // A reload mid-conversation: the session state still holds its figures, but not its starting cost.
+      const t: Totals = await read($, totalsA)
+      convo = { steps: t.mainSteps, main: t.main, coldCount: t.coldCount, coldWritten: t.coldWritten }
+      convoUsdBase = null
+    } else {
+      startConversation((await read($, measureA))?.usd ?? null, 'start')
+    }
     // Hooks also run under -p and the SDK, where nothing draws (overview § Where mods run).
-    isInteractive = e.isInteractive
     if (e.isInteractive) {
       // Returning the promise lets a mock clock await the tick (test § Test a timer).
       $.clock.every(TICK_MS, () => tick($))
@@ -794,7 +905,26 @@ export const register: Register = (on, options) => {
   // /clear, /resume and /branch reset every $.state value and do not fire session.start again
   // (interface § Load a saved value again after /clear). Resume and fork also say how long ago the
   // last response was, so the countdown carries on.
+  // A /clear ends the conversation; what it came to is put together here from the module's own figures
+  // and shown once the new conversation starts. A real exit has no place to show anything.
+  on('session.end', async ($, e, next) => {
+    if (e.reason === 'clear' && isInteractive) {
+      try {
+        pendingSummary = await conversationSummary($)
+      } catch (error) {
+        pendingSummary = null
+        $.ui.log(`summary at /clear failed: ${cleanLabel(error instanceof Error ? error.message : String(error))}`, { to: 'debug' })
+      }
+    }
+
+    return next(e)
+  })
+
   on('classic.SessionStart', { source: ['clear', 'resume', 'fork'] }, async ($, e, next) => {
+    if (e.source === 'clear' && pendingSummary !== null) {
+      $.ui.toast(pendingSummary, { timeoutMs: 12_000 })
+    }
+    pendingSummary = null
     await loadTtlConfig($)
     await measureNow($)
     promptBase = await turnsNow($)
@@ -802,6 +932,7 @@ export const register: Register = (on, options) => {
     // A new transcript: no last main request to compare the next one with.
     lastMain = null
     await settleBudget($)
+    startConversation((await read($, measureA))?.usd ?? null, e.source === 'resume' || e.source === 'fork' ? e.source : 'start')
     if (e.source === 'resume' || e.source === 'fork') lastResumeAt = await $.clock.now()
     if ((e.source === 'resume' || e.source === 'fork') && e.seconds_since_last_response !== undefined) {
       if (e.prompt_cache_likely_expired !== undefined) await recordCheck($, !e.prompt_cache_likely_expired, 'resume')
@@ -883,6 +1014,7 @@ export const register: Register = (on, options) => {
         }
         await update($, stepsA, list => [...list, { ...u, at: startedAt, model: usage.model, ...(kind ? { kind } : {}) }].slice(-STEPS_KEPT))
         await update($, totalsA, t => ({ ...t, main: add(t.main, u), mainSteps: t.mainSteps + 1 }))
+        convo = { ...convo, steps: convo.steps + 1, main: add(convo.main, u) }
         // A warm cache re-written anyway: counted with the pause before it and its most likely cause, in
         // one write – the cause first, so the pane never pairs a new miss with the previous cause.
         if (isUnexpectedWrite(wasCold, before !== null && before.lastAt > 0, u)) {
@@ -908,6 +1040,7 @@ export const register: Register = (on, options) => {
           const cold: ColdWrite = { at: startedAt, written: u.write, cause, idleMs }
           await update($, coldA, list => [...list, cold].slice(-20))
           await update($, totalsA, t => ({ ...t, coldCount: t.coldCount + 1, coldWritten: t.coldWritten + u.write }))
+          convo = { ...convo, coldCount: convo.coldCount + 1, coldWritten: convo.coldWritten + u.write }
           const keep = await read($, keepA)
           // A hint, not an action: switching keepwarm on by itself would spend quota unasked.
           // Only after a pause in this session: after a model switch or a resume, keepwarm could not have helped.
@@ -1027,6 +1160,12 @@ export const register: Register = (on, options) => {
       const label = toolLabel(e.tool, e as unknown as Record<string, unknown>)
       const at = await $.clock.now()
       await update($, toolResultsA, prev => addToolResult(prev ?? NO_RESULTS, e.tool, label, tokens, at))
+      // One large result is worth a word while it can still be acted on (compact, or read less next time).
+      // At most one such toast per HOG_GAP_MS: ten large reads in a row are one word, not ten.
+      if (isInteractive && isContextHog(tokens, (await read($, measureA))?.window ?? 0) && at - lastHogAt >= HOG_GAP_MS) {
+        lastHogAt = at
+        $.ui.toast(hogNote(label, e.tool, tokens), { timeoutMs: 10_000 })
+      }
     }
 
     return result
@@ -1091,6 +1230,7 @@ export const register: Register = (on, options) => {
       return measured
     })
     await checkBudget($)
+    await checkLimits($)
 
     return result
   })
@@ -1157,14 +1297,17 @@ export const register: Register = (on, options) => {
     const pane = { id: PANE, title: 'Tokens & Cache', rows: columns >= 114 ? 26 : 36 }
     // Docked beside a fullscreen transcript from 110 columns (types: CommandPresentation), the pane is a
     // sidebar: Esc only hands the keys back. Above the prompt Esc closes it (closeOnEscape takes only true).
-    const isDock = e.presentation?.isFullscreen === true && columns >= 110
+    const isDock = e.presentation?.isFullscreen === true && columns >= DOCK_COLUMNS
     await $.ui.open(isDock ? pane : { ...pane, closeOnEscape: true })
     $.ui.invalidate('ui.render')
+
+    // Above the prompt in a terminal: say why, and how it gets beside the chat. /tui is the terminal's.
+    const tip = isDock || !(await $.session.surfaces()).includes('terminal') ? null : dockTip(e.presentation?.isFullscreen, columns, 'sentence')
 
     return {
       text: isDock
         ? 'Opened the "Tokens & Cache" sidebar. /tokens again closes it.'
-        : 'Opened the "Tokens & Cache" pane. Esc at an empty prompt or /tokens again closes it.',
+        : `Opened the "Tokens & Cache" pane above the prompt. Esc at an empty prompt or /tokens again closes it.${tip === null ? '' : ` ${tip[0]!.toUpperCase()}${tip.slice(1)}.`}`,
     }
   })
 
@@ -1842,6 +1985,7 @@ export const register: Register = (on, options) => {
     const topLargest = results.largest[0]?.tokens ?? 0
     // Claude Code's own estimate of the conversation, as /context names the category.
     const messagesTokens = map?.categories.find(c => c.name === 'Messages')?.tokens ?? null
+    const compactLine = compactNote(messagesTokens, measure?.tokens ?? null)
     const contextView = (
       <Box flexDirection="column">
         {contextCard}
@@ -1858,6 +2002,11 @@ export const register: Register = (on, options) => {
           </Box>
           {map === null && <Text dimColor>Claude Code reports it after the first answer.</Text>}
           {map !== null && map.categories.slice(0, 8).map(c => itemRow(c.name, c.tokens, topCat, nameW, pctOf(c.tokens)))}
+          {compactLine !== null && (
+            <Text color="warning" wrap="wrap">
+              {compactLine}
+            </Text>
+          )}
           <Box flexDirection="row" justifyContent="space-between">
             <Text dimColor wrap="truncate-end">
               {tier === 'wide' ? 'Exact count: one API request per tool and memory file, as /context' : 'exact: 1 request per tool and file'}
@@ -1909,7 +2058,7 @@ export const register: Register = (on, options) => {
               MCP servers{map.deferredMcpTools > 0 ? ` · ${map.deferredMcpTools} more tools behind tool search, not loaded` : ''}
             </Text>
             {map.mcpServers.length === 0 && <Text dimColor> none loaded</Text>}
-            {map.mcpServers.slice(0, 5).map(m => itemRow(m.name, m.tokens, topServer, nameW, mcpNote(m.tools, m.toolNames, health.toolCalls ?? {}, measure?.prompts == null ? null : measure.prompts - promptBase)))}
+            {map.mcpServers.slice(0, 5).map(m => itemRow(m.name, m.tokens, topServer, nameW, mcpNote(m.tools, m.toolNames, health.toolCalls ?? {}, measure?.prompts == null ? null : measure.prompts - promptBase, shareOfRequest(m.tokens, measure?.tokens ?? null))))}
             <Text wrap="truncate-end">
               <Text dimColor>Skills </Text>
               {map.skills === null ? (
@@ -2127,6 +2276,7 @@ export const register: Register = (on, options) => {
     // Clicks reach a pane only in Claude Code's fullscreen renderer, which captures the mouse
     // (fullscreen › Use the mouse); in the classic renderer the terminal keeps it.
     const canClick = e.viewport?.isFullscreen === true
+    const dockLine = e.props.placement === 'inline' && e.surface === 'terminal' ? dockTip(e.viewport?.isFullscreen, e.viewport?.columns, cols >= 108 ? 'line' : 'short') : null
     const tabButton = (id: typeof tab, name: string, hotkey: string, warn = false) => (
       <Button
         key={`tab-${id}`}
@@ -2205,6 +2355,12 @@ export const register: Register = (on, options) => {
         )}
         {tab === 'context' && contextView}
         {tab === 'health' && healthView}
+        {/* Above the prompt in a terminal, the Overview says how the pane gets beside the chat. */}
+        {tab === 'overview' && dockLine !== null && (
+          <Text dimColor wrap="truncate-end">
+            {dockLine}
+          </Text>
+        )}
         <Box flexDirection="row" justifyContent="space-between">
           {/* Ctrl+X Tab walks the focus band → each open pane → prompt (keybindings › abovePrompt:focus), so
               the pane says when it has the keyboard (Pane.isFocused): digits typed before that reach the chat. */}
@@ -2298,12 +2454,14 @@ function costLabel(measure: Measure | null, isLong: boolean): string {
  * /clear, /resume or /branch. "unused so far" only after a few prompts in that span, so a fresh or
  * resumed session does not call every server idle.
  */
-function mcpNote(tools: number, toolNames: readonly string[] | undefined, calls: Readonly<Record<string, number>>, prompts: number | null): string {
-  if (toolNames === undefined) return ` · ${tools} tools`
+function mcpNote(tools: number, toolNames: readonly string[] | undefined, calls: Readonly<Record<string, number>>, prompts: number | null, share = ''): string {
+  // The server's share of every request's context: its tool definitions go out with each one.
+  const each = share === '' ? '' : ` · ${share} of each request`
+  if (toolNames === undefined) return ` · ${tools} tools${each}`
   const n = serverCalls(toolNames, calls)
   const idle = n === 0 && prompts !== null && prompts >= 3 ? ' – unused so far' : ''
 
-  return ` · ${tools} tools · ${n} call${n === 1 ? '' : 's'}${idle}`
+  return ` · ${tools} tools${each} · ${n} call${n === 1 ? '' : 's'}${idle}`
 }
 
 /** One request column's details for its hover row, padded so it covers the time row beneath the chart. */
