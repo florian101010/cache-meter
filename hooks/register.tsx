@@ -943,7 +943,7 @@ async function registerKeepwarm($: EngineInterface) {
     await $.command.register({
       name: 'keepwarm-auto',
       description: 'Keep the cache warm through every break, pinging by itself (each ping one cache read) – off stops it',
-      argumentHint: '[2h]  longest break covered (10m … 8h)',
+      argumentHint: '[2h | off]  longest break covered (10m … 8h)',
     })
   } catch (error) {
     notRegistered($, 'keepwarm-auto', error)
