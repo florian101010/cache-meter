@@ -2831,7 +2831,7 @@ test('/keepwarm auto: no cold-cache tip while it is on', async ($, on) => {
   expect(toasts.some(t => /^Cache was cold/.test(t))).toBe(false)
 })
 
-test('/keepwarm auto: the band asks no /keepwarm? while auto waits between breaks', async ($, on) => {
+test('/keepwarm auto: the band shows no Keep warm while auto waits between breaks', async ($, on) => {
   const { clock } = world(on)
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   await step($)
@@ -2840,7 +2840,7 @@ test('/keepwarm auto: the band asks no /keepwarm? while auto waits between break
   await clock.advance(101 * 60_000)
   await clock.settle()
   const ui = await $.ui.mount({ surface: 'terminal', ...band(160) })
-  expect(await ui.find({ type: 'Text', text: / · \/keepwarm\?/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Button', key: 'keepwarm-band' })).toBeUndefined()
   await ui.unmount()
 })
 
@@ -3228,7 +3228,7 @@ test('option keepwarm off: band, pane and cold toast suggest no /keepwarm', { op
   await step($)
   await clock.advance(52 * 60_000)
   const bandUi = await $.ui.mount({ surface: 'terminal', ...band(160) })
-  expect(await bandUi.find({ type: 'Text', text: / · \/keepwarm\?/ })).toBeUndefined()
+  expect(await bandUi.find({ type: 'Button', key: 'keepwarm-band' })).toBeUndefined()
   await bandUi.unmount()
   const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
   expect(await ui.find({ type: 'Button', key: 'keepwarm-start' })).toBeUndefined()
@@ -3312,4 +3312,74 @@ test('option keepwarm: switching it on refused – the commands stay unregistere
   expect((await setRow($, 'cache-meter.keepwarm', 'on')).text).toBe('{"deny":"locked"}')
   expect(commands.map(c => c.name)).toEqual(['tokens'])
   expect((await run($, 'keepwarm-auto', '')).text).toBe(OFF_TEXT)
+})
+
+// The band's Keep warm button: only in the last stretch of a warm cache, keepwarm off, nothing in the way.
+test('band: Keep warm shows in the last stretch and starts the same 2h run as the pane', async ($, on) => {
+  const { clock, toasts } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  // Early in the window: no button.
+  await clock.advance(20 * 60_000)
+  let ui = await $.ui.mount({ surface: 'terminal', ...band(160) })
+  expect(await ui.find({ type: 'Button', key: 'keepwarm-band' })).toBeUndefined()
+  await ui.unmount()
+  // About 8 minutes left: the button, beside Compact, with no hotkey.
+  await clock.advance(32 * 60_000)
+  ui = await $.ui.mount({ surface: 'terminal', ...band(160) })
+  const button = await ui.find({ type: 'Button', key: 'keepwarm-band' })
+  expect(button?.props).toMatchObject({ label: 'Keep warm' })
+  expect(button?.props.hotkey).toBeUndefined()
+  expect(await ui.find({ type: 'Button', key: 'compact' })).toBeDefined()
+  await ui.press({ key: 'keepwarm-band' })
+  expect(toasts.some(t => /^Keepwarm on until \d\d:\d\d · pings at ≤ 10 min left$/.test(t))).toBe(true)
+  // Running now: the band marks it, and the button is gone.
+  expect(await ui.find({ type: 'Button', key: 'keepwarm-band' })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: / ↻/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('band: no Keep warm mid-answer, with the pane open, or in a narrow row', async ($, on) => {
+  const { clock } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  await clock.advance(52 * 60_000)
+  const has = async (columns: number, isWorking = false) => {
+    const ui = await $.ui.mount({ surface: 'terminal', ...band(columns, isWorking) })
+    const found = (await ui.find({ type: 'Button', key: 'keepwarm-band' })) !== undefined
+    await ui.unmount()
+    return found
+  }
+  expect(await has(160)).toBe(true)
+  expect(await has(160, true)).toBe(false)
+  // Narrow: it goes first, Compact and the bar stay.
+  expect(await has(70)).toBe(false)
+  const narrow = await $.ui.mount({ surface: 'terminal', ...band(70) })
+  expect(await narrow.find({ type: 'Button', key: 'compact' })).toBeDefined()
+  expect(await narrow.find({ type: 'Text', text: /■/ })).toBeDefined()
+  await narrow.unmount()
+  await run($, 'tokens', '')
+  expect(await has(160)).toBe(false)
+})
+
+test('band: no Keep warm at a 5m TTL', { options: { cacheTtl: '5m' } }, async ($, on) => {
+  const { clock } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  // 30 s left: the last stretch (pings are due at ≤ 1/6 of the TTL), where the button would show at 1h.
+  await clock.advance(4 * 60_000 + 30_000)
+  const ui = await $.ui.mount({ surface: 'terminal', ...band(160) })
+  expect(await ui.find({ type: 'Text', text: /^●/ })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'keepwarm-band' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('band: no Keep warm without a screen', async ($, on) => {
+  const { clock } = world(on)
+  await $.session.start({ surface: null, isInteractive: false, cwd: '/work' })
+  await step($)
+  await clock.advance(52 * 60_000)
+  const ui = await $.ui.mount({ surface: 'terminal', ...band(160) })
+  expect(await ui.find({ type: 'Button', key: 'keepwarm-band' })).toBeUndefined()
+  await ui.unmount()
 })

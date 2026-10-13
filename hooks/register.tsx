@@ -1652,9 +1652,13 @@ export const register: Register = (on, options) => {
     const rewriteText =
       status.kind === 'expired' && cache !== null && rewriteTokens > 0
         ? ` · rewrite ${cache.rewriteUsd !== null ? `≈ $${cache.rewriteUsd.toFixed(2)}` : `≈ ${short(rewriteTokens)} tok`}`
-        : isKeepwarmOn && isLow && !isKeeping && keep.auto === null && isInteractive
-          ? ' · /keepwarm?'
-          : ''
+        : ''
+    // The last stretch of a warm cache, keepwarm off: a button starts the same 2h run as the pane's. Only
+    // where Compact may show (not mid-answer, not with the pane open – it has its own), and only where
+    // keepwarm can start (one-hour TTL). No hotkey: a digit one would also fire from an empty prompt
+    // (reference › Elements), and a press spends quota. Click it, or Ctrl+X Tab and Enter.
+    const canKeepHere = isKeepwarmOn && isInteractive && showButton && isLow && !isKeeping && keep.auto === null && ttl.ms >= HOUR
+    const keepButtonWidth = canKeepHere ? ' [ Keep warm ]'.length : 0
     const base =
       '● cache '.length +
       label.length +
@@ -1695,9 +1699,22 @@ export const register: Register = (on, options) => {
     const showCompact =
       compactText !== '' &&
       base + compactText.length + (showAuto ? autoText.length : 0) + (showRewrite ? rewriteText.length : 0) + (showCost ? costText.length : 0) + minBar < cols
+    // Dropped first of all when the row is narrow.
+    const showKeep =
+      keepButtonWidth > 0 &&
+      base +
+        keepButtonWidth +
+        (showAuto ? autoText.length : 0) +
+        (showRewrite ? rewriteText.length : 0) +
+        (showCost ? costText.length : 0) +
+        (showCompact ? compactText.length : 0) +
+        (showBeat ? beatText.length : 0) +
+        minBar <
+        cols
     const free =
       cols -
       base -
+      (showKeep ? keepButtonWidth : 0) -
       (showAuto ? autoText.length : 0) -
       (showRewrite ? rewriteText.length : 0) -
       (showCost ? costText.length : 0) -
@@ -1745,6 +1762,8 @@ export const register: Register = (on, options) => {
           </Text>
         )}
         {showCompact && <Text color="claude">{compactText}</Text>}
+        {showKeep && <Text> </Text>}
+        {showKeep && <Button key="keepwarm-band" label="Keep warm" onPress={() => pressKeepWarm($, 2 * HOUR)} />}
         {showButton && <Text> </Text>}
         {showButton && <Button key="compact" label="Compact" onPress={() => compactNow($)} />}
       </Box>
