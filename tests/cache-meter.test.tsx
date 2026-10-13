@@ -2671,7 +2671,7 @@ test('/keepwarm auto: listed in the typeahead beside /keepwarm, with its own row
   expect(commands.find(c => c.name === 'keepwarm')?.argumentHint).toMatch(/auto/)
   const auto = commands.find(c => c.name === 'keepwarm-auto')
   expect(auto?.description).toMatch(/every break/)
-  expect(auto?.argumentHint).toMatch(/^\[2h\]/)
+  expect(auto?.argumentHint).toMatch(/^\[2h \| off\]/)
 })
 
 test('/keepwarm auto: pings only after a while away; your prompt ends the break', async ($, on) => {
