@@ -49,6 +49,20 @@ if not (isinstance(h.get('modules'), list) or isinstance(h.get('hooks'), dict)):
 m = json.load(open('.claude-plugin/plugin.json'))
 if 'hooks' in m and m['hooks'] in ('./hooks/hooks.json', 'hooks/hooks.json'):
     sys.exit('plugin.json names hooks/hooks.json, which Claude Code loads by itself')
+# The icon the directory listing reads (plugins-reference › Directory listing fields): a path inside the
+# plugin, an image that exists – validate --strict accepts a missing or non-image file.
+icon = m.get('icon')
+if icon is not None:
+    import os
+    path = os.path.normpath(icon)
+    if path.startswith('..') or os.path.isabs(path):
+        sys.exit(f'icon points outside the plugin: {icon}')
+    try:
+        head = open(path, 'rb').read(8)
+    except OSError:
+        sys.exit(f'icon file missing: {icon}')
+    if head not in (b'\x89PNG\r\n\x1a\n',) and not head.startswith((b'\xff\xd8\xff', b'GIF8', b'RIFF')):
+        sys.exit(f'icon is not a PNG, JPEG, GIF or WebP image: {icon}')
 PY
 
 if ((fail)); then exit 1; fi

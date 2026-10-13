@@ -9,7 +9,7 @@
     {
       "name": "cache-meter",
       "source": "./",
-      "description": "Stop wasting tokens: keeps the prompt cache warm through every break, shows when it expires and what each answer costs.",
+      "description": "Stop wasting tokens: keeps your prompt cache warm through breaks with /keepwarm, shows when it expires and what each answer costs.",
       "category": "productivity",
       "tags": [
         "claude-code-mod",

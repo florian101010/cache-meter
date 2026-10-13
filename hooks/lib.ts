@@ -664,7 +664,8 @@ export function isSecretLikePart(part: string): boolean {
 
 /** A label as it is stored and shown: one line, no control characters, at most 80 characters (the end kept). */
 export function cleanLabel(label: string): string {
-  const one = label.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, ' ')
+  // Control characters, line breaks, and the invisible ones that could reorder or hide text (bidi, zero width).
+  const one = label.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2066-\u2069\ufeff]/g, ' ')
 
   return one.length > 80 ? `…${one.slice(-79)}` : one
 }

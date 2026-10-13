@@ -2,26 +2,30 @@
 
 All notable changes to Cache Meter, a Claude Code mod. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.12.0] – 2026-10-12
+## [0.12.0] – 2026-10-13
 
 Every break, by itself.
 
 ### Added
-- **`/keepwarm auto`** (also `/keepwarm-auto`, listed beside `/keepwarm` in the typeahead): once typed, every break of the session is covered. Each prompt and answer moves the window to *now + 2h* (`/keepwarm auto 4h`, 10m to 8h), so the ping goes out only once you have been away long enough – lunch, a call, a long read; your next prompt ends the break. Opt-in per session, nothing stored; stays on through `/clear`, `/resume` and `/branch`. At most 12 pings per break; a longer break lets the cache go and the next answer covers the next one; a miss, an unanswered or refused ping or a 5-minute TTL switches it off for good, and what happened while you were away is said again at your next prompt. It starts only on your own command (typed, or through Remote Control) – another mod's `$.command.run` is refused. The keepwarm card reads *Keepwarm auto · breaks up to 2h*.
+- **`/keepwarm auto`** (also `/keepwarm-auto`, listed beside `/keepwarm` in the typeahead): once typed, every break of the session is covered. Each prompt and answer moves the window to *now + 2h* (`/keepwarm auto 4h`, 10m to 8h), so the ping goes out only once you have been away long enough – lunch, a call, a long read; your next prompt ends the break. Opt-in per session, nothing written to disk; stays on through `/clear`, `/resume` and `/branch`. At most 12 pings per break; a longer break lets the cache go and the next answer covers the next one; a miss, an unanswered or refused ping or a 5-minute TTL switches it off for good, and what happened while you were away is said again at your next prompt. It starts only on your own command (typed, or through Remote Control) – another mod's `$.command.run` is refused. `/keepwarm-auto off` stops it. The keepwarm card reads *Keepwarm auto · breaks up to 2h*.
+- **Another plugin with `/keepwarm`:** mod commands share one name, and only the first mod in the hook chain answers; a name another plugin registered first is refused for this one (measured with 2.1.296). Cache Meter reads the command list at start, says once when another plugin has `/keepwarm`, passes `/keepwarm` words it doesn't know – and `off` – on to it, and shows its own usage if nobody answers there. `/keepwarm-auto off` always reaches Cache Meter.
+- A Code of Conduct (Contributor Covenant 2.1), linked from README and CONTRIBUTING.
+- The manifest names the plugin's icon for Anthropic's directory listing (field `icon`, the brand icon the plugin already carries); CI checks that the icon exists inside the plugin and is an image.
 
 ### Changed
-- Each command is registered on its own: one that Claude Code refuses (a built-in's name) fails only that one, with a debug-log line.
+- Each command is registered on its own: one that Claude Code refuses (a built-in's name, or a name another plugin registered first) fails only that one, with a debug-log line.
 - `/keepwarm` shows `auto` in its argument hint; the cold-rewrite tip mentions `/keepwarm auto`; `/tokens report` names an auto run.
-- README: `/tokens report` is described as *session stats* – never the conversation – instead of *the whole session*, which read as a copy of the chat (README, banner).
-- A ping's answer may include thinking (a fork takes no output cap), so its cost is described as the cache read plus the answer; README tip for API keys: `promptCacheTtl` `1h` makes `/keepwarm` usable there (one-hour writes 2× instead of 1.25×).
-- A ping is described as 1/20 of a re-write **or less** (1/40 on Opus 5.5) – in the pane hint and the README, matching the banner.
-- `docs/how-it-works.md` ordered by topic – overview, the cache, keeping it warm, the band, the pane, notices, quality – with a contents list; `/keepwarm auto` and *Where the pane sits* have headings of their own. No statement changed.
-- **Another plugin with `/keepwarm`:** mod commands share one name, and only the first mod in the hook chain answers. Cache Meter now finds a second `/keepwarm` (`$.command.list()`), says so once, and passes `/keepwarm` words it doesn't know on to it; `/keepwarm-auto` stays its own.
-- A Code of Conduct (Contributor Covenant 2.1), linked from README and CONTRIBUTING.
-- The manifest names the plugin's icon for Anthropic's directory listing (field `icon`, the brand icon the plugin already carries), and the `/config` help texts of the seven options are short enough to read under a toggle.
-- The plugin's description (`plugin.json`, `marketplace.json`) is one line, as `/plugin` shows it: *Stop wasting tokens: keeps the prompt cache warm through every break, shows when it expires and what each answer costs.*
-- README: **Why you'll want it** at the top, under a new *WHY CACHE METER – Stop wasting tokens* banner ($1.20 re-write against a $0.03 ping) – each feature as the problem it solves, in the reader's words, what Cache Meter does and where.
-- Docs: *sends nothing you have not switched on* – with `/keepwarm auto` on, its pings go out by themselves (README, PRIVACY, SECURITY, AGENTS). The README's `/keepwarm` range is 10m–8h, as the command takes it (it said 30m).
+- The plugin's description (`plugin.json`, `marketplace.json`) is one line, as `/plugin` shows it: *Stop wasting tokens: keeps your prompt cache warm through breaks with /keepwarm, shows when it expires and what each answer costs.* The marketplace line reads *Cache Meter – a Claude Code Mod that stops wasted tokens.*; the author links to floriangrimmer.de.
+- The `/config` help texts of the seven options are short enough to read under a toggle; `cacheTtl` names the model-switch value and what to pick on an API key.
+- Labels: invisible characters (bidi, zero width) are removed too.
+
+### Docs
+- README: **Why you'll want it** at the top, under a new *WHY CACHE METER – Stop wasting tokens* banner ($1.20 re-write against a $0.03 ping) – each feature as the problem it solves, in the reader's words, what Cache Meter does and where; an independent-project line under the badges.
+- *Sends nothing you have not switched on* – with `/keepwarm auto` on, its pings go out by themselves (README, PRIVACY, SECURITY, AGENTS). The README's `/keepwarm` range is 10m–8h, as the command takes it (it said 30m).
+- A ping's cost is the cache read – 1/20 of a re-write or less (1/40 on Opus 5.5 and Sonnet 5.5) – plus its short answer, which may include thinking (a fork takes no output cap). Tip for API keys: `promptCacheTtl` `1h` makes `/keepwarm` usable there where the provider offers one-hour caching (one-hour writes 2× instead of 1.25×); with `auto` on an API key Cache Meter assumes an hour, so set `5m` or `1h`. A subscription's plan usage for cache reads is not documented (no "same ratio").
+- `/tokens report` is described as *session stats* – never the conversation – instead of *the whole session*, which read as a copy of the chat (README, banner); subagent task descriptions are named as included.
+- `docs/how-it-works.md` ordered by topic – overview, the cache, keeping it warm, the band, the pane, notices, quality – with a contents list; `/keepwarm auto` and *Where the pane sits* have headings of their own. The reorder changed no statement; corrections from the review came in with it: the last three cold re-writes (not five), the band's drop order, the subagent TTL controls, sources for stop reasons and the context colour.
+- What stays over `/clear` in the mod's own variables is listed in full (README, PRIVACY, SECURITY), including the auto setting, its last notice and another plugin's name; reasons for failures go to Claude Code's debug log.
 
 ## [0.11.0] – 2026-10-12
 

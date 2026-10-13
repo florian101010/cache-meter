@@ -2,7 +2,7 @@
   "name": "cache-meter",
   "displayName": "Cache Meter",
   "version": "0.12.0",
-  "description": "Stop wasting tokens: keeps the prompt cache warm through every break, shows when it expires and what each answer costs.",
+  "description": "Stop wasting tokens: keeps your prompt cache warm through breaks with /keepwarm, shows when it expires and what each answer costs.",
   "author": {
     "name": "Florian Grimmer",
     "url": "https://www.floriangrimmer.de/"
@@ -32,7 +32,7 @@
     "cacheTtl": {
       "type": "string",
       "title": "Cache TTL",
-      "description": "auto: follows Claude Code's TTL controls and your plan state, else 60m (full order: docs/how-it-works.md). 60m or 5m: fixed – wins over everything.",
+      "description": "auto: Claude Code's TTL controls and your plan state, else the TTL a model switch reported, else 60m – on an API key pick 5m, or set promptCacheTtl to 1h. 60m or 5m: fixed – wins over everything.",
       "options": [
         "auto",
         "60m",

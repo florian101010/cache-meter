@@ -156,8 +156,8 @@ let autoMs: number | null = null
 // What /keepwarm auto did while you were away (a break outlasted it, or it switched off): its toast fades
 // unseen, so the word comes again at your next own prompt.
 let autoNote: string | null = null
-// Another plugin that also registers /keepwarm (mod commands share one name space; registering a name
-// again replaces it, types: $.command.register): its name once found, and whether the person was told.
+// Another plugin that also has /keepwarm: mod commands share one name, and only the first mod in the hook
+// chain answers (events › The order mods run in). Its name once found, and whether the person was told.
 let otherKeepwarm: string | null = null
 let isOtherKeepwarmNoted = false
 let mainRequests = 0
@@ -894,7 +894,8 @@ function notRegistered($: EngineInterface, name: string, error: unknown) {
 // or null. A failed read counts as none and leaves a debug-log line.
 async function otherKeepwarmOwner($: EngineInterface): Promise<string | null> {
   try {
-    const entry = (await $.command.list()).find(c => c.name === 'keepwarm' && c.source === 'plugin' && c.plugin !== undefined && c.plugin !== 'cache-meter')
+    // CommandInfo.plugin is the manifest name (measured: no @marketplace suffix); cut at @ in case one comes.
+    const entry = (await $.command.list()).find(c => c.name === 'keepwarm' && c.source === 'plugin' && c.plugin !== undefined && c.plugin.split('@')[0] !== 'cache-meter')
 
     return entry?.plugin ?? null
   } catch (error) {
@@ -904,18 +905,31 @@ async function otherKeepwarmOwner($: EngineInterface): Promise<string | null> {
   }
 }
 
-async function checkOtherKeepwarmLater($: EngineInterface) {
-  const name = await otherKeepwarmOwner($)
-  if (name !== null) await noteOtherKeepwarm($, name)
-}
-
 // Two mods with /keepwarm: only the first in the hook chain answers it (events › The order mods run in),
 // and which one that is depends on the load order – said once, where the person reads it.
 async function noteOtherKeepwarm($: EngineInterface, name: string) {
   otherKeepwarm = cleanLabel(name)
   if (!isInteractive || isOtherKeepwarmNoted) return
   isOtherKeepwarmNoted = true
-  $.ui.toast(`/keepwarm is also a command of ${otherKeepwarm} – only one of the two answers it. /keepwarm-auto is always Cache Meter's.`, { timeoutMs: 15_000 })
+  $.ui.toast(`/keepwarm is also a command of ${otherKeepwarm} – which one answers depends on the load order. Cache Meter's own: /keepwarm-auto, and /keepwarm-auto off to stop it.`, { timeoutMs: 15_000 })
+}
+
+// Passes a /keepwarm on to the other plugin. Nobody answering ends in Claude Code's developer line
+// ("… no command.run hook answered it …", measured with 2.1.296; types: a run no hook answers "says so as
+// its output") or, where nothing is beneath, a rejection – either way the person gets `fallback` instead.
+async function passKeepwarmOn(
+  e: Parameters<Parameters<Register>[0]>[1],
+  next: (e: never) => Promise<{ text?: string }>,
+  fallback: string,
+): Promise<{ text?: string }> {
+  try {
+    const result = await next(e as never)
+    if (typeof result.text !== 'string' || /no command\.run hook answered/.test(result.text)) return { text: fallback }
+
+    return result
+  } catch {
+    return { text: fallback }
+  }
 }
 
 // Keepwarm sends requests that cost, so it starts only on the person's own word: typed at the terminal
@@ -1011,12 +1025,13 @@ export const register: Register = (on, options) => {
       // Soon after start, once the band has been drawn and said whether the session is fullscreen.
       $.clock.after(2_000, () => maybeAutoOpen($))
     }
-    // A /keepwarm of another plugin registered before this one shows in the list now; one registered after
-    // replaces this one's entry, so the list is read once more a few seconds after start.
+    // Another plugin's /keepwarm registered before this one shows in the list now. One registering later is
+    // refused, not this one replaced – measured with 2.1.296 ("refused: the plugin … registered it already");
+    // the types' "registering a name again replaces it" holds within one plugin – so later is not looked for.
     const otherBefore = await otherKeepwarmOwner($)
-    // Each command on its own, written out so `claude plugin validate` names them as the mod's own: one
-    // that Claude Code refuses (a built-in's name, api › Add a command) fails only that one, and the debug
-    // log says which. Without the commands the band still works.
+    // Each command on its own, written out (validate then names tokens and keepwarm-auto as the mod's own –
+    // measured, not documented): one Claude Code refuses – a built-in's name (api › Add a command), or one
+    // another plugin registered first (measured) – fails only that one, and the debug log says which.
     try {
       await $.command.register({
         name: 'tokens',
@@ -1045,7 +1060,6 @@ export const register: Register = (on, options) => {
       notRegistered($, 'keepwarm-auto', error)
     }
     if (otherBefore !== null) await noteOtherKeepwarm($, otherBefore)
-    else if (e.isInteractive) $.clock.after(5_000, () => checkOtherKeepwarmLater($))
 
     return result
   })
@@ -1510,20 +1524,31 @@ export const register: Register = (on, options) => {
 
   on('command.run', { command: 'keepwarm' }, async ($, e, next) => {
     const c = parseKeepCommand(e.args)
-    // Words this /keepwarm does not know may be the other plugin's (its own subcommands): passed on to it,
-    // when there is one; otherwise the usage.
-    if (c === undefined && otherKeepwarm !== null) return next(e)
-    if (c === undefined) return { text: 'Usage: /keepwarm [10m … 8h | auto [10m … 8h] | off] – 2h when left out.' }
-    if (c.mode === 'off') return { text: await stopKeepWarm($) }
-    if (!isPersonsCommand(e)) return { text: NOT_YOURS }
+    // Another plugin's /keepwarm, still there (it may have gone since the start)?
+    if (otherKeepwarm !== null) otherKeepwarm = await otherKeepwarmOwner($)
+    const usage = 'Usage: /keepwarm [10m … 8h | auto [10m … 8h] | off] – 2h when left out.'
+    // Words this /keepwarm does not know may be the other plugin's own subcommands: passed on to it.
+    if (c === undefined) return otherKeepwarm !== null ? passKeepwarmOn(e, next as never, usage) : { text: usage }
+    if (c.mode === 'off') {
+      const own = await stopKeepWarm($)
+      if (otherKeepwarm === null) return { text: own }
+      // Off for both: the other plugin's keepwarm would ping on otherwise.
+      const theirs = await passKeepwarmOn(e, next as never, '')
 
-    return { text: c.mode === 'auto' ? await startAuto($, c.ms) : await startKeepWarm($, c.ms) }
+      return { text: theirs.text ? `${own}\n${theirs.text}` : own }
+    }
+    if (!isPersonsCommand(e)) return { text: NOT_YOURS }
+    const text = c.mode === 'auto' ? await startAuto($, c.ms) : await startKeepWarm($, c.ms)
+
+    return { text: otherKeepwarm !== null ? `${text}\n(This is Cache Meter's keepwarm – ${otherKeepwarm} has a /keepwarm too.)` : text }
   })
 
   // The same as /keepwarm auto, as a command of its own so the typeahead lists it beside /keepwarm.
   on('command.run', { command: 'keepwarm-auto' }, async ($, e) => {
+    // Its own name: `off` here always reaches Cache Meter, whichever mod answers /keepwarm first.
+    if (e.args.trim().toLowerCase() === 'off') return { text: await stopKeepWarm($) }
     const c = parseKeepCommand(`auto ${e.args}`)
-    if (c === undefined || c.mode !== 'auto') return { text: 'Usage: /keepwarm-auto [10m … 8h] – breaks up to 2h when left out. /keepwarm off stops it.' }
+    if (c === undefined || c.mode !== 'auto') return { text: 'Usage: /keepwarm-auto [10m … 8h | off] – breaks up to 2h when left out.' }
     if (!isPersonsCommand(e)) return { text: NOT_YOURS }
 
     return { text: await startAuto($, c.ms) }

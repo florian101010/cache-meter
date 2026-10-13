@@ -76,6 +76,6 @@ Code conventions enforced by `validate`: helpers that take `$` are top-level fun
 | `types/index.d.ts` | type contract of every `$.state` value |
 | `tests/cache-meter.test.tsx` | tests for `claude plugin test` |
 | `docs/how-it-works.md` | events, state, thresholds, cold-rewrite rule, keepwarm algorithm, with doc references |
-| `README.md`, `CHANGELOG.md`, `CONTRIBUTING.md`, `SECURITY.md`, `PRIVACY.md` | user docs, history, contribution rules, what the mod can reach, what it reads, keeps and sends |
+| `README.md`, `CHANGELOG.md`, `CONTRIBUTING.md`, `SECURITY.md`, `PRIVACY.md`, `CODE_OF_CONDUCT.md` | user docs, history, contribution rules, what the mod can reach, what it reads, keeps and sends |
 | `llms.txt` | machine-readable index of the repository |
 | `.github/workflows/ci.yml`, `.github/scripts/directory-checks.sh`, `.github/workflows/upstream.yml` | CI: validate, tests, parameter guard, directory file checks; weekly check against new Claude Code releases and the docs |

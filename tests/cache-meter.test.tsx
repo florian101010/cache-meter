@@ -44,6 +44,7 @@ import {
   toolDiff,
   toolLabel,
   isSecretLikePart,
+  cleanLabel,
   isSameReset,
   isWarnedWindow,
   dockTip,
@@ -153,6 +154,8 @@ function world(on: On, opts: { env?: Record<string, string>; forkRead?: number; 
     surfaces: ['terminal'] as string[],
     // What $.command.list() answers: the typeahead's commands (another plugin's /keepwarm, say).
     commandList: [] as { name: string; description: string; source: string; plugin?: string }[],
+    // Whether $.command.list() rejects.
+    commandListFails: false,
     // Run while a ping is in flight (a hook's $ has no $.turn.step: the test hands in its own).
     duringFork: null as (() => Promise<unknown>) | null,
     // Whether the next tool call is refused (a deny from a hook beneath).
@@ -198,7 +201,10 @@ function world(on: On, opts: { env?: Record<string, string>; forkRead?: number; 
     return { value: { ...v.value, context, cost: { usd: next.usd } } } as never
   })
   on('turn.start', ($, e) => ({ turnId: e.turnId }))
-  on('command.list', () => ({ value: next.commandList }) as never)
+  on('command.list', () => {
+    if (next.commandListFails) throw new Error('not now')
+    return { value: next.commandList } as never
+  })
   on('session.surfaces', () => ({ value: next.surfaces }) as never)
   // As core answers: `text` is the result as the model reads it (types: ToolCallResult); or a deny from beneath.
   on('tool.call', () => (next.deny ? { deny: 'refused' } : { result: 'ok', ...(next.toolText === null ? {} : { text: next.toolText }) }) as never)
@@ -3077,16 +3083,7 @@ test('another /keepwarm registered first: said once, at start', async ($, on) =>
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   await clock.advance(10_000)
   const notes = toasts.filter(t => t.startsWith('/keepwarm is also a command of'))
-  expect(notes).toEqual(['/keepwarm is also a command of cache-tax – only one of the two answers it. /keepwarm-auto is always Cache Meter\'s.'])
-})
-
-test('another /keepwarm registered later: found a few seconds after start', async ($, on) => {
-  const { toasts, next, clock } = world(on)
-  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
-  expect(toasts.some(t => t.startsWith('/keepwarm is also'))).toBe(false)
-  next.commandList = [OTHER_KEEPWARM]
-  await clock.advance(5_100)
-  expect(toasts.filter(t => t.startsWith('/keepwarm is also a command of cache-tax'))).toHaveLength(1)
+  expect(notes).toEqual(['/keepwarm is also a command of cache-tax – which one answers depends on the load order. Cache Meter\'s own: /keepwarm-auto, and /keepwarm-auto off to stop it.'])
 })
 
 test('no other /keepwarm, or its own entry, or no screen: no word', async ($, on) => {
@@ -3115,6 +3112,71 @@ test('/keepwarm words it does not know go on to the other plugin; without one, t
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   expect((await run($, 'keepwarm', 'always')).text).toBe('other plugin: always')
   expect((await run($, 'keepwarm', 'status')).text).toBe('other plugin: status')
-  // Its own words it still answers itself.
-  expect((await run($, 'keepwarm', 'off')).text).toMatch(/^Keepwarm off/)
+})
+
+test('with another /keepwarm: its own words it answers itself, off reaches both, /keepwarm-auto off always stops it', async ($, on) => {
+  const { next, clock, forks } = world(on)
+  on('command.run', ($, e) => ({ text: `other plugin: ${(e as { args: string }).args}` }) as never)
+  next.commandList = [OTHER_KEEPWARM]
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  const started = (await run($, 'keepwarm', '2h')).text ?? ''
+  expect(started).toMatch(/^Keepwarm until/)
+  expect(started).toMatch(/This is Cache Meter's keepwarm – cache-tax has a \/keepwarm too\.\)$/)
+  expect((await run($, 'keepwarm', 'auto')).text).toMatch(/^Keepwarm auto on/)
+  const off = (await run($, 'keepwarm', 'off')).text ?? ''
+  expect(off).toMatch(/^Keepwarm auto off \(0 pings/)
+  expect(off).toMatch(/\nother plugin: off$/)
+  await run($, 'keepwarm', 'auto')
+  expect((await run($, 'keepwarm-auto', 'off')).text).toMatch(/^Keepwarm auto off/)
+  await clock.advance(51 * 60_000)
+  await clock.settle()
+  expect(forks).toHaveLength(0)
+})
+
+test('with another /keepwarm: nobody answering beneath gives the usage, not a developer line', async ($, on) => {
+  const { next } = world(on)
+  // Claude Code's own line when no hook answers (measured with 2.1.296).
+  on('command.run', () => ({ text: 'cache-tax registered /keepwarm but no command.run hook answered it: add on("command.run", …) to the plugin.' }) as never)
+  next.commandList = [OTHER_KEEPWARM]
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  expect((await run($, 'keepwarm', 'always')).text).toMatch(/^Usage: \/keepwarm/)
+})
+
+test('with another /keepwarm: nothing at all beneath gives the usage', async ($, on) => {
+  const { next } = world(on)
+  next.commandList = [OTHER_KEEPWARM]
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  expect((await run($, 'keepwarm', 'always')).text).toMatch(/^Usage: \/keepwarm/)
+})
+
+test('the other /keepwarm gone mid-session: the usage again; headless it still passes on', async ($, on) => {
+  const { next } = world(on)
+  on('command.run', ($, e) => ({ text: `other plugin: ${(e as { args: string }).args}` }) as never)
+  next.commandList = [OTHER_KEEPWARM]
+  await $.session.start({ surface: null, isInteractive: false, cwd: '/work' })
+  expect((await run($, 'keepwarm', 'status')).text).toBe('other plugin: status')
+  next.commandList = []
+  expect((await run($, 'keepwarm', 'status')).text).toMatch(/^Usage: \/keepwarm/)
+})
+
+test('a command list that cannot be read: all three commands still registered, no word', async ($, on) => {
+  const { commands, toasts, next } = world(on)
+  next.commandListFails = true
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  expect(commands.map(c => c.name)).toEqual(['tokens', 'keepwarm', 'keepwarm-auto'])
+  expect(toasts.some(t => t.startsWith('/keepwarm is also'))).toBe(false)
+})
+
+test('its own entry with a marketplace suffix is still its own', async ($, on) => {
+  const { toasts, next } = world(on)
+  next.commandList = [{ name: 'keepwarm', description: 'mine', source: 'plugin', plugin: 'cache-meter@cache-meter' }]
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  expect(toasts.some(t => t.startsWith('/keepwarm is also'))).toBe(false)
+})
+
+test('labels: & and quotes in a Bash first word give just Bash; invisible characters are cleaned', () => {
+  expect(toolLabel('Bash', { command: 'a&&/bin/rm -rf x' })).toBe('Bash')
+  expect(toolLabel('Bash', { command: '"/usr/bin/x" y' })).toBe('Bash')
+  expect(cleanLabel('evil\u202eplugin\u200b')).toBe('evil plugin ')
 })
