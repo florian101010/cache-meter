@@ -2,6 +2,16 @@
 
 All notable changes to Cache Meter, a Claude Code mod. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.2] – 2026-10-29
+
+For the review of Anthropic's plugin directory: 0.12.1 passed the automatic checks and is held for a reviewer. No change in behaviour.
+
+### Changed
+- `MOD_ANSWERS_PERMISSION`: the `/keepwarm` hook calls `next(e)` itself and hands the answer to a helper (`answerOrFallback`), so its event visibly goes on unchanged; no helper declares parameters named like a hook's (`e`, `next`) any more, and no `next` is cast.
+
+### Docs
+- README *What leaves your machine, call by call*: what `$.ui.notify` sends (two fixed texts, through Claude Code's own notification channel), `$.model.fork` and **Count exactly**; that `$.settings.read()` is read for `promptCacheTtl` only and `$.session.turns()` is a count, neither sent anywhere; that the CI scripts in `.github/` only read the mod's files and run on GitHub, the credential prefixes in `lib.ts` only hide such strings in labels, and `tests/` holds the test kit's calls.
+
 ## [0.12.1] – 2026-10-29
 
 For Anthropic's plugin directory, whose check failed 0.12.0. No change you would notice, except that a failed animation file now shows Claude Code's own dimmed error line in its place.
@@ -270,6 +280,7 @@ Changes for Anthropic's plugin directory, whose validation blocked 0.5.1.
 - Pane `/tokens`: per-request token history, totals, plan limits, cost.
 - `/keepwarm`.
 
+[0.12.2]: https://github.com/florian101010/cache-meter/compare/cache-meter--v0.12.1...cache-meter--v0.12.2
 [0.12.1]: https://github.com/florian101010/cache-meter/compare/cache-meter--v0.12.0...cache-meter--v0.12.1
 [0.12.0]: https://github.com/florian101010/cache-meter/compare/c369531...cache-meter--v0.12.0
 [0.11.0]: https://github.com/florian101010/cache-meter/compare/5c80825...ddd6407
