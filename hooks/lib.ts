@@ -1,7 +1,7 @@
 // Pure helpers of cache-meter: no `$`, so the tests call them directly.
 
 import type { CafeState } from './cafe'
-import type { CacheInfo, ContextMap, Limit, LimitStart, ToolResults, Usage4 } from '../types'
+import type { CacheInfo, ContextMap, Limit, LimitStart, ToolResults, Usage4 } from './state'
 
 export const HOUR = 3_600_000
 export const FIVE_MIN = 300_000
@@ -919,14 +919,6 @@ export function dockTip(isFullscreen: boolean | undefined, columns: number | und
   if (isFullscreen === true && columns !== undefined && columns < DOCK_COLUMNS) {
     return size === 'short' ? `tip: ${DOCK_COLUMNS}+ columns put this beside the chat` : `tip: a window ${DOCK_COLUMNS} columns or wider puts this beside the chat as a sidebar`
   }
-
-  return null
-}
-
-/** Which animation a failed surface module is (types: UiFaultInput.module, its path under the plugin's folder). */
-export function faultTarget(module: string): 'cafe' | 'spin' | null {
-  if (/(^|\/)cafe\.tsx$/.test(module)) return 'cafe'
-  if (/(^|\/)spin\.tsx$/.test(module)) return 'spin'
 
   return null
 }

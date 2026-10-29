@@ -121,7 +121,8 @@ hooks/register.tsx                all hooks: data sources, band, pane, commands,
 hooks/lib.ts                      pure functions without $ (TTL derivation, formatting) – unit-testable
 hooks/spin.tsx                    the turning keepwarm arrow, a surface module (Client) without $ – not in hooks.json
 hooks/cafe.tsx                    the café animation, a surface module (Client) without $ – not in hooks.json
-types/index.d.ts                  type contract of every $.state value
+types/index.d.ts                  type contract of every $.state value (imported by no module)
+hooks/state.ts                    value types derived from it, imported by the modules
 tests/cache-meter.test.tsx        tests run by `claude plugin test`
 docs/how-it-works.md              design and data flow
 AGENTS.md                         guide for coding agents: install, verify, test, change

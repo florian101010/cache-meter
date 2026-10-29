@@ -2,6 +2,22 @@
 
 All notable changes to Cache Meter, a Claude Code mod. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.1] – 2026-10-29
+
+For Anthropic's plugin directory, whose check failed 0.12.0. No change you would notice, except that a failed animation file now shows Claude Code's own dimmed error line in its place.
+
+### Fixed
+- `MOD_HOOKS_UNKNOWN_EVENT`: the `ui.fault` hook is gone – the directory's list of events doesn't hold it yet. A café or arrow file that fails shows Claude Code's dimmed error line in its place; the rest of the pane draws as before.
+- `MOD_IMPORT_DYNAMIC_COMPUTED`: the café and the turning keepwarm arrow are written as `h('Client', { module: './cafe.tsx', … })` with the module as one fixed string, so the directory can read which file loads there; whether a surface draws them comes from `e.surface` (terminal, Desktop).
+- `MOD_SOURCE_UNCERTAIN`: no module imports `types/index.d.ts` any more; `hooks/state.ts` derives the value types from its `PluginState`.
+- `MOD_CONFIG_SET_UNREAD`: the test mod that changes the option `keepwarm` names each row as fixed text.
+
+### Changed
+- The `config.set` hook passes every change on unchanged (`return next(e)`) and applies the option `keepwarm` a second later from the value the row then holds (`$.config.list`) – a refused change keeps the old value.
+
+### Docs
+- README: what `config.set` does, and that the calls a scan finds in `tests/` (running commands and tools, submitting prompts, setting the option) are the test kit's, not the mod's.
+
 ## [0.12.0] – 2026-10-13
 
 Every break, by itself.
@@ -254,6 +270,7 @@ Changes for Anthropic's plugin directory, whose validation blocked 0.5.1.
 - Pane `/tokens`: per-request token history, totals, plan limits, cost.
 - `/keepwarm`.
 
+[0.12.1]: https://github.com/florian101010/cache-meter/compare/cache-meter--v0.12.0...cache-meter--v0.12.1
 [0.12.0]: https://github.com/florian101010/cache-meter/compare/c369531...cache-meter--v0.12.0
 [0.11.0]: https://github.com/florian101010/cache-meter/compare/5c80825...ddd6407
 [0.10.0]: https://github.com/florian101010/cache-meter/compare/edf5849...c88d13f

@@ -19,7 +19,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { AgentUse, CacheInfo, ColdWrite, ContextMap, Health, KeepWarm, Measure, ServerToolCall, Step, ToolResults, Totals, TtlConfig, Usage4 } from '../types'
+import type { AgentUse, CacheInfo, ColdWrite, ContextMap, Health, KeepWarm, Measure, ServerToolCall, Step, ToolResults, Totals, TtlConfig, Usage4 } from './state'
 import {
   COLD_MIN,
   FIVE_MIN,
@@ -89,7 +89,6 @@ import {
   hogNote,
   isContextHog,
   shareOfRequest,
-  faultTarget,
   progress,
   shineCells,
   tween,
@@ -197,10 +196,6 @@ let openTurns: Record<string, { usd: number | null; requests: number }> = {}
 let seat: 'dock' | 'inline' | null = null
 // Option animations: the café under the request chart and the countdown's flash at each new minute.
 let animations = true
-// The café's Client failed on a surface (ui.fault): left out from then on, the pane drawn without it.
-let isCafeBroken = false
-// The same for the turning keepwarm arrow: a still ↻ from then on.
-let isSpinBroken = false
 // When a request last wrote a fresh cache (first or cold): the café brews for a moment.
 let brewedAt: number | null = null
 // The countdown's minute as last drawn, and until when its digits flash after it changed.
@@ -951,6 +946,30 @@ async function registerKeepwarm($: EngineInterface) {
   if (otherBefore !== null) await noteOtherKeepwarm($, otherBefore)
 }
 
+// The option keepwarm as its /config row holds it now (types: $.config.list, every enabled plugin's
+// userConfig rows): on registers the two commands, off stops a running keepwarm and hides them, since a
+// command cannot be unregistered (types: $.command has list, run, register).
+async function applyKeepwarmOption($: EngineInterface) {
+  try {
+    const row = (await $.config.list()).find(r => r.key.endsWith('.keepwarm') && r.provider.plugin.split('@')[0] === $.plugin.name)
+    if (row === undefined) return
+    const isOn = row.value !== 'off'
+    if (isOn === isKeepwarmOn) return
+    isKeepwarmOn = isOn
+    if (isOn) await registerKeepwarm($)
+    else {
+      const keep = await read($, keepA)
+      const text = await stopKeepWarm($)
+      if (keep.until !== null || keep.auto !== null) $.ui.toast(text)
+    }
+    // The typeahead's cached answers go next turn (types: $.ui.invalidate); the band and pane redraw now.
+    $.ui.invalidate('command.describe')
+    $.ui.invalidate('ui.render')
+  } catch (error) {
+    $.ui.log(`option keepwarm not applied: ${cleanLabel(error instanceof Error ? error.message : String(error))}`, { to: 'debug' })
+  }
+}
+
 // Passes a /keepwarm on to the other plugin. Nobody answering ends in Claude Code's developer line
 // ("… no command.run hook answered it …", measured with 2.1.296; types: a run no hook answers "says so as
 // its output") or, where nothing is beneath, a rejection – either way the person gets `fallback` instead.
@@ -1005,8 +1024,6 @@ export const register: Register = (on, options) => {
   lastResumeAt = null
   openTurns = {}
   animations = options.animations !== 'off'
-  isCafeBroken = false
-  isSpinBroken = false
   brewedAt = null
   shownMinute = null
   flashUntil = 0
@@ -1500,19 +1517,6 @@ export const register: Register = (on, options) => {
     }
   })
 
-  // A surface module failed (did not load, draw or run): the engine draws the pane again by itself,
-  // and the pane leaves that Client out from then on (reference › ui.fault).
-  on('ui.fault', async ($, e, next) => {
-    // Per module (types: UiFaultInput.module, the path under the plugin's folder): a failed arrow
-    // leaves the café alone and the other way round. Each fault's reason goes to the debug log.
-    const target = faultTarget(e.module)
-    if (target === 'cafe') isCafeBroken = true
-    if (target === 'spin') isSpinBroken = true
-    $.ui.log(`${e.module} failed (${e.phase}): ${e.reason}`, { to: 'debug' })
-
-    return next(e)
-  })
-
   // The person closed the dashboard (its close mark or ctrl+x x): it stays closed this session.
   on('ui.close', async ($, e, next) => {
     if (e.id === PANE && e.origin.kind === 'person') isDismissed = true
@@ -1542,32 +1546,18 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
-  // Option keepwarm switched in /config: on registers the two commands now; off stops a running keepwarm
-  // and hides them, since a command cannot be unregistered (types: $.command has list, run, register).
-  // Whether a /config change also reloads the module is not documented and not measured – with a reload,
-  // register and session.start run again with the new value, which ends in the same place.
-  on('config.set', async ($, e, next) => {
-    const result = await next(e)
-    // Only this plugin's own row, and only once written. The row's owner is `provider` (types: pinned);
-    // without one – the test kit passes key and value only – the key's `<plugin>.` part names it.
+  // Option keepwarm switched in /config: the change passes unchanged (`return next(e)`), and a moment later
+  // the value the row holds then is applied – the types don't say when the writer runs relative to the
+  // hook's return, and a refused change keeps the old value. Whether a /config change also reloads the
+  // module is not documented and not measured; with a reload, register and session.start run again with
+  // the new value, which ends in the same place.
+  on('config.set', ($, e, next) => {
+    // The row's owner is `provider` (types: pinned); without one – the test kit passes key and value
+    // only – the key's `<plugin>.` part names it.
     const owner = e.provider?.plugin ?? e.key.slice(0, e.key.lastIndexOf('.'))
-    if (result.deny !== undefined || !e.key.endsWith('.keepwarm') || owner.split('@')[0] !== $.plugin.name) return result
-    try {
-      isKeepwarmOn = result.value !== 'off'
-      if (isKeepwarmOn) await registerKeepwarm($)
-      else {
-        const keep = await read($, keepA)
-        const text = await stopKeepWarm($)
-        if (keep.until !== null || keep.auto !== null) $.ui.toast(text)
-      }
-      // The typeahead's cached answers go next turn (types: $.ui.invalidate); the band and pane redraw now.
-      $.ui.invalidate('command.describe')
-      $.ui.invalidate('ui.render')
-    } catch (error) {
-      $.ui.log(`option keepwarm not applied: ${cleanLabel(error instanceof Error ? error.message : String(error))}`, { to: 'debug' })
-    }
+    if (e.key.endsWith('.keepwarm') && owner.split('@')[0] === $.plugin.name) $.clock.after(1_000, () => applyKeepwarmOption($))
 
-    return result
+    return next(e)
   })
 
   // Option keepwarm off: this plugin's two commands leave the typeahead and /help; typed in full they still
@@ -1784,7 +1774,9 @@ export const register: Register = (on, options) => {
     // Raster (colored cells) is drawn by the terminal only (reference › Elements); elsewhere text.
     const Raster = 'Raster' in elements ? elements.Raster : null
     // Client (a surface module's region) is drawn by the terminal and the Desktop app (reference › Elements).
-    const Client = 'Client' in elements ? elements.Client : null
+    // Written as h('Client', …) with its module as one fixed string, the form the directory reads off the
+    // source to know which file loads there.
+    const hasClient = e.surface === 'terminal' || e.surface === 'desktop'
     const steps = await read($, stepsA)
     const totals: Totals = await read($, totalsA)
     const measure = await read($, measureA)
@@ -1925,13 +1917,13 @@ export const register: Register = (on, options) => {
     // --- keepwarm -----------------------------------------------------------------------------
     const pingIn = isWarm ? Math.max(0, remaining - ttl.ms * PING_SHARE) : 0
     const isAutoOn = keep.auto !== null
-    const isSpinning = isKeeping && animations && Client !== null && !isSpinBroken
+    const isSpinning = isKeeping && animations && hasClient
     const keepCard = (
       <Box borderStyle="round" borderColor="claude" borderDimColor={!isKeeping && !isAutoOn} paddingX={1} flexDirection="column">
         <Box flexDirection="row" justifyContent="space-between">
           {/* While keepwarm runs the arrow turns (option animations), in a Client of its own. */}
           <Box flexDirection="row" flexShrink={1}>
-            {isSpinning && Client !== null && <Client key="keep-spin" module="./spin.tsx" width={1} />}
+            {isSpinning && h('Client', { key: 'keep-spin', module: './spin.tsx', width: 1 })}
             <Text wrap="truncate-end">
               <Text color="claude" bold>
                 {`${isSpinning ? ' ' : '↻ '}Keepwarm${isAutoOn ? ' auto' : isKeeping ? ' on' : ''}`}
@@ -2593,7 +2585,7 @@ export const register: Register = (on, options) => {
 
     // The café under the request chart (option animations): only docked, where the pane has the room's
     // height; the outer Box takes it, and the café grows into what the cards leave (BoxProps.flexGrow).
-    const showCafe = animations && !isCafeBroken && Client !== null && e.props.placement === 'dock' && tab === 'overview'
+    const showCafe = animations && hasClient && e.props.placement === 'dock' && tab === 'overview'
 
     return (
       <Box flexDirection="column" minHeight={showCafe ? e.props.scroll.bodyRows : undefined}>
@@ -2642,14 +2634,13 @@ export const register: Register = (on, options) => {
             </Box>
           ))}
         {tab === 'overview' && requestsCard}
-        {showCafe && Client !== null && (
-          <Client
-            key="cafe"
-            module="./cafe.tsx"
-            props={{ state: cafeState(status.kind, isLow, Object.keys(openTurns).length > 0, heartbeat !== null && heartbeat.until > now, brewedAt !== null && now - brewedAt < BREW_MS) }}
-            flexGrow={1}
-          />
-        )}
+        {showCafe &&
+          h('Client', {
+            key: 'cafe',
+            module: './cafe.tsx',
+            props: { state: cafeState(status.kind, isLow, Object.keys(openTurns).length > 0, heartbeat !== null && heartbeat.until > now, brewedAt !== null && now - brewedAt < BREW_MS) },
+            flexGrow: 1,
+          })}
         {tab === 'context' && contextView}
         {tab === 'health' && healthView}
         {/* Above the prompt in a terminal, the Overview says how the pane gets beside the chat. */}
