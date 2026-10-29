@@ -1,6 +1,7 @@
 // Pure helpers of cache-meter: no `$`, so the tests call them directly.
 
-import type { CacheInfo, ContextMap, Limit, Usage4 } from '../types'
+import type { CafeState } from './cafe'
+import type { CacheInfo, ContextMap, Limit, LimitStart, ToolResults, Usage4 } from '../types'
 
 export const HOUR = 3_600_000
 export const FIVE_MIN = 300_000
@@ -116,13 +117,6 @@ export function hhmm(ms: number): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
-/** Cells of each segment of a stacked bar whose full width stands for `top` tokens. */
-export function stack(u: Usage4, top: number, width: number): { read: number; write: number; input: number } {
-  if (top <= 0 || width <= 0) return { read: 0, write: 0, input: 0 }
-  const cell = (n: number) => (n > 0 ? Math.max(1, Math.round((n / top) * width)) : 0)
-
-  return { read: cell(u.read), write: cell(u.write), input: cell(u.input) }
-}
 
 /** `/keepwarm` argument → milliseconds of warming; `null` turns it off, `undefined` is unreadable. */
 export function parseKeepWarm(args: string): number | null | undefined {
@@ -136,6 +130,33 @@ export function parseKeepWarm(args: string): number | null | undefined {
   if (ms < 10 * 60_000 || ms > 8 * HOUR) return undefined
 
   return ms
+}
+
+/**
+ * `/keepwarm` arguments: a fixed run (`2h`, `30m`, nothing = 2h), `auto` with an optional break length
+ * (`auto`, `auto 3h`; 2h when left out), or `off`. Undefined = unreadable.
+ */
+export function parseKeepCommand(args: string): { mode: 'run' | 'auto'; ms: number } | { mode: 'off' } | undefined {
+  const a = args.trim().toLowerCase()
+  const auto = /^auto(?:\s+(.*))?$/.exec(a)
+  if (auto) {
+    const ms = parseKeepWarm(auto[1] ?? '')
+    return typeof ms === 'number' ? { mode: 'auto', ms } : undefined
+  }
+  const ms = parseKeepWarm(a)
+  if (ms === undefined) return undefined
+
+  return ms === null ? { mode: 'off' } : { mode: 'run', ms }
+}
+
+/** A length for the person: `2h`, `45m`, `1h 30m`. */
+export function durationLabel(ms: number): string {
+  const min = Math.round(ms / 60_000)
+  const h = Math.floor(min / 60)
+  const m = min % 60
+  if (h === 0) return `${m}m`
+
+  return m === 0 ? `${h}h` : `${h}h ${m}m`
 }
 
 /** When to ping: once this share of the TTL or less is left (≈ 10 min of 60m). */
@@ -374,7 +395,7 @@ export function right(text: string, width: number): string {
 export type BreakdownLike = {
   categories: readonly { name: string; tokens: number; kind: string }[]
   memoryFiles: readonly { path: string; tokens: number }[]
-  mcpTools: readonly { serverName: string; tokens: number; isLoaded: boolean }[]
+  mcpTools: readonly { name: string; serverName: string; tokens: number; isLoaded: boolean }[]
   agents: readonly { agentType: string; tokens: number }[]
   skills?: { totalSkills: number; includedSkills: number; tokens: number }
 }
@@ -385,18 +406,19 @@ const heaviest = <T extends { tokens: number }>(items: readonly T[]): T[] =>
 /** The heaviest shares of the context, from a breakdown: categories in use, memory files, MCP servers, agents, skills. */
 export function contextMapOf(b: BreakdownLike, detail: ContextMap['detail'], at: number): ContextMap {
   // Loaded MCP tools summed per server (a plain record: the directory's scan reads Map.set like the shell's set).
-  const servers: Record<string, { tokens: number; tools: number }> = {}
+  const servers: Record<string, { tokens: number; tools: number; toolNames: string[] }> = {}
   for (const tool of b.mcpTools) {
     if (!tool.isLoaded) continue
-    const sum = servers[tool.serverName] ?? { tokens: 0, tools: 0 }
-    servers[tool.serverName] = { tokens: sum.tokens + tool.tokens, tools: sum.tools + 1 }
+    const sum = servers[tool.serverName] ?? { tokens: 0, tools: 0, toolNames: [] }
+    servers[tool.serverName] = { tokens: sum.tokens + tool.tokens, tools: sum.tools + 1, toolNames: [...sum.toolNames, tool.name] }
   }
 
   return {
     detail,
     at,
     categories: heaviest(b.categories.filter(c => c.kind === 'used')).map(c => ({ name: c.name, tokens: c.tokens })),
-    memoryFiles: heaviest(b.memoryFiles).map(f => ({ name: f.path, tokens: f.tokens })),
+    // Kept home-shortened: other loaded mods can read this state (types: $.state).
+    memoryFiles: heaviest(b.memoryFiles).map(f => ({ name: homePath(f.path), tokens: f.tokens })),
     mcpServers: heaviest(Object.entries(servers).map(([name, sum]) => ({ name, ...sum }))),
     deferredMcpTools: b.mcpTools.filter(t => !t.isLoaded).length,
     agents: heaviest(b.agents).map(a => ({ name: a.agentType, tokens: a.tokens })),
@@ -451,4 +473,460 @@ export function tally(counts: Readonly<Record<string, number>>, label: (key: str
 /** Adds one to `key`. */
 export function bump(counts: Readonly<Record<string, number>>, key: string): Record<string, number> {
   return { ...counts, [key]: (counts[key] ?? 0) + 1 }
+}
+
+/** Calls of this session to any of a server's tools (wire names, as the context breakdown lists them). */
+export function serverCalls(toolNames: readonly string[], calls: Readonly<Record<string, number>>): number {
+  return toolNames.reduce((sum, name) => sum + (calls[name] ?? 0), 0)
+}
+
+/** At least this long between the first reading of a limit window and a forecast from it. */
+export const FORECAST_MIN_MS = 10 * 60_000
+
+/**
+ * When a plan limit reaches 100 % at the pace since its first reading in this window, or null:
+ * too early, no rise, no known reset time, or not before the window resets.
+ */
+export function limitForecast(
+  start: { at: number; pct: number } | undefined,
+  pct: number,
+  now: number,
+  resetsAt?: string,
+): number | null {
+  if (start === undefined || now - start.at < FORECAST_MIN_MS || pct <= start.pct || pct >= 100) return null
+  const perMs = (pct - start.pct) / (now - start.at)
+  const at = now + (100 - pct) / perMs
+  // Without a reset time the window may free up first: no forecast rather than a wrong one.
+  const reset = resetsAt === undefined ? Number.NaN : Date.parse(resetsAt)
+
+  return !Number.isNaN(reset) && at < reset ? at : null
+}
+
+/** The line under an answer: what the turn cost and how well it hit the cache. Cost only when known. */
+export function turnLine(u: Usage4, requests: number, usd: number | null, isPlan: boolean): string {
+  const hit = hitPct(u)
+  const cost = usd === null || usd < 0.005 ? '' : `${isPlan ? '≈ ' : ''}$${usd.toFixed(2)} ${isPlan ? 'API value' : 'spent'} · `
+  const parts = [`${requests} request${requests === 1 ? '' : 's'}`, hit === null ? '' : `${hit}% from cache`, u.write >= 1000 ? `${short(u.write)} written to cache` : '']
+
+  return `◉ Cache Meter · ${cost}${parts.filter(Boolean).join(' · ')}`
+}
+
+/** Two reset times of one limit window: under a minute apart (a reading may move by seconds). */
+export function isSameReset(a: string, b: string): boolean {
+  return Math.abs(Date.parse(a) - Date.parse(b)) < 60_000
+}
+
+/** Whether a limit window was already warned about: the same kind, and the same reset within a minute. */
+export function isWarnedWindow(warned: readonly { kind: string; resetsAt: string }[], kind: string, resetsAt: string): boolean {
+  return warned.some(w => w.kind === kind && isSameReset(w.resetsAt, resetsAt))
+}
+
+/**
+ * Where each plan limit's pace starts: its first reading, renewed when the window reset (the
+ * percentage fell, or the reset time moved), so the forecast does not die after the first reset.
+ */
+export function nextLimitStarts(
+  prev: Readonly<Record<string, LimitStart>>,
+  limits: readonly Limit[],
+  now: number,
+): Record<string, LimitStart> {
+  const next: Record<string, LimitStart> = {}
+  for (const l of limits) {
+    const old = prev[l.kind]
+    const resetsAt = l.resetsAt ?? null
+    // A reset time that moves by a minute or more is a new window; under a minute, the same one read again.
+    const isMoved = old?.resetsAt != null && resetsAt !== null && !isSameReset(resetsAt, old.resetsAt)
+    const isNewWindow = old === undefined || l.percentUsed < old.pct || isMoved
+    next[l.kind] = isNewWindow ? { at: now, pct: l.percentUsed, resetsAt } : old
+  }
+
+  return next
+}
+
+/**
+ * A main request that re-wrote the cache although it was warm by the clock: something early in the
+ * prompt changed (model, effort, tool definitions; prompt-caching › Actions that invalidate the cache –
+ * editing CLAUDE.md is not one), or the real TTL is shorter than assumed. Not after a known cold point (start, /compact, a switch).
+ */
+export function isUnexpectedWrite(wasCold: boolean, hadCache: boolean, u: Usage4): boolean {
+  return !wasCold && hadCache && u.write >= COLD_MIN && u.read < u.write
+}
+
+/** The note at a model switch while the cache is warm: what Claude Code estimates the switch re-writes. */
+export function switchNote(tokens: number, usd: number, isKnownPrice: boolean, remainingMs: number | null): string {
+  // 'catalog' (list price) and 'configured' (the organization's modelPricing) are known prices; 'default'
+  // means the target model was unknown and a default tier was assumed (types: PreModelSwitch pricing).
+  const price = `≈ $${usd.toFixed(2)}${isKnownPrice ? '' : ' (estimate)'}`
+  const warm = remainingMs === null ? '' : ` · cache warm ${remainingLabel(remainingMs)} more`
+
+  return `Model switch re-writes ${short(tokens)} tokens to the cache (${price})${warm} – after it expires, switching adds nothing`
+}
+
+/**
+ * Whether changing effort keeps the cache on this model: on Opus 5.5, Sonnet 5.5, Haiku 5.5 and
+ * Fable 5.1 with an API key or a subscription it does (prompt-caching › Changing effort level).
+ */
+export function effortKeepsCache(model: string): boolean {
+  return /(opus|sonnet|haiku)-5-5|fable-5-1/.test(model)
+}
+
+/** What changed between two main requests that splits the cache: a model or an effort that does not keep it. */
+export function requestChange(
+  prev: { model: string; effort?: string | number } | null,
+  next: { model: string; effort?: string | number },
+): string | null {
+  if (prev === null) return null
+  if (prev.model !== next.model) return `model ${prev.model} → ${next.model}`
+  if (prev.effort !== next.effort && prev.effort !== undefined && next.effort !== undefined && !effortKeepsCache(next.model)) {
+    return `effort ${prev.effort} → ${next.effort}`
+  }
+
+  return null
+}
+
+/** MCP tools loaded before and after: how many came and went. */
+export function toolDiff(before: readonly string[], after: readonly string[]): { added: number; removed: number } {
+  const was = new Set(before)
+  const is = new Set(after)
+
+  return { added: [...is].filter(n => !was.has(n)).length, removed: [...was].filter(n => !is.has(n)).length }
+}
+
+/**
+ * Why a warm cache was re-written, from what is observable: the model, an effort that splits the
+ * cache, a pause longer than the real TTL, the tool set (only without tool search), an effort change on a model that keeps the
+ * cache only with an API key or a subscription. The rest is named, not guessed
+ * (prompt-caching › Actions that invalidate the cache).
+ */
+export function breakCause(i: {
+  change: string | null
+  effortOnly: string | null
+  tools: { added: number; removed: number } | null
+  idleMs: number | null
+  ttlMs: number
+}): string {
+  if (i.change !== null) return `${i.change} – each splits the cache`
+  if (i.idleMs !== null && i.idleMs >= FIVE_MIN && i.ttlMs > FIVE_MIN) {
+    return `after ${duration(i.idleMs)} idle: the real TTL is likely 5m, not ${duration(i.ttlMs)} (option cacheTtl)`
+  }
+  if (i.tools !== null && (i.tools.added > 0 || i.tools.removed > 0)) {
+    return `tool set changed (+${i.tools.added} / −${i.tools.removed} MCP tools)`
+  }
+  if (i.effortOnly !== null) return `${i.effortOnly} – keeps the cache on this model only with an API key or a subscription`
+
+  return 'not observable here: fast mode turned on, a code-intelligence plugin (LSP tool), a tool deny rule, or removed images'
+}
+
+/** The expiry notification's text; the /keepwarm tip only while the option offers the command. */
+export function expiryText(remainingMs: number, tokens: number, canKeep = true): string {
+  return `Prompt cache expires in ${remainingLabel(remainingMs)} – the next prompt would re-write ${short(tokens)} tokens.${canKeep ? ' Type /keepwarm to keep it.' : ''}`
+}
+
+/** A subagent's name in the Health tab: its type and task, else its id. */
+export function agentLabel(entry: { type?: string; description?: string } | undefined, id: string): string {
+  if (entry === undefined) return cleanLabel(id.slice(0, 12))
+  const what = entry.description?.trim() ?? ''
+
+  return cleanLabel(what === '' ? entry.type ?? id.slice(0, 12) : `${entry.type ?? 'agent'}: ${what}`)
+}
+
+/** A size in tokens, estimated from characters (÷ 4) – an estimate, labelled as one wherever it is drawn. */
+export function estimateTokens(text: string): number {
+  return Math.ceil(text.length / 4)
+}
+
+/** A home directory as `~`, so paths stay short and screenshots show no user name. */
+export function homePath(path: string): string {
+  return path
+    .replace(/^\/(?:Users|home|var\/home|export\/home)\/+[^/]+(?=\/|$)/, '~')
+    .replace(/^\/volume\d+\/(?:homes|@home)\/[^/]+(?=\/|$)/, '~')
+    .replace(/^\/root(?=\/|$)/, '~')
+    .replace(/^\/mnt\/[a-z]\/Users\/[^/]+(?=\/|$)/i, '~')
+    .replace(/^[A-Za-z]:[\\/]Users[\\/][^\\/]+(?=[\\/]|$)/i, '~')
+}
+
+/** The tools whose `file_path` / `notebook_path` is a file on disk (types: claude-code-tools). */
+const FILE_TOOLS = new Set(['Read', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit'])
+
+/** How credentials begin (GitHub, OpenAI/Stripe, Slack, AWS, Google, GitLab, Hugging Face, npm, PyPI, DigitalOcean, Shopify, Tailscale, Docker, Linear, Vault, age): never shown in a label. */
+const SECRET_PREFIXES = 'gh[poursa]_|github_pat_|sk-|sk_|rk_(?:live|test)_|xox[abprs]-|xapp-|akia|asia|aiza|ya29\\.|glpat-|glrt-|glptt-|hf_|npm_|pypi-|dop_v1_|shpat_|tskey-|dckr_pat_|lin_api_|hvs\\.|age-secret-key-'
+/** The same prefixes anywhere after a separator ("backup-ghp_…"), or a long run of letters and digits
+ * mixed, as tokens and keys are: a path part like that is shown as "…" – masking a harmless name is the
+ * cheaper mistake. */
+const SECRET_INSIDE = new RegExp(`(^|[^A-Za-z0-9])(${SECRET_PREFIXES})`, 'i')
+
+/** True for a path part that may hold a credential. */
+export function isSecretLikePart(part: string): boolean {
+  if (SECRET_INSIDE.test(part)) return true
+  // base64 and dotted tokens too: + = . do not end a run.
+  return (part.match(/[A-Za-z0-9_+=.-]{32,}/g) ?? []).some(run => /[A-Za-z]/.test(run) && /\d/.test(run))
+}
+
+/** A label as it is stored and shown: one line, no control characters, at most 80 characters (the end kept). */
+export function cleanLabel(label: string): string {
+  // Control characters, line breaks, and the invisible ones that could reorder or hide text (bidi, zero width).
+  const one = label.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2066-\u2069\ufeff]/g, ' ')
+
+  return one.length > 80 ? `…${one.slice(-79)}` : one
+}
+
+/**
+ * A tool call's label: the tool, plus for the file tools the home-shortened path and for Bash only the
+ * program name – a command's arguments, a URL or a token never become part of it.
+ */
+export function toolLabel(tool: string, input: Readonly<Record<string, unknown>>): string {
+  const path = typeof input.file_path === 'string' ? input.file_path : typeof input.notebook_path === 'string' ? input.notebook_path : null
+  if (path !== null && FILE_TOOLS.has(tool)) {
+    // A path, not a URL: anything with a scheme gives just the tool; a query or fragment is cut off.
+    if (/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(path)) return tool
+
+    // A path segment that may hold a credential (a file named after a token) is shown as "…".
+    const shown = homePath(path.split(/[?#]/)[0] ?? '')
+      .split(/([\\/])/)
+      .map(part => (isSecretLikePart(part) ? '…' : part))
+      .join('')
+
+    return cleanLabel(`${tool} ${shown}`)
+  }
+  if (tool === 'Bash' && typeof input.command === 'string') {
+    // Words are split where bash splits them – space, tab, newline – not on every Unicode space: a
+    // no-break space inside an assignment's value must not end the value. Plain VAR=value prefixes go;
+    // the first word left must look like a program name, else just "Bash": never a guess.
+    const rest = input.command.replace(/^[ \t\n]+/, '').replace(/^(?:[A-Za-z_][A-Za-z0-9_]*=(?:"[^"$`\\]*"|'[^']*'|[A-Za-z0-9_.,:/@%+=-]*)[ \t\n]+)*/, '')
+    const program = rest.split(/[ \t\n]+/)[0] ?? ''
+    // A home directory itself is no program name (it would show the user name). The whole first word must
+    // be a plain path – no $, quotes, ; | & or a leading - anywhere in it – before its last part is shown.
+    if (homePath(program) === '~' || !/^[A-Za-z0-9_.+~/][A-Za-z0-9_.+~/-]*$/.test(program)) return tool
+    const name = program.split('/').pop() ?? ''
+    const isProgram = /^[A-Za-z0-9_.+][A-Za-z0-9_.+-]*$/.test(name) && name.length <= 32 && !isSecretLikePart(name) && !/\d{8}/.test(name)
+
+    return isProgram ? `${tool} ${name}` : tool
+  }
+
+  return tool
+}
+
+/** Adds one tool result to the tally: per tool, and the five largest single results. */
+export function addToolResult(prev: ToolResults, tool: string, label: string, tokens: number, at: number): ToolResults {
+  const sum = prev.byTool[tool] ?? { count: 0, tokens: 0 }
+
+  return {
+    byTool: { ...prev.byTool, [tool]: { count: sum.count + 1, tokens: sum.tokens + tokens } },
+    largest: [...prev.largest, { label, tokens, at }].sort((a, b) => b.tokens - a.tokens).slice(0, 5),
+    since: prev.since,
+  }
+}
+
+/**
+ * Prompts until auto-compact at the pace of the last turns: the context sizes after each turn since the
+ * last drop (a compaction), at least two rises. Null when auto-compact is off or unknown, or no pace.
+ */
+export function compactForecast(history: readonly number[], autoCompactPct: number | null, window: number): number | null {
+  if (autoCompactPct === null || window <= 0 || history.length < 3) return null
+  let start = 0
+  history.forEach((size, i) => {
+    if (i > 0 && size < (history[i - 1] ?? size)) start = i
+  })
+  const run = history.slice(start)
+  const first = run[0]
+  const last = run.at(-1)
+  if (run.length < 3 || first === undefined || last === undefined) return null
+  const pace = (last - first) / (run.length - 1)
+  const left = (autoCompactPct / 100) * window - last
+  if (pace <= 0) return null
+  if (left <= 0) return 0
+
+  return Math.ceil(left / pace)
+}
+
+/** Everything the session report needs, gathered from state; dollar figures only as Claude Code gave them. */
+export type ReportData = {
+  at: number
+  ageMs: number | null
+  prompts: number | null
+  requests: number
+  model: string | null
+  usd: number | null
+  isPlan: boolean
+  hit: number | null
+  saving: number | null
+  cold: { count: number; written: number }
+  warmMiss: { count: number; cause: string | null }
+  context: { percent: number | null; tokens: number | null; autoCompactPct: number | null; promptsLeft: number | null }
+  limits: { name: string; percentUsed: number }[]
+  memoryFiles: { name: string; tokens: number }[]
+  mcpServers: { name: string; tokens: number; calls: number }[]
+  toolsByTool: { tool: string; count: number; tokens: number }[]
+  largest: { label: string; tokens: number }[]
+  agents: { label: string; steps: number; tokens: number; hit: number | null }[]
+  keepwarm: { pings: number; readTokens: number; auto?: number | null }
+}
+
+/** A label as inline code in the report, so a crafted path or task cannot add Markdown. */
+function code(text: string): string {
+  return `\`${cleanLabel(text).replace(/`/g, "'")}\``
+}
+
+/** The session report `/tokens report` copies: Markdown, the same figures and labels as the pane. */
+export function reportMarkdown(r: ReportData): string {
+  const lines: string[] = []
+  const usd = r.usd === null ? '–' : `${r.isPlan ? '≈ ' : ''}$${r.usd.toFixed(2)}${r.isPlan ? ' API value (subscription: a comparison, not a charge)' : ' spent'}`
+  lines.push(`# Cache Meter – session report`, '')
+  lines.push(`${new Date(r.at).toISOString().slice(0, 16).replace('T', ' ')} UTC${r.ageMs === null ? '' : ` · session ${duration(r.ageMs)}`}${r.model === null ? '' : ` · ${r.model}`}`, '')
+  lines.push('## Cost and cache', '')
+  lines.push(`- Cost: ${usd}${r.prompts ? ` · ${r.prompts} prompts · ${r.requests} requests` : ` · ${r.requests} requests`}`)
+  lines.push(`- Cache hit rate: ${r.hit === null ? '–' : `${r.hit}%`}${r.saving === null ? '' : ` · cache saved ${r.saving}% of input cost`}`)
+  lines.push(`- Cold re-writes: ${r.cold.count}${r.cold.count > 0 ? ` (${short(r.cold.written)} tokens)` : ''}`)
+  lines.push(`- Warm misses: ${r.warmMiss.count}${r.warmMiss.cause === null ? '' : ` – last: ${r.warmMiss.cause}`}`)
+  if (r.keepwarm.auto != null) lines.push(`- Keepwarm auto (breaks up to ${durationLabel(r.keepwarm.auto)}): ${r.keepwarm.pings} pings, ${short(r.keepwarm.readTokens)} tokens read`)
+  else if (r.keepwarm.pings > 0) lines.push(`- Keepwarm: ${r.keepwarm.pings} pings, ${short(r.keepwarm.readTokens)} tokens read`)
+  lines.push('', '## Context', '')
+  lines.push(
+    `- Fill: ${r.context.percent === null ? '–' : `${r.context.percent}%`}${r.context.tokens === null ? '' : ` (${short(r.context.tokens)} tokens)`}${r.context.autoCompactPct === null ? '' : ` · auto-compact at ${r.context.autoCompactPct}%`}${r.context.promptsLeft === null ? '' : ` · in ≈ ${r.context.promptsLeft} prompts at this pace`}`,
+  )
+  if (r.memoryFiles.length > 0) lines.push(`- Memory files: ${r.memoryFiles.map(f => `${code(f.name)} ${short(f.tokens)}`).join(', ')}`)
+  if (r.mcpServers.length > 0) lines.push(`- MCP servers: ${r.mcpServers.map(m => `${code(m.name)} ${short(m.tokens)} (${m.calls} calls)`).join(', ')}`)
+  if (r.toolsByTool.length > 0) {
+    lines.push(`- Tool results (≈ tokens, characters ÷ 4): ${r.toolsByTool.map(t => `${t.tool} ${short(t.tokens)} in ${t.count}`).join(', ')}`)
+    lines.push(`- Largest: ${r.largest.map(l => `${code(l.label)} ${short(l.tokens)}`).join(', ')}`)
+  }
+  if (r.agents.length > 0) {
+    lines.push('', '## Subagents', '')
+    for (const a of r.agents) lines.push(`- ${code(a.label)}: ${short(a.tokens)} tokens, ${a.steps} requests, ${a.hit === null ? '–' : `${a.hit}%`} hit`)
+  }
+  if (r.limits.length > 0) {
+    lines.push('', '## Plan limits', '')
+    for (const l of r.limits) lines.push(`- ${l.name}: ${l.percentUsed}%`)
+  }
+  lines.push('', '_Made with [Cache Meter](https://github.com/florian101010/cache-meter)._')
+
+  return lines.join('\n')
+}
+
+/** The café's word for the cache: what the barista and the cup act out. */
+export function cafeState(
+  kind: 'empty' | 'warm' | 'expired',
+  isLow: boolean,
+  isWorking: boolean,
+  isBeating: boolean,
+  isBrewing: boolean,
+): CafeState {
+  if (isBeating) return 'ping'
+  if (isBrewing) return 'brewing'
+  if (isWorking) return 'working'
+  if (kind === 'expired') return 'cold'
+  if (kind === 'empty') return 'empty'
+
+  return isLow ? 'last' : 'warm'
+}
+
+/** Ease-out (cubic) of a progress 0…1: fast first, gentle at the end. */
+export function easeOut(t: number): number {
+  const c = Math.max(0, Math.min(1, t))
+
+  return 1 - (1 - c) ** 3
+}
+
+/** How far an animation that started at `start` and lasts `ms` has come at `now`: 0…1, eased. */
+export function progress(start: number, now: number, ms: number): number {
+  return ms <= 0 ? 1 : easeOut((now - start) / ms)
+}
+
+/** A value on its way from `from` to `to`, at an eased progress `p` (0…1). */
+export function tween(from: number, to: number, p: number): number {
+  return from + (to - from) * Math.max(0, Math.min(1, p))
+}
+
+/** A 24-bit colour mixed towards white by `amount` (0…1); the terminal-default marker stays as it is. */
+export function lighten(color: number, amount: number): number {
+  if (color === DEFAULT_COLOR) return color
+  const mix = (v: number) => Math.round(v + (255 - v) * amount)
+
+  return (mix((color >> 16) & 0xff) << 16) | (mix((color >> 8) & 0xff) << 8) | mix(color & 0xff)
+}
+
+/**
+ * A shine passing over a one-row meter: the cell at `at` (and its neighbours, a little less) drawn
+ * lighter. `at` outside the row leaves it unchanged.
+ */
+export function shineCells(cells: readonly Cell[], at: number): Cell[] {
+  return cells.map((cell, x) => {
+    const d = Math.abs(x - at)
+    if (d > 1) return cell
+
+    return [cell[0], lighten(cell[1], d === 0 ? 0.6 : 0.3), cell[2]]
+  })
+}
+
+/** A single tool result this large, or larger, in the main conversation is worth a word. */
+export const HOG_MIN = 10_000
+export const HOG_SHARE = 0.02
+
+/** Whether one tool result fills enough of the context to mention: max(10k, 2 % of the window) tokens. */
+export function isContextHog(tokens: number, window: number): boolean {
+  return tokens >= Math.max(HOG_MIN, window > 0 ? window * HOG_SHARE : 0)
+}
+
+/** The toast for a large tool result: what put how much into the context (an estimate), and why it matters. */
+export function hogNote(label: string, tool: string, tokens: number): string {
+  return `${label === '' ? tool : label} put ≈ ${short(tokens)} tokens into the context – sent again with every request until /compact`
+}
+
+/** A part of the context as a share of every request's context: "6%", "<1%", or '' when unknown. */
+export function shareOfRequest(tokens: number, contextTokens: number | null): string {
+  if (contextTokens === null || contextTokens <= 0 || tokens <= 0) return ''
+  const pct = (tokens / contextTokens) * 100
+
+  return pct < 1 ? '<1%' : `${Math.round(pct)}%`
+}
+
+/** The conversation's messages are worth a /compact note from this size and share of the context on. */
+export const COMPACT_NOTE_MIN = 20_000
+export const COMPACT_NOTE_SHARE = 0.25
+
+/**
+ * The Context tab's note on /compact, or null: only measured figures – the messages' size as Claude Code
+ * counts it – and what /compact does by the docs (commands: "Free up context by summarizing the
+ * conversation so far"; costs: compacting a large context "is itself a large request"). No saving is
+ * promised: what the summary keeps is not known before.
+ */
+export function compactNote(messages: number | null, context: number | null): string | null {
+  if (messages === null || context === null || context <= 0) return null
+  if (messages < COMPACT_NOTE_MIN || messages < context * COMPACT_NOTE_SHARE) return null
+
+  return `Messages ${short(messages)} (${Math.round((messages / context) * 100)}% of the context) are sent again with every request – /compact summarizes them to free space, itself one large request`
+}
+
+/** A plan limit worth a warning: half used or more, and full before it resets at this pace. */
+export const LIMIT_NOTE_PCT = 50
+
+/** The terminal width from which the fullscreen layout docks a pane beside the transcript (types: Pane.placement). */
+export const DOCK_COLUMNS = 110
+
+/**
+ * Why the pane sits above the prompt and how it gets beside the chat, for a terminal only: on the main
+ * screen `/tui fullscreen` (it saves the setting and relaunches with the conversation – fullscreen ›
+ * Enable fullscreen rendering – so the mod's in-memory figures start over), in fullscreen a wider window. Null when it already
+ * docks or nothing is known.
+ */
+export function dockTip(isFullscreen: boolean | undefined, columns: number | undefined, size: 'sentence' | 'line' | 'short'): string | null {
+  if (isFullscreen === false) {
+    if (size === 'short') return 'tip: /tui fullscreen puts this beside the chat'
+    if (size === 'line') return `tip: /tui fullscreen puts this beside the chat as a sidebar (${DOCK_COLUMNS}+ columns; relaunches, figures start over)`
+
+    return `tip: /tui fullscreen puts this beside the chat as a sidebar (from ${DOCK_COLUMNS} columns; Claude Code relaunches with the conversation, the meter starts over)`
+  }
+  if (isFullscreen === true && columns !== undefined && columns < DOCK_COLUMNS) {
+    return size === 'short' ? `tip: ${DOCK_COLUMNS}+ columns put this beside the chat` : `tip: a window ${DOCK_COLUMNS} columns or wider puts this beside the chat as a sidebar`
+  }
+
+  return null
+}
+
+/** Which animation a failed surface module is (types: UiFaultInput.module, its path under the plugin's folder). */
+export function faultTarget(module: string): 'cafe' | 'spin' | null {
+  if (/(^|\/)cafe\.tsx$/.test(module)) return 'cafe'
+  if (/(^|\/)spin\.tsx$/.test(module)) return 'spin'
+
+  return null
 }

@@ -1,11 +1,11 @@
 {
   "name": "cache-meter",
   "displayName": "Cache Meter",
-  "version": "0.5.4",
-  "description": "Claude Code mod: /keepwarm keeps your prompt cache alive through a break; a countdown, hit rate, context fill and API value above the prompt; and a /tokens dashboard with what caching saved, what fills your context, API errors and cost per hour.",
+  "version": "0.12.0",
+  "description": "Stop wasting tokens: keeps your prompt cache warm through breaks with /keepwarm, shows when it expires and what each answer costs.",
   "author": {
     "name": "Florian Grimmer",
-    "url": "https://github.com/florian101010"
+    "url": "https://www.floriangrimmer.de/"
   },
   "homepage": "https://github.com/florian101010/cache-meter#readme",
   "repository": "https://github.com/florian101010/cache-meter",
@@ -26,12 +26,13 @@
   "documentationUrl": "https://github.com/florian101010/cache-meter#readme",
   "supportUrl": "https://github.com/florian101010/cache-meter/issues",
   "privacyPolicyUrl": "https://github.com/florian101010/cache-meter/blob/main/PRIVACY.md",
+  "icon": "./.claude-plugin/icon.png",
   "types": "./types/index.d.ts",
   "userConfig": {
     "cacheTtl": {
       "type": "string",
       "title": "Cache TTL",
-      "description": "auto: derived from Claude Code's TTL controls (FORCE_PROMPT_CACHING_5M, CLAUDE_CODE_PROMPT_CACHE_TTL, promptCacheTtl, ENABLE_PROMPT_CACHING_1H), else 5m once a plan limit is used up, else the value reported on a model switch, else 60m. 60m/5m: fixed, wins over everything.",
+      "description": "auto: Claude Code's TTL controls and your plan state, else the TTL a model switch reported, else 60m – on an API key pick 5m, or set promptCacheTtl to 1h. 60m or 5m: fixed – wins over everything.",
       "options": [
         "auto",
         "60m",
@@ -39,15 +40,73 @@
       ],
       "default": "auto"
     },
+    "keepwarm": {
+      "type": "string",
+      "title": "Keepwarm",
+      "description": "on: /keepwarm and /keepwarm-auto keep the prompt cache warm through a break, when you type them. off: neither command, no ping, no keepwarm tips – Cache Meter then sends no request of its own. Switching it here applies at once; the typeahead follows from your next prompt.",
+      "options": [
+        "on",
+        "off"
+      ],
+      "default": "on"
+    },
     "autoSidebar": {
       "type": "string",
       "title": "Sidebar at start",
-      "description": "auto: in Claude Code's fullscreen renderer (/tui fullscreen), open the /tokens dashboard as a sidebar beside the chat at session start – placed from 144 terminal columns, 110 once you opened it yourself – and leave it closed once you close it. Never opens above the prompt by itself. off: only with /tokens.",
+      "description": "auto: in the fullscreen renderer (/tui fullscreen), the /tokens dashboard opens as a sidebar at session start (from 144 columns, 110 once you opened it) and stays closed once you close it – never above the prompt. off: only with /tokens.",
       "options": [
         "auto",
         "off"
       ],
       "default": "auto"
+    },
+    "turnLine": {
+      "type": "string",
+      "title": "Line under each answer",
+      "description": "on: one line under each answer – its cost (subagents included), requests, share from the cache and tokens written to it. off: no line.",
+      "options": [
+        "on",
+        "off"
+      ],
+      "default": "on"
+    },
+    "expiryNotice": {
+      "type": "string",
+      "title": "Notification before the cache expires",
+      "description": "on: a terminal notification through your own notification channel about 10 minutes before a one-hour cache expires while keepwarm is off – once per cache window, from 10k tokens of context. off: none.",
+      "options": [
+        "off",
+        "on"
+      ],
+      "default": "off"
+    },
+    "animations": {
+      "type": "string",
+      "title": "Animations",
+      "description": "on: in the docked dashboard a small café acts out the cache; on the Overview the minute flashes, new columns grow in, figures count up and the keepwarm arrow turns – brief, only while the Overview shows. The animation files get only the cache's state. off: none of it.",
+      "options": [
+        "on",
+        "off"
+      ],
+      "default": "on"
+    },
+    "limitNotice": {
+      "type": "string",
+      "title": "Notification when a plan limit fills up",
+      "description": "on: a terminal notification through your own notification channel when a plan limit (5 hours, 7 days, spend limit) is half used and on course to fill before it resets – once per window. The toast comes either way. off: the toast only.",
+      "options": [
+        "off",
+        "on"
+      ],
+      "default": "off"
+    },
+    "sessionBudget": {
+      "type": "number",
+      "title": "Session budget ($)",
+      "description": "0 = off. A dollar budget for this session against the figure the band shows (spend, or API value on a subscription): it reads \"of $X\", turns yellow at 80 % and red at 100 %, with one toast at each.",
+      "default": 0,
+      "min": 0,
+      "max": 10000
     }
   }
 }

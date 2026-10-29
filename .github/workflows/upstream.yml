@@ -1,0 +1,69 @@
+name: Upstream
+
+# Keeps the mod current with Claude Code and its documentation (CONTRIBUTING › Keeping up):
+# weekly, the tests run on the newest Claude Code, and the official pages the mod relies on are
+# compared with docs/upstream-docs.txt. A failure opens (or comments on) one issue per kind.
+on:
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  latest:
+    name: tests on the newest Claude Code
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DISABLE_AUTOUPDATER: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - name: Install the newest Claude Code
+        run: npm install -g @anthropic-ai/claude-code@latest
+      - id: version
+        run: echo "version=$(claude --version | head -n 1)" >> "$GITHUB_OUTPUT"
+      - id: check
+        continue-on-error: true
+        shell: bash
+        run: claude plugin validate --strict . && claude plugin test .
+      - name: Open or update an issue
+        if: steps.check.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="Upstream: tests fail on the newest Claude Code"
+          body="The tests or validate --strict fail on Claude Code ${VERSION}. Run: ${RUN}. Read that version's release notes and the changed doc pages, fix, then raise CLAUDE_CODE_VERSION in ci.yml (CONTRIBUTING › Keeping up)."
+          number=$(gh issue list --state open --search "in:title \"${title}\"" --json number --jq '.[0].number // empty')
+          if [ -n "$number" ]; then gh issue comment "$number" --body "$body"; else gh issue create --title "$title" --body "$body"; fi
+          exit 1
+
+  docs:
+    name: official documentation changed
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: check
+        continue-on-error: true
+        # shell: bash runs with -o pipefail; the default for a step without it does not, and the
+        # pipeline's status would be tee's – always success (GitHub › workflow syntax › defaults.run.shell).
+        shell: bash
+        run: bash .github/scripts/upstream-docs.sh --check | tee changed.txt
+      - name: Open or update an issue
+        if: steps.check.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="Upstream: official documentation changed"
+          body=$(printf 'These pages the mod relies on changed since docs/upstream-docs.txt was written:\n\n%s\n\nRead them, adjust code and docs where needed, then run .github/scripts/upstream-docs.sh --write (CONTRIBUTING › Keeping up).' "$(cat changed.txt)")
+          number=$(gh issue list --state open --search "in:title \"${title}\"" --json number --jq '.[0].number // empty')
+          if [ -n "$number" ]; then gh issue comment "$number" --body "$body"; else gh issue create --title "$title" --body "$body"; fi
+          exit 1

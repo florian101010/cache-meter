@@ -35,6 +35,37 @@ jobs:
       - name: Install Claude Code
         run: npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
       - run: claude --version
+      # The plugin directory blocks a parameter named h (JSX compiles to calls of h in .tsx files) and
+      # a nested one named on (it shadows register's own `on`, which stays): CHANGELOG 0.5.2. Fail here first.
+      - name: No parameters named h or on
+        run: |
+          rc=0
+          grep -nE '(^|[^A-Za-z0-9_$])(h|on) =>|\(h[,)]|, ?(h|on)\)' hooks/*.ts hooks/*.tsx || rc=$?
+          # 0 = a forbidden parameter found, 2 = files unreadable: both fail; 1 = none found.
+          test "$rc" -eq 1
+      # The file rules of Anthropic's plugin directory a script can check (size, binaries, lockfiles, launchers).
+      - name: Directory file checks
+        run: bash .github/scripts/directory-checks.sh
+      # The CI scripts themselves: syntax, shellcheck, and the directory check against a planted failure.
+      - name: CI scripts
+        run: |
+          for f in .github/scripts/*.sh; do bash -n "$f"; done
+          shellcheck .github/scripts/*.sh
+          tmp=$(mktemp -d)
+          git ls-files -z | xargs -0 -I{} cp --parents {} "$tmp"
+          git -C "$tmp" init -q && echo '{}' > "$tmp/package-lock.json" && git -C "$tmp" add -A
+          if bash "$tmp/.github/scripts/directory-checks.sh" > "$tmp/out.txt"; then echo "directory-checks.sh passed a planted lockfile"; exit 1; fi
+          grep -q lockfile "$tmp/out.txt"
+          # …and a planted merge-conflict marker.
+          rm "$tmp/package-lock.json" && git -C "$tmp" rm -q --cached package-lock.json
+          printf '<<<<<<< HEAD\nx\n' > "$tmp/conflicted.md" && git -C "$tmp" add conflicted.md
+          if bash "$tmp/.github/scripts/directory-checks.sh" > "$tmp/out.txt"; then echo "directory-checks.sh passed a planted conflict marker"; exit 1; fi
+          grep -q "merge-conflict markers" "$tmp/out.txt"
+          # …and an icon path to a file that isn't there.
+          git -C "$tmp" rm -q -f --cached conflicted.md
+          python3 -c "import json,sys; p=sys.argv[1]; d=json.load(open(p)); d['icon']='./.claude-plugin/missing.png'; open(p,'w').write(json.dumps(d))" "$tmp/.claude-plugin/plugin.json"
+          if bash "$tmp/.github/scripts/directory-checks.sh" > "$tmp/out.txt" 2>&1; then echo "directory-checks.sh passed a missing icon"; exit 1; fi
+          grep -q "icon file missing" "$tmp/out.txt"
       # Manifest, marketplace, hooks module and state contract; warnings fail the build.
       - run: claude plugin validate --strict .
       # The mod's tests run against the engine with no session, sign-in or network.
