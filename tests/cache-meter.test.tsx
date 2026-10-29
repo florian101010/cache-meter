@@ -16,7 +16,6 @@ import {
   hogNote,
   isContextHog,
   shareOfRequest,
-  faultTarget,
   cacheSaving,
   columnCells,
   forecast,
@@ -156,6 +155,9 @@ function world(on: On, opts: { env?: Record<string, string>; forkRead?: number; 
     commandList: [] as { name: string; description: string; source: string; plugin?: string }[],
     // Whether $.command.list() rejects.
     commandListFails: false,
+    // The option keepwarm's /config row as $.config.list() reports it, and a refusal of config.set.
+    keepwarmRow: 'on' as string,
+    configDeny: null as string | null,
     // Run while a ping is in flight (a hook's $ has no $.turn.step: the test hands in its own).
     duringFork: null as (() => Promise<unknown>) | null,
     // Whether the next tool call is refused (a deny from a hook beneath).
@@ -201,6 +203,16 @@ function world(on: On, opts: { env?: Record<string, string>; forkRead?: number; 
     return { value: { ...v.value, context, cost: { usd: next.usd } } } as never
   })
   on('turn.start', ($, e) => ({ turnId: e.turnId }))
+  // As the writer answers: the row takes the value unless refused (types: ConfigSetResult).
+  on('config.set', ($, e) => {
+    if (next.configDeny !== null) return { deny: next.configDeny } as never
+    if (e.key === 'cache-meter.keepwarm') next.keepwarmRow = String(e.value)
+    return { value: e.value } as never
+  })
+  on('config.list', () => ({
+    // Another plugin's row of the same field name first: only Cache Meter's own row counts.
+    value: [{ key: 'other-keep.keepwarm', label: 'Keepwarm', kind: 'choice', value: 'off', provider: { plugin: 'other-keep', tier: 'user' }, isLocked: false }, { key: 'cache-meter.keepwarm', label: 'Keepwarm', kind: 'choice', value: next.keepwarmRow, provider: { plugin: 'cache-meter', tier: 'user' }, isLocked: false }],
+  }) as never)
   on('command.list', () => {
     if (next.commandListFails) throw new Error('not now')
     return { value: next.commandList } as never
@@ -2844,14 +2856,6 @@ test('/keepwarm auto: the band shows no Keep warm while auto waits between break
   await ui.unmount()
 })
 
-test('ui.fault: which animation a failed module is', () => {
-  expect(faultTarget('hooks/cafe.tsx')).toBe('cafe')
-  expect(faultTarget('hooks/spin.tsx')).toBe('spin')
-  expect(faultTarget('cafe.tsx')).toBe('cafe')
-  expect(faultTarget('hooks/notcafe.tsx')).toBeNull()
-  expect(faultTarget('hooks/register.tsx')).toBeNull()
-})
-
 test('café: brewing ends by itself after BREW_MS', async ($, on) => {
   const { clock } = world(on)
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
@@ -3189,15 +3193,27 @@ const OWN = { plugin: 'cache-meter', tier: 'user' }
 const SETTER = {
   name: 'setter',
   register(on: On) {
-    on('command.run', { command: 'set-row' }, async ($, e) => {
-      const [key, value] = (e as { args: string }).args.split(' ')
-      const result = await $.config.set({ key, value } as never)
+    // Each call names its row as fixed text.
+    on('command.run', { command: 'set-keepwarm' }, async ($, e) => {
+      const result = await $.config.set({ key: 'cache-meter.keepwarm', value: e.args })
+
+      return { text: JSON.stringify(result) }
+    })
+    on('command.run', { command: 'set-other' }, async $ => {
+      const result = await $.config.set({ key: 'other-keep.keepwarm', value: 'off' })
 
       return { text: JSON.stringify(result) }
     })
   },
 }
-const setRow = ($: Engine, key: string, value: string) => $.command.run({ command: 'set-row', args: `${key} ${value}` } as never) as Promise<{ text?: string }>
+// Sets the option keepwarm through the second mod, then lets the deferred apply run (config.set hook).
+async function setKeepwarm($: Engine, clock: { advance: (ms: number) => Promise<unknown>; settle: () => Promise<unknown> }, value: string) {
+  const answer = (await $.command.run({ command: 'set-keepwarm', args: value } as never)) as { text?: string }
+  await clock.advance(1_000)
+  await clock.settle()
+
+  return answer
+}
 
 test('option keepwarm off: only /tokens registered, no word about another /keepwarm, which passes straight on', { options: { keepwarm: 'off' } }, async ($, on) => {
   const { commands, toasts, next } = world(on)
@@ -3253,12 +3269,11 @@ test('option keepwarm off: the expiry notice gives no /keepwarm tip', { options:
 })
 
 test('option keepwarm switched on in /config: both commands registered at once, the other /keepwarm named', { options: { keepwarm: 'off' }, plugins: [SETTER] }, async ($, on) => {
-  const { commands, toasts, next } = world(on)
-  on('config.set', ($, e) => ({ value: (e as { value: unknown }).value }) as never)
+  const { commands, toasts, next, clock } = world(on)
   next.commandList = [OTHER_KEEPWARM]
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   await step($)
-  expect((await setRow($, 'cache-meter.keepwarm', 'on')).text).toBe('{"value":"on"}')
+  expect((await setKeepwarm($, clock, 'on')).text).toBe('{"value":"on"}')
   expect(commands.map(c => c.name)).toEqual(['tokens', 'keepwarm', 'keepwarm-auto'])
   expect(toasts.some(t => t.startsWith('/keepwarm is also a command of other-keep'))).toBe(true)
   expect((await run($, 'keepwarm-auto', '')).text).toMatch(/^Keepwarm auto on/)
@@ -3266,7 +3281,6 @@ test('option keepwarm switched on in /config: both commands registered at once, 
 
 test('option keepwarm switched off in /config: a running auto stops, its commands hide, another plugin\'s stays', { plugins: [SETTER] }, async ($, on) => {
   const { toasts, forks, clock } = world(on)
-  on('config.set', ($, e) => ({ value: (e as { value: unknown }).value }) as never)
   on('command.describe', ($, e) => {
     const d = e as { description: string; argumentHint?: string; isHidden: boolean }
     return { description: d.description, argumentHint: d.argumentHint, isHidden: d.isHidden } as never
@@ -3277,7 +3291,7 @@ test('option keepwarm switched off in /config: a running auto stops, its command
     $.command.describe({ command, description: 'x', isHidden: false, immediate: false, provider: { ...OWN, plugin } } as never)
   expect((await describe('keepwarm', 'cache-meter')).isHidden).toBe(false)
   expect((await run($, 'keepwarm', 'auto')).text).toMatch(/^Keepwarm auto on/)
-  await setRow($, 'cache-meter.keepwarm', 'off')
+  await setKeepwarm($, clock, 'off')
   expect(toasts.some(t => t.startsWith('Keepwarm auto off'))).toBe(true)
   expect((await describe('keepwarm', 'cache-meter')).isHidden).toBe(true)
   expect((await describe('keepwarm-auto', 'cache-meter@cache-meter')).isHidden).toBe(true)
@@ -3290,26 +3304,26 @@ test('option keepwarm switched off in /config: a running auto stops, its command
 })
 
 test('option keepwarm: another plugin\'s row of the same name, or a refused change, changes nothing', { plugins: [SETTER] }, async ($, on) => {
-  const { forks, clock } = world(on)
-  let deny = false
-  on('config.set', ($, e) => (deny ? { deny: 'locked' } : { value: (e as { value: unknown }).value }) as never)
+  const { forks, clock, next } = world(on)
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   await step($)
   await run($, 'keepwarm', 'auto')
   // A row named keepwarm that belongs to another plugin.
-  await setRow($, 'other-keep.keepwarm', 'off')
-  deny = true
-  expect((await setRow($, 'cache-meter.keepwarm', 'off')).text).toBe('{"deny":"locked"}')
+  await $.command.run({ command: 'set-other', args: '' } as never)
+  await clock.advance(1_000)
+  next.configDeny = 'locked'
+  expect((await setKeepwarm($, clock, 'off')).text).toBe('{"deny":"locked"}')
   await clock.advance(51 * 60_000)
   await clock.settle()
   expect(forks.length).toBeGreaterThan(0)
 })
 
 test('option keepwarm: switching it on refused – the commands stay unregistered', { options: { keepwarm: 'off' }, plugins: [SETTER] }, async ($, on) => {
-  const { commands } = world(on)
-  on('config.set', () => ({ deny: 'locked' }) as never)
+  const { commands, next, clock } = world(on)
+  next.configDeny = 'locked'
+  next.keepwarmRow = 'off'
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
-  expect((await setRow($, 'cache-meter.keepwarm', 'on')).text).toBe('{"deny":"locked"}')
+  expect((await setKeepwarm($, clock, 'on')).text).toBe('{"deny":"locked"}')
   expect(commands.map(c => c.name)).toEqual(['tokens'])
   expect((await run($, 'keepwarm-auto', '')).text).toBe(OFF_TEXT)
 })

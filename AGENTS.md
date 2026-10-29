@@ -73,7 +73,8 @@ Code conventions enforced by `validate`: helpers that take `$` are top-level fun
 | `hooks/lib.ts` | pure functions: TTL derivation, hit rate, formatting, thresholds |
 | `hooks/spin.tsx` | the turning keepwarm arrow: a surface module (`Client`), no `$`, no props. Not in `hooks.json` |
 | `hooks/cafe.tsx` | the café animation: a surface module (`Client`), no `$`, gets only the cache's state word; `sceneRows` is pure and unit-tested. Not listed in `hooks.json` – it is found through `module: "./cafe.tsx"` |
-| `types/index.d.ts` | type contract of every `$.state` value |
+| `types/index.d.ts` | type contract of every `$.state` value (imported by no module) |
+| `hooks/state.ts` | the value types, derived from that contract's `PluginState` – the modules import these |
 | `tests/cache-meter.test.tsx` | tests for `claude plugin test` |
 | `docs/how-it-works.md` | events, state, thresholds, cold-rewrite rule, keepwarm algorithm, with doc references |
 | `README.md`, `CHANGELOG.md`, `CONTRIBUTING.md`, `SECURITY.md`, `PRIVACY.md`, `CODE_OF_CONDUCT.md` | user docs, history, contribution rules, what the mod can reach, what it reads, keeps and sends |

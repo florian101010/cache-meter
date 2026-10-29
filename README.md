@@ -324,7 +324,7 @@ Four more places, only when there is something to say:
 
 ## Requirements
 
-- **Claude Code 2.1.287 or later** in the terminal, or 2.1.286 or later in the Code tab of the Desktop app (see [where mods run](https://code.claude.com/docs/en/plugins/mods/overview#where-mods-run)). Tested with **2.1.296**. The café's fallback when its animation file fails (`ui.fault`) needs 2.1.289 or later.
+- **Claude Code 2.1.287 or later** in the terminal, or 2.1.286 or later in the Code tab of the Desktop app (see [where mods run](https://code.claude.com/docs/en/plugins/mods/overview#where-mods-run)). Tested with **2.1.296**.
 - Mods enabled – the default; see [turn mods on or off](https://code.claude.com/docs/en/plugins/mods/overview#turn-mods-on-or-off).
 - In the VS Code extension and under `claude -p` the hooks run but nothing is drawn, and `/keepwarm` refuses to start.
 - The Health tab's server-side tool calls (e.g. the advisor) need Claude Code 2.1.290 or later; earlier versions do not report them.
@@ -434,11 +434,12 @@ With `auto`, Cache Meter follows Claude Code's own TTL controls and your plan st
 | `command.run` (`/tokens`, `/keepwarm`, `/keepwarm-auto` only) | Answers its own commands (with the option `keepwarm` `off`: `/keepwarm` of another plugin goes straight on to it, its own say how to switch keepwarm on); `/tokens report` puts a Markdown report on the clipboard (`$.ui.copy`) and prints only a confirmation. If another plugin registered `/keepwarm` first, it says so once, passes `/keepwarm` words it doesn't know on to that plugin (with its own usage if nobody answers), and passes `off` on as well; `/keepwarm-auto off` always reaches it | Other commands are not matched |
 | `prompt.submit` | Closes its own pane above the prompt when you send a prompt; with `/keepwarm auto` on, your own prompt also ends the break (moves its window) | Nothing – the prompt is not read, changed or dropped |
 | `ui.close` | Notes that you closed its pane, so it doesn't reopen | Nothing – it never keeps a pane open |
-| `config.set` | Notices when its own option `keepwarm` changes in `/config`, after the change is written: registers or stops keepwarm | Nothing – every change goes through unchanged; of another row it compares only the name, never the value |
+| `config.set` | Notices when its own option `keepwarm` changes in `/config` and passes the change on unchanged; a second later it reads that row's value (`$.config.list`) and registers or stops keepwarm | Nothing – every change goes through unchanged, and it sets no option itself; of another row it compares only the name, never the value |
 | `command.describe` | With the option `keepwarm` `off`, hides its own `/keepwarm` and `/keepwarm-auto` from the slash-command menu | Nothing – other commands, including another plugin's `/keepwarm`, are left as they are |
-| `ui.fault` | Notes that one of the animation files (the café, the turning keepwarm arrow) failed to load, draw or run, and leaves that one out from then on; the reason goes to the debug log | Nothing – the rest of the pane draws as before |
 | `session.end` | At a `/clear`: puts together what the conversation came to (cost, requests, share from the cache, cold re-writes) from the mod's own figures, shown once the new one starts | Nothing – passes the event on; at a real exit nothing is shown |
 | `ui.render` (band, its own pane) | Draws the band – keeping what other mods draw below it – and the `/tokens` pane | Only its own drawing |
+
+**In `tests/` only:** the test file drives the mod the way Claude Code would – it runs slash commands (`$.command.run`), calls tools, submits prompts and, through a second test mod, changes the option `keepwarm` (`$.config.set`). None of these calls is in the mod itself: Cache Meter runs no command, calls no tool, submits no prompt and sets no option; `claude plugin test` loads the test file, Claude Code never does.
 
 `claude plugin validate .` prints this list for the version you have.
 </details>
