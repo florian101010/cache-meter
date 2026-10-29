@@ -973,13 +973,10 @@ async function applyKeepwarmOption($: EngineInterface) {
 // Passes a /keepwarm on to the other plugin. Nobody answering ends in Claude Code's developer line
 // ("… no command.run hook answered it …", measured with 2.1.296; types: a run no hook answers "says so as
 // its output") or, where nothing is beneath, a rejection – either way the person gets `fallback` instead.
-async function passKeepwarmOn(
-  e: Parameters<Parameters<Register>[0]>[1],
-  next: (e: never) => Promise<{ text?: string }>,
-  fallback: string,
-): Promise<{ text?: string }> {
+// The hook itself calls `next(e)` (so its event visibly goes on unchanged) and hands this the answer.
+async function answerOrFallback(passed: Promise<{ text?: string }>, fallback: string): Promise<{ text?: string }> {
   try {
-    const result = await next(e as never)
+    const result = await passed
     if (typeof result.text !== 'string' || /no command\.run hook answered/.test(result.text)) return { text: fallback }
 
     return result
@@ -993,8 +990,8 @@ async function passKeepwarmOn(
 // or a peer session (types: PromptOrigin). Stopping it is open to anyone.
 const NOT_YOURS = 'Keepwarm starts only when you type the command yourself. Not started.'
 const KEEPWARM_OFF = 'Keepwarm is switched off in /config (Cache Meter option "Keepwarm") – switch it on there to use it.'
-function isPersonsCommand(e: { origin?: { kind: string } }): boolean {
-  return e.origin?.kind === 'composer' || e.origin?.kind === 'bridge'
+function isPersonsCommand(run: { origin?: { kind: string } }): boolean {
+  return run.origin?.kind === 'composer' || run.origin?.kind === 'bridge'
 }
 
 export const register: Register = (on, options) => {
@@ -1581,12 +1578,12 @@ export const register: Register = (on, options) => {
     if (otherKeepwarm !== null) otherKeepwarm = await otherKeepwarmOwner($)
     const usage = 'Usage: /keepwarm [10m … 8h | auto [10m … 8h] | off] – 2h when left out.'
     // Words this /keepwarm does not know may be the other plugin's own subcommands: passed on to it.
-    if (c === undefined) return otherKeepwarm !== null ? passKeepwarmOn(e, next as never, usage) : { text: usage }
+    if (c === undefined) return otherKeepwarm !== null ? answerOrFallback(next(e), usage) : { text: usage }
     if (c.mode === 'off') {
       const own = await stopKeepWarm($)
       if (otherKeepwarm === null) return { text: own }
       // Off for both: the other plugin's keepwarm would ping on otherwise.
-      const theirs = await passKeepwarmOn(e, next as never, '')
+      const theirs = await answerOrFallback(next(e), '')
 
       return { text: theirs.text ? `${own}\n${theirs.text}` : own }
     }

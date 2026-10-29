@@ -1,7 +1,7 @@
 {
   "name": "cache-meter",
   "displayName": "Cache Meter",
-  "version": "0.12.1",
+  "version": "0.12.2",
   "description": "Stop wasting tokens: keeps your prompt cache warm through breaks with /keepwarm, shows when it expires and what each answer costs.",
   "author": {
     "name": "Florian Grimmer",

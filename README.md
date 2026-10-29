@@ -444,6 +444,23 @@ With `auto`, Cache Meter follows Claude Code's own TTL controls and your plan st
 `claude plugin validate .` prints this list for the version you have.
 </details>
 
+### What leaves your machine, call by call
+
+For Anthropic's directory review, every call that could send something, and what it carries:
+
+| Call | What it sends, and where | Only when |
+|---|---|---|
+| `$.ui.notify` | One fixed-text notification through Claude Code's own notification channel – your terminal, and your own `Notification` hooks if you have any. It is Claude Code's call (types: `$.ui.notify`), not another plugin's. The two texts are *Prompt cache expires in 9m – the next prompt would re-write 100.5k tokens.* (plus *Type /keepwarm to keep it.*) and *5 hours limit at 60% – full ≈ 18:40 at this pace (resets Mon 20:00)*. No setting, no conversation text, no file content | options `expiryNotice` or `limitNotice` on |
+| `$.model.fork` | One `/keepwarm` ping: your conversation once more, through Claude Code and your own credentials, to the provider your session already uses | you started `/keepwarm` or `/keepwarm auto` |
+| `$.session.usage({ breakdown: 'full' })` | Claude Code counts tokens with the API, as `/context` does | you press **Count exactly** |
+
+What it reads never goes into these: `$.settings.read()` is read for one value, `promptCacheTtl` (the cache lifetime); `$.session.turns()` returns a number, how many turns the session has. Neither value is sent anywhere.
+
+**Files the scan reads that Claude Code never loads:**
+- `.github/scripts/directory-checks.sh` and `.github/workflows/` run on GitHub's CI only. They read the mod's files (`hooks/`, `.claude-plugin/plugin.json`) to check them before a release and write nothing into them; `.github/scripts/upstream-docs.sh` downloads Claude Code's documentation pages to compare them, and runs nothing it downloads.
+- `hooks/lib.ts` holds a list of how credentials begin (`ghp_`, `sk-` and others) for one purpose: a tool label that looks like one is shown as `…`. It reads no credential from your machine or environment.
+- `tests/` holds the test kit's calls (see the hooks table above) and test strings shaped like credentials, to check that they are never shown.
+
 ## FAQ
 
 ### Cost
