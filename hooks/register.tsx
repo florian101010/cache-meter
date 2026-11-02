@@ -1828,6 +1828,43 @@ export const register: Register = (on, options) => {
     const rightIn = Math.max(16, rightW - 4)
     const fullIn = Math.max(16, cols - 4)
 
+    // A row label: a dim name in an 11-column field, as in the Health tab.
+    const label = (text: string) => <Text dimColor>{text.padEnd(11)}</Text>
+    // A row that never cuts a figure off: its parts joined by `sep`, and what does not fit goes to further
+    // lines under the value (packParts) – the label on the first line only. `lead` and `tail` are dim
+    // words that belong to the part (`agent time ` before a time, ` API value` after a cost).
+    type Part = { text: string; lead?: string; tail?: string; bold?: boolean; color?: string; dim?: boolean }
+    const packed = (key: string, rowLabel: string | null, parts: readonly Part[], width: number, sep = ' · ') => {
+      const indent = rowLabel === null ? 0 : 11
+      const whole = (pt: Part) => `${pt.lead ?? ''}${pt.text}${pt.tail ?? ''}`
+      const lines = packParts(
+        parts.map(pt => (pt.text === '' ? '' : whole(pt))),
+        width - indent,
+        sep,
+      )
+
+      return lines.map((pieces, li) => (
+        <Text key={`${key}-${li}`} wrap="truncate-end">
+          {rowLabel !== null && (li === 0 ? label(rowLabel) : <Text>{' '.repeat(indent)}</Text>)}
+          {/* Flat, no wrapper per part: a part's own Text carries its colour. */}
+          {pieces.flatMap((piece, j) => {
+            const pt = parts[piece.part]!
+            const style = { bold: pt.bold, color: pt.color, dimColor: pt.dim }
+            const k = `${key}-${li}-${j}`
+            const out = j > 0 ? [<Text key={`${k}-sep`} dimColor>{sep}</Text>] : []
+            if (piece.text !== whole(pt)) return [...out, <Text key={k} {...style}>{piece.text}</Text>]
+
+            return [
+              ...out,
+              ...(pt.lead === undefined ? [] : [<Text key={`${k}-lead`} dimColor>{pt.lead}</Text>]),
+              <Text key={k} {...style}>{pt.text}</Text>,
+              ...(pt.tail === undefined ? [] : [<Text key={`${k}-tail`} dimColor>{pt.tail}</Text>]),
+            ]
+          })}
+        </Text>
+      ))
+    }
+
     // A one-row meter: Raster cells in the terminal, the same runs as colored text elsewhere.
     const gauge = (key: string, width: number, fraction: number, fill: number, theme: string, marks: readonly Mark[] = [], shineAt: number | null = null) => {
       const runs = meterRuns(width, fraction, marks)
@@ -1931,12 +1968,17 @@ export const register: Register = (on, options) => {
             next message re-writes ≈ {stake}
           </Text>
         )}
-        {isWarm && rewriteTokens > 0 && (
-          <Text dimColor wrap="truncate-end">
-            expiry costs a re-write of ≈ {stake}
-            {pingMarks.length > 0 && tier !== 'narrow' ? ' · ┃ keepwarm pings here' : ''}
-          </Text>
-        )}
+        {isWarm &&
+          rewriteTokens > 0 &&
+          packed(
+            'expiry',
+            null,
+            [
+              { text: `expiry costs a re-write of ≈ ${stake}`, dim: true },
+              { text: pingMarks.length > 0 && tier !== 'narrow' ? '┃ keepwarm pings here' : '', dim: true },
+            ],
+            leftIn,
+          )}
       </Box>
     )
 
@@ -2069,42 +2111,6 @@ export const register: Register = (on, options) => {
     const limits = measure?.limits ?? []
     // Name (11) + bar + ' 100%' (5) + ' · resets Mon 17:10' (19): the bar takes what the column leaves.
     const limitBar = Math.max(6, Math.min(24, rightIn - 35))
-    // A row label: a dim name in an 11-column field, as in the Health tab.
-    const label = (text: string) => <Text dimColor>{text.padEnd(11)}</Text>
-    // A row that never cuts a figure off: its parts joined by `sep`, and what does not fit goes to further
-    // lines under the value (packParts) – the label on the first line only. `lead` and `tail` are dim
-    // words that belong to the part (`agent time ` before a time, ` API value` after a cost).
-    type Part = { text: string; lead?: string; tail?: string; bold?: boolean; color?: string; dim?: boolean }
-    const packed = (key: string, rowLabel: string | null, parts: readonly Part[], width: number, sep = ' · ') => {
-      const indent = rowLabel === null ? 0 : 11
-      const whole = (pt: Part) => `${pt.lead ?? ''}${pt.text}${pt.tail ?? ''}`
-      const lines = packParts(
-        parts.map(pt => (pt.text === '' ? '' : whole(pt))),
-        width - indent,
-        sep,
-      )
-
-      return lines.map((pieces, li) => (
-        <Text key={`${key}-${li}`} wrap="truncate-end">
-          {rowLabel !== null && (li === 0 ? label(rowLabel) : <Text>{' '.repeat(indent)}</Text>)}
-          {/* Flat, no wrapper per part: a part's own Text carries its colour. */}
-          {pieces.flatMap((piece, j) => {
-            const pt = parts[piece.part]!
-            const style = { bold: pt.bold, color: pt.color, dimColor: pt.dim }
-            const k = `${key}-${li}-${j}`
-            const out = j > 0 ? [<Text key={`${k}-sep`} dimColor>{sep}</Text>] : []
-            if (piece.text !== whole(pt)) return [...out, <Text key={k} {...style}>{piece.text}</Text>]
-
-            return [
-              ...out,
-              ...(pt.lead === undefined ? [] : [<Text key={`${k}-lead`} dimColor>{pt.lead}</Text>]),
-              <Text key={k} {...style}>{pt.text}</Text>,
-              ...(pt.tail === undefined ? [] : [<Text key={`${k}-tail`} dimColor>{pt.tail}</Text>]),
-            ]
-          })}
-        </Text>
-      ))
-    }
     // Agent time: summed in turn.complete; state an older version wrote has no such fields (read as 0).
     const busyMs = totals.busyMs ?? 0
     const busyTurns = totals.busyTurns ?? 0
@@ -2168,11 +2174,17 @@ export const register: Register = (on, options) => {
             ],
             rightIn,
           )}
-        {issues !== '' && (
-          <Text color="warning" wrap="truncate-end">
-            {issues} – see 3: Health
-          </Text>
-        )}
+        {issues !== '' &&
+          packed(
+            'issues',
+            null,
+            [
+              { text: issues, color: 'warning' },
+              { text: 'see 3: Health', color: 'warning' },
+            ],
+            rightIn,
+            ' – ',
+          )}
         {totals.mainSteps === 0 ? null : colds.length === 0 ? (
           <Text wrap="truncate-end">
             <Text dimColor>{'Cold       '}</Text>
@@ -2213,11 +2225,17 @@ export const register: Register = (on, options) => {
             )}
           </Box>
         )}
-        {limits.length === 0 && (
-          <Text dimColor wrap="truncate-end">
-            Plan limits: no reading (no subscription, or no answer yet)
-          </Text>
-        )}
+        {limits.length === 0 &&
+          packed(
+            'no-limits',
+            null,
+            [
+              { text: 'Plan limits: no reading', dim: true },
+              { text: '(no subscription, or no answer yet)', dim: true },
+            ],
+            rightIn,
+            ' ',
+          )}
         {limits.map(l => {
           const used = Math.max(0, Math.min(limitBar, Math.round((l.percentUsed / 100) * limitBar)))
           const full = limitForecast(measure?.limitStart?.[l.kind], l.percentUsed, now, l.resetsAt)
@@ -2617,6 +2635,7 @@ export const register: Register = (on, options) => {
               { text: '(main conversation, in + out)', dim: true },
             ],
             fullIn,
+            ' ',
           )}
         </Box>
         <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="column">
@@ -2653,12 +2672,13 @@ export const register: Register = (on, options) => {
             packed(
               'server-last',
               '',
-              [
-                { text: `last ${hhmm(health.lastServerTools.at)}:`, dim: true },
-                ...health.lastServerTools.calls.map(c => ({ text: `${c.name} ${c.ms === null ? '–' : duration(c.ms)}`, dim: true })),
-              ],
+              health.lastServerTools.calls.map((c, i) => ({
+                lead: i === 0 ? `last ${hhmm(health.lastServerTools!.at)}: ` : undefined,
+                text: `${c.name} ${c.ms === null ? '–' : duration(c.ms)}`,
+                dim: true,
+              })),
               fullIn,
-              ' ',
+              ', ',
             )}
         </Box>
         <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="column">

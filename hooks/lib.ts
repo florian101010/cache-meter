@@ -709,7 +709,8 @@ export function cleanLabel(label: string): string {
 
 /**
  * A tool call's label: the tool, plus for the file tools the home-shortened path and for Bash only the
- * program name – a command's arguments, a URL or a token never become part of it.
+ * program name – a command's arguments, a URL or a token never become part of it. An MCP tool is its own
+ * name alone (`shortTool`). A path over 80 characters loses its start, never the tool word.
  */
 export function toolLabel(tool: string, input: Readonly<Record<string, unknown>>): string {
   const path = typeof input.file_path === 'string' ? input.file_path : typeof input.notebook_path === 'string' ? input.notebook_path : null
@@ -754,6 +755,7 @@ export function toolLabel(tool: string, input: Readonly<Record<string, unknown>>
 /**
  * An MCP tool by its own name, the part after the last `__` of its wire name (`mcp__server__tool`):
  * the server's part filled a narrow column before the tool's name showed. Any other tool as it is.
+ * Two servers' tools of the same name then look alike; the Context tab's MCP card names the servers.
  */
 export function shortTool(tool: string): string {
   if (!tool.startsWith('mcp__')) return tool
@@ -762,15 +764,19 @@ export function shortTool(tool: string): string {
   return own === '' ? tool : own
 }
 
-/** Columns a text takes: one per code point (the pane's texts hold no wide characters). */
+/**
+ * Columns a text takes, as one per code point: wide characters (CJK, emoji) in a path or a task are
+ * under-counted, and the renderer's truncation catches what still overflows.
+ */
 export function columns(text: string): number {
   return [...text].length
 }
 
 /**
  * A stored label fitted to `width` columns: the tool word, then as many trailing path segments as fit
- * after "…/" – so the file name always shows and a parent folder when there is room. A label without a
- * path (`Bash git`, an MCP tool) is returned as it is; the renderer cuts it if it must.
+ * after "…/" – the file name, and a parent folder when there is room. The tool word gives way first
+ * (`…/register.tsx`); a file name wider than the column keeps it and is cut in the middle by the
+ * renderer. A label without a path (`Bash git`, an MCP tool) is returned as it is.
  */
 export function fitLabel(label: string, width: number): string {
   if (columns(label) <= width) return label
@@ -938,7 +944,7 @@ export function reportMarkdown(r: ReportData): string {
   if (r.memoryFiles.length > 0) lines.push(`- Memory files: ${r.memoryFiles.map(f => `${code(f.name)} ${short(f.tokens)}`).join(', ')}`)
   if (r.mcpServers.length > 0) lines.push(`- MCP servers: ${r.mcpServers.map(m => `${code(m.name)} ${short(m.tokens)} (${m.calls} calls)`).join(', ')}`)
   if (r.toolsByTool.length > 0) {
-    lines.push(`- Tool results (≈ tokens, characters ÷ 4): ${r.toolsByTool.map(t => `${t.tool} ${short(t.tokens)} in ${t.count}`).join(', ')}`)
+    lines.push(`- Tool results (≈ tokens, characters ÷ 4): ${r.toolsByTool.map(t => `${shortTool(t.tool)} ${short(t.tokens)} in ${t.count}`).join(', ')}`)
     lines.push(`- Largest: ${r.largest.map(l => `${code(l.label)} ${short(l.tokens)}`).join(', ')}`)
   }
   if (r.agents.length > 0) {
