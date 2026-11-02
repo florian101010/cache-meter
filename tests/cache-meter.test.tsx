@@ -14,7 +14,11 @@ import {
   cafeState,
   barCells,
   compactNote,
+  fitLabel,
+  fitParts,
   foldSmall,
+  packParts,
+  shortTool,
   hogNote,
   isContextHog,
   shareOfRequest,
@@ -308,6 +312,10 @@ test('TTL: own option, then Claude Code controls, then overage, then reported va
   expect(resolveTtl({ ...NO_TTL, setting: '5m', reported: '1h' }).ms).toBe(FIVE_MIN)
   expect(resolveTtl({ ...NO_TTL, force5m: true, enable1h: true }).source).toBe('FORCE_PROMPT_CACHING_5M')
   expect(resolveTtl({ ...NO_TTL, envTtl: '5m', settingTtl: '1h' }).source).toBe('CLAUDE_CODE_PROMPT_CACHE_TTL')
+  // By value too: the variable wins over the setting, both ways round.
+  expect(resolveTtl({ ...NO_TTL, envTtl: '5m', settingTtl: '1h' }).ms).toBe(FIVE_MIN)
+  expect(resolveTtl({ ...NO_TTL, envTtl: '1h', settingTtl: '5m' }).ms).toBe(HOUR)
+  expect(resolveTtl({ ...NO_TTL, enable1h: true, limits: [{ kind: 'five_hour', percentUsed: 100 }] }).source).toBe('ENABLE_PROMPT_CACHING_1H')
   expect(resolveTtl({ ...NO_TTL, settingTtl: '5m' }).ms).toBe(FIVE_MIN)
   expect(resolveTtl({ ...NO_TTL, envTtl: 'bogus' }).ms).toBe(HOUR)
   expect(resolveTtl({ ...NO_TTL, reported: '1h', limits: [{ kind: 'five_hour', percentUsed: 100 }] }).ms).toBe(FIVE_MIN)
@@ -361,7 +369,7 @@ test('turn.step: a main request fills the band, a subagent only the totals', asy
   await ui.unmount()
 
   const pane = await $.ui.mount({ surface: 'desktop', ...PANE })
-  expect(await pane.find({ type: 'Text', text: / · 1 requests/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^subagents read .* · 1 request$/ })).toBeDefined()
   await pane.unmount()
 })
 
@@ -680,7 +688,7 @@ test('drawing helpers: tall digits, raster cells, meter', async () => {
   expect(rasterCells([[0x2588, 0xff8800, 0x01000000]])).toBe('iCUAAACI/wAAAAAB')
   expect(rasterCells([[0x2588, 0x00ff00, 0x01000000], [0x2591, 0x585b70, 0x01000000]])).toBe('iCUAAAD/AAAAAAABkSUAAHBbWAAAAAAB')
   // 4.5 of 10 cells: four full, a half block, a marker on cell 7, the rest track.
-  const mark = { at: 7, color: 0xff6b81, theme: 'error' }
+  const mark = { at: 7, color: 0xff6b81, theme: 'error' as const }
   const runs = meterRuns(10, 0.45, [mark])
   expect(runs.map(r => r.text).join('')).toBe('████▌░░┃░░')
   expect(runs.map(r => r.role)).toEqual(['fill', 'track', 0, 'track'])
@@ -1088,8 +1096,15 @@ test('limit forecast drawn in the overview once the pace is known', async ($, on
   await ui.unmount()
   await clock.advance(HOUR)
   await $.session.measure(at(40) as never)
+  // 90 columns: the 24-cell bar leaves no room, so the forecast has a line of its own.
   ui = await $.ui.mount({ surface: 'terminal', ...PANE })
-  expect(await ui.find({ type: 'Text', text: ` · full ≈ ${hhmm(T0 + 4 * HOUR)} at this pace` })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: new RegExp(`^full ≈ ${hhmm(T0 + 4 * HOUR)} at this pace$`) })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /· full ≈/ })).toBeUndefined()
+  await ui.unmount()
+  // 109 columns: room enough, it stays on the row.
+  ui = await $.ui.mount({ surface: 'terminal', ...PANE, props: { ...PANE.props, bodyColumns: 109 } })
+  expect(await ui.find({ type: 'Text', text: new RegExp(`^ · full ≈ ${hhmm(T0 + 4 * HOUR)} at this pace$`) })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^full ≈/ })).toBeUndefined()
   await ui.unmount()
 })
 
@@ -1217,14 +1232,17 @@ async function stepWith($: Engine, model: string, effort?: string, agentId?: str
   return next.value
 }
 
-async function healthText($: Engine, pattern: RegExp) {
+// The first Text on a pane tab that shows `pattern`, from a fresh mount.
+async function tabText($: Engine, tab: 'health' | 'context', pattern: RegExp) {
   const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
-  await ui.press({ key: 'tab-health' })
+  await ui.press({ key: `tab-${tab}` })
   const found = await ui.find({ type: 'Text', text: pattern })
   await ui.unmount()
 
   return found
 }
+
+const healthText = ($: Engine, pattern: RegExp) => tabText($, 'health', pattern)
 
 test('cache-splitting change: what splits it, what keeps it', async () => {
   expect(effortKeepsCache('claude-opus-5-5')).toBe(true)
@@ -1279,7 +1297,7 @@ test('warm miss: the cause is named – effort, tool set, or a shorter TTL', asy
   next.read = 10_000
   await clock.advance(60_000)
   await stepWith($, 'claude-opus-5', 'medium')
-  expect(await healthText($, /^ +effort high → medium – each splits the cache$/)).toBeDefined()
+  expect(await healthText($, /^effort high → medium – each splits the cache$/)).toBeDefined()
   // The tool set changed between two requests.
   next.tools = [{ name: 'mcp__linear__x', serverName: 'linear', tokens: 900, isLoaded: true }]
   await clock.advance(60_000)
@@ -1333,8 +1351,8 @@ test('subagents: tokens, requests and cache hit per agent, named by type and tas
   await step($, 'agent-1')
   await step($, 'agent-1')
   await step($, 'agent-unknown-123456')
-  expect(await healthText($, /201\.0k tok · 2 req · .*Explore: find the tests$/)).toBeDefined()
-  expect(await healthText($, /1 req .*agent-unknow$/)).toBeDefined()
+  expect(await healthText($, /^Explore: find the tests · 201\.0k tok · 2 req · /)).toBeDefined()
+  expect(await healthText($, /^agent-unknow · [\d.]+k? tok · 1 req · /)).toBeDefined()
 })
 
 test('turnLine off: no line under the answer', { options: { turnLine: 'off' } }, async ($, on) => {
@@ -1356,14 +1374,7 @@ test('warm miss after an effort change on a model that keeps the cache: named wi
   expect(await healthText($, /effort high → low – keeps the cache on this model only with an API key or a subscription$/)).toBeDefined()
 })
 
-async function contextText($: Engine, pattern: RegExp) {
-  const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
-  await ui.press({ key: 'tab-context' })
-  const found = await ui.find({ type: 'Text', text: pattern })
-  await ui.unmount()
-
-  return found
-}
+const contextText = ($: Engine, pattern: RegExp) => tabText($, 'context', pattern)
 
 test('tool labels: path or program name, never arguments', async () => {
   expect(toolLabel('Read', { file_path: '/Users/u/project/a.ts' })).toBe('Read ~/project/a.ts')
@@ -1395,7 +1406,7 @@ test('tool labels: path or program name, never arguments', async () => {
   expect(toolLabel('Read', { file_path: 'C:\\Users\\carol\\notes.md' })).toBe('Read ~\\notes.md')
   expect(toolLabel('Read', { file_path: '/root/.bashrc' })).toBe('Read ~/.bashrc')
   expect(toolLabel('Grep', { pattern: 'password' })).toBe('Grep')
-  expect(toolLabel('mcp__github__get_file', { path: 'x' })).toBe('mcp__github__get_file')
+  expect(toolLabel('mcp__github__get_file', { path: 'x' })).toBe('get_file')
 })
 
 test('what the conversation holds: tool results of the main conversation, reset by a compaction', async ($, on) => {
@@ -1499,7 +1510,7 @@ test('warm miss: with tool search active a loaded tool is no cause', async ($, o
   await clock.advance(60_000)
   await stepWith($, 'claude-opus-5', 'high')
   expect(await healthText($, /tool set changed/)).toBeUndefined()
-  expect(await healthText($, /^ +not observable here/)).toBeDefined()
+  expect(await healthText($, /^not observable here/)).toBeDefined()
 })
 
 test('a /model switch warns once: no second note at the request, no warm miss', async ($, on) => {
@@ -1573,9 +1584,9 @@ test('subagents: a failed name lookup is tried again', async ($, on) => {
   const { next } = world(on)
   next.agentListFails = 1
   await step($, 'agent-1')
-  expect(await healthText($, / agent-1$/)).toBeDefined()
+  expect(await healthText($, /^agent-1 · /)).toBeDefined()
   await step($, 'agent-1')
-  expect(await healthText($, /Explore: find the tests$/)).toBeDefined()
+  expect(await healthText($, /^Explore: find the tests · /)).toBeDefined()
 })
 
 test('last stretch: the dot pulses once a second; a redraw timer runs only then', async ($, on) => {
@@ -1640,7 +1651,7 @@ test('request chart: a hover area per column reveals its details over the time r
   expect(detail?.props).toMatchObject({ position: 'absolute', display: 'none' })
   const row = await ui.find({ type: 'Text', text: /^\d\d:\d\d · 100\.0k in · 93% hit · 6\.0k written · out 500 *$/ })
   expect(String(row?.text).length).toBe(Number(detail?.props.width))
-  expect(await ui.find({ type: 'Text', text: /· first write *$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /· 93% hit · first write · / })).toBeDefined()
   await ui.unmount()
 })
 
@@ -1703,8 +1714,8 @@ test('privacy round 2: Unicode spaces, token-like names, home dirs and URLs neve
   expect(toolLabel('Bash', { command: 'TOKEN=a\tnpm test' })).toBe('Bash npm')
   expect(toolLabel('Bash', { command: './scripts/deploy.sh --prod' })).toBe('Bash deploy.sh')
   // file_path only for the file tools, never a URL, no query or fragment
-  expect(toolLabel('mcp__x__upload', { file_path: 'https://h/up?sig=SECRET' })).toBe('mcp__x__upload')
-  expect(toolLabel('mcp__x__upload', { file_path: '/Users/carol/contract-mueller.pdf' })).toBe('mcp__x__upload')
+  expect(toolLabel('mcp__x__upload', { file_path: 'https://h/up?sig=SECRET' })).toBe('upload')
+  expect(toolLabel('mcp__x__upload', { file_path: '/Users/carol/contract-mueller.pdf' })).toBe('upload')
   expect(toolLabel('Read', { file_path: 'https://h/up?sig=SECRET' })).toBe('Read')
   expect(toolLabel('Read', { file_path: '/Users/carol/a.md?token=SECRET#x' })).toBe('Read ~/a.md')
   expect(toolLabel('Read', { file_path: '/tmp/ghp_SECRET123.txt' })).toBe('Read /tmp/…')
@@ -1797,7 +1808,7 @@ test('live during a turn: an empty limit list keeps the plan limits and the fore
   await $.session.measure(at(40) as never)
   const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
   expect(await ui.find({ type: 'Text', text: /5 hours/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: ` · full ≈ ${hhmm(T0 + 4 * HOUR)} at this pace` })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: `full ≈ ${hhmm(T0 + 4 * HOUR)} at this pace` })).toBeDefined()
   await ui.unmount()
 })
 
@@ -1873,7 +1884,7 @@ test('after a relaunch (/tui, --resume): the pane says the history starts over, 
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
   expect(await ui.find({ type: 'Text', text: /^No request since \d\d:\d\d: Cache Meter keeps its history in memory only/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /^0 requests since \d\d:\d\d · $/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^0 requests since \d\d:\d\d · / })).toBeDefined()
   await ui.unmount()
   // Nothing measured: Health does not call that a clean record.
   const miss = await healthText($, /^no request measured yet$/)
@@ -1890,7 +1901,7 @@ test('a fresh session: no restart note, and the history note leaves once request
   await ui.unmount()
   await step($)
   ui = await $.ui.mount({ surface: 'terminal', ...PANE })
-  expect(await ui.find({ type: 'Text', text: /^1 requests · $/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^1 requests · / })).toBeDefined()
   await ui.unmount()
   expect(await healthText($, /every warm request read the cache/)).toBeDefined()
 })
@@ -3492,10 +3503,10 @@ test('agent time after a relaunch or /resume: counted from then on, and the pane
   await step($)
   await $.turn.complete({ turnId: 't1', answer: 'ok', durationMs: 45_000, isAborted: false, usage: TURN_USAGE } as never)
   const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
-  expect(await ui.find({ type: 'Text', text: /^ since \d\d:\d\d · ⌀ 45s per prompt$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^agent time 45s since \d\d:\d\d · ⌀ 45s per prompt$/ })).toBeDefined()
   await ui.press({ key: 'tab-health' })
   // No share of the session: the time before the relaunch is not known.
-  expect(await ui.find({ type: 'Text', text: /^ since \d\d:\d\d · ⌀ 45s\/prompt$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^Agent time 45s since \d\d:\d\d · ⌀ 45s\/prompt$/ })).toBeDefined()
   await ui.unmount()
 })
 
@@ -3547,4 +3558,344 @@ test('context tab rows cannot wrap: name, bar and figures keep their width, only
   // The server's tools and calls on their own line beneath its row.
   expect(await ui.find({ type: 'Text', text: /^ {2}2 tools · 0 calls$/ })).toBeDefined()
   await ui.unmount()
+})
+
+// A session with something in every card: plan limit with a forecast, cold re-writes (pause, resume),
+// a model switch, a warm miss, a subagent, a long path, an MCP result that floods the context.
+async function richSession($: Engine, on: On) {
+  const w = world(on)
+  const { next, clock } = w
+  next.turns = 0
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  await step($)
+  // A warm miss: a minute after the last request, warm by the clock, it wrote more than it read.
+  await clock.advance(60_000)
+  next.read = 0
+  next.write = 50_000
+  await step($)
+  next.read = 93_000
+  next.write = 6_000
+  next.toolText = 'x'.repeat(12_000)
+  await toolCall($, { tool: 'Read', file_path: '/Users/u/Dateien/ai-webdev/new-website-floriangrimmer/src/components/hooks/register.tsx' })
+  next.toolText = 'y'.repeat(100_000)
+  await toolCall($, { tool: 'mcp__MCP_DOCKER__playwright__browser_snapshot' })
+  next.toolText = 'z'.repeat(9_000)
+  await toolCall($, { tool: 'Bash', command: 'git status' })
+  next.toolText = null
+  await step($, 'agent-1')
+  // Two hours away: a cold re-write.
+  await clock.advance(2 * HOUR)
+  next.write = 120_000
+  await step($)
+  next.write = 6_000
+  await $.classic.PostModelSwitch({ hook_event_name: 'PostModelSwitch', from_model: 'a', to_model: 'b', requested_model: null, source: 'command', context_tokens: 100_000, prompt_cache_warm: true, cache_ttl: '1h', estimated_cache_write_usd: 0.4, pricing: 'catalog' } as never)
+  await $.classic.SessionStart({ source: 'resume', seconds_since_last_response: 4_800, prompt_cache_likely_expired: true, context_tokens: 150_000 } as never)
+  next.write = 150_000
+  await step($)
+  next.write = 6_000
+  await $.turn.complete({ turnId: 't1', answer: 'ok', durationMs: 184_000, isAborted: false, usage: TURN_USAGE } as never)
+  next.turns = 4
+  // Plan-limit readings an hour apart: the pace, so the forecast is drawn.
+  const limits = (pct: number) => ({ context: { tokens: 300_000, window: 1_000_000, percent: 30 }, rateLimits: [{ kind: 'seven_day', percentUsed: pct, resetsAt: '2026-10-17T18:00:00Z' }], cost: { usd: 9.5 }, changed: ['context', 'rateLimits', 'cost'] })
+  await $.session.measure(limits(20) as never)
+  await clock.advance(HOUR)
+  await $.session.measure(limits(45) as never)
+  // One more request: the cache is warm again, so the cache card shows what expiry would cost.
+  await step($)
+
+  return w
+}
+
+// Every line that cuts instead of wrapping must fit the card (fullIn = bodyColumns − 4), at the widths of a
+// pane docked beside the chat on a tablet: nothing a reader needs is lost behind "…".
+// The text a drawn element shows: its string children, and its child elements' in document order.
+function textOf(el: unknown): string {
+  if (typeof el === 'string') return el
+  const children = (el as { children?: unknown[] } | undefined)?.children ?? []
+
+  return children.map(textOf).join('')
+}
+
+// The texts a pane draws that would be cut: every Text that truncates and is wider than its card
+// (a single column: below 110 columns, register's tier 'wide').
+async function cutLines($: Engine, widths: readonly number[], tabs: readonly string[]): Promise<string[]> {
+  const cut: string[] = []
+  for (const cols of widths) {
+    for (const tab of tabs) {
+      const ui = await $.ui.mount({ surface: 'terminal', ...PANE, props: { ...PANE.props, bodyColumns: cols } })
+      await ui.press({ key: `tab-${tab}` })
+      for (const t of await ui.findAll({ type: 'Text' })) {
+        if (t.props.wrap === 'wrap') continue
+        if ([...t.text].length > cols - 4) cut.push(`${cols} ${tab}: ${t.text}`)
+      }
+      await ui.unmount()
+    }
+  }
+
+  return cut
+}
+
+test('narrow pane: no plan limits, API errors and unusual stops – nothing cut either', async ($, on) => {
+  const { next } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  next.stop = 'max_tokens'
+  await step($)
+  next.stop = 'refusal'
+  await step($)
+  next.stop = 'end_turn'
+  await $.classic.StopFailure({ hook_event_name: 'StopFailure', error: 'overloaded' } as never)
+  await $.classic.StopFailure({ hook_event_name: 'StopFailure', error: 'rate_limit' } as never)
+  await $.session.measure({ context: { tokens: 100_000, window: 1_000_000, percent: 10 }, rateLimits: [], cost: { usd: 1 }, changed: ['context', 'cost'] })
+  const cut = await cutLines($, [55, 48], ['overview', 'health'])
+  expect(cut).toEqual([])
+  const ui = await $.ui.mount({ surface: 'terminal', ...PANE, props: { ...PANE.props, bodyColumns: 48 } })
+  // The pane keeps the tab last chosen (Health above): back to the Overview.
+  await ui.press({ key: 'tab-overview' })
+  expect(await ui.find({ type: 'Text', text: '(no subscription, or no answer yet)' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'see 3: Health' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('narrow pane: no line in Overview, Context or Health is cut', { timeoutMs: 20_000 }, async ($, on) => {
+  await richSession($, on)
+  const cut = await cutLines($, [55, 48], ['overview', 'context', 'health'])
+  expect(cut).toEqual([])
+  // From 110 columns the Overview splits into two columns, each as narrow as a docked pane; the request
+  // chart and the footer stay full width, so one limit for every line does not fit there. The line that
+  // was cut on 0.13.0 – the cache card's, in the 50-column left column – is checked by itself.
+  const wide = await $.ui.mount({ surface: 'terminal', ...PANE, props: { ...PANE.props, bodyColumns: 110 } })
+  await wide.press({ key: 'tab-overview' })
+  const expiry = await wide.find({ type: 'Text', text: /^expiry costs a re-write of ≈ / })
+  expect([...String(expiry?.text)].length).toBeLessThanOrEqual(Math.floor((110 - 1) / 2) - 4)
+  expect(await wide.find({ type: 'Text', text: /^┃ keepwarm pings here$/ })).toBeDefined()
+  // The session card's rows, in the 51-column right column.
+  const rightIn = 110 - 1 - Math.floor((110 - 1) / 2) - 4
+  const session = (await wide.findAll({ type: 'Text' })).filter(
+    t => t.props.wrap === 'truncate-end' && /^(read |\d+ requests|\d+ prompts? · agent time|subagents |Cold |7 days| {11}\d\d:\d\d)/.test(t.text),
+  )
+  expect(session.length).toBeGreaterThan(5)
+  expect(session.filter(t => [...t.text].length > rightIn).map(t => t.text)).toEqual([])
+  await wide.unmount()
+  const ui = await $.ui.mount({ surface: 'terminal', ...PANE, props: { ...PANE.props, bodyColumns: 48 } })
+  // Every card the test means to reach is drawn.
+  await ui.press({ key: 'tab-overview' })
+  expect(await ui.find({ type: 'Text', text: /^full ≈ \d\d:\d\d at this pace$/ })).toBeDefined()
+  await ui.press({ key: 'tab-health' })
+  expect(await ui.find({ type: 'Text', text: /^Warm miss {2}1× re-written while warm/ })).toBeDefined()
+  await ui.press({ key: 'tab-context' })
+  // A fitted label fits its name column – half the card in a narrow pane, wide enough for the tool word.
+  // The name is the text of the row's first child (its name box), read from the drawn descriptions.
+  const nameOf = async (i: number) => textOf((await ui.find({ key: `large-${i}` }))?.children[0])
+  expect(await nameOf(1)).toBe('Read …/register.tsx')
+  const nameW = Math.floor((48 - 4) / 2)
+  for (const i of [0, 1, 2]) {
+    const name = await nameOf(i)
+    expect([i, name !== '' && [...name].length <= nameW]).toEqual([i, true])
+  }
+  // The MCP result (25k tokens, over 2 % of the 1M window) floods the context: by its own name, in the
+  // warning colour, with a "!" – on that row alone; the Read row (3k) keeps the accent colour.
+  expect(await ui.find({ type: 'Text', text: /^browser_snapshot$/ })).toBeDefined()
+  const marks = await ui.findAll({ type: 'Text', text: /^ !$/ })
+  expect(marks.map(m => [m.props.color, m.props.bold])).toEqual([['warning', true]])
+  const readBar = (await ui.find({ key: 'large-1-figures' }))?.children[0] as { props?: { color?: string } } | undefined
+  expect(readBar?.props?.color).toBe('suggestion')
+  await ui.unmount()
+})
+
+// The states the first session does not reach: budget on, notice on, server-side tools, a subagent's
+// error, history counted since a relaunch, more than three cold re-writes, one after a model switch.
+test('narrow pane: budget, notice, server tools, errors, relaunch, many colds – nothing cut', { timeoutMs: 20_000, options: { sessionBudget: 2, expiryNotice: 'on' } }, async ($, on) => {
+  const { next, clock } = world(on)
+  next.turns = 3
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  // A resume Claude Code gives no verdict on: the Health tab says so in a sentence that wraps.
+  await $.classic.SessionStart({ source: 'resume', seconds_since_last_response: 60, context_tokens: 100_000 })
+  // 15k tokens: over the 10k floor, under 2 % of the 1M window – no flood, no mark.
+  next.toolText = 'w'.repeat(60_000)
+  await toolCall($, { tool: 'Read', file_path: '/work/big.log' })
+  next.toolText = null
+  next.server = [
+    { id: 's1', name: 'advisor', input: {}, startedAt: T0, endedAt: T0 + 59_000 },
+    { id: 's2', name: 'web_search', input: {}, startedAt: T0, endedAt: T0 + 3_000 },
+  ]
+  await step($)
+  next.server = []
+  await $.classic.StopFailure({ hook_event_name: 'StopFailure', error: 'rate_limit', agent_id: 'agent-1' } as never)
+  for (let i = 0; i < 4; i++) {
+    await clock.advance(2 * HOUR)
+    next.write = 100_000 + i * 10_000
+    await step($)
+  }
+  await stepWith($, 'claude-other')
+  next.write = 6_000
+  await $.turn.complete({ turnId: 't1', answer: 'ok', durationMs: 95_000, isAborted: false, usage: TURN_USAGE } as never)
+  await $.session.measure({ context: { tokens: 300_000, window: 1_000_000, percent: 30 }, rateLimits: [], cost: { usd: 1.7 }, changed: ['context', 'cost'] })
+  const cut = await cutLines($, [55, 48], ['overview', 'health'])
+  expect(cut).toEqual([])
+  // 55 columns: the server-side calls fit on one line, joined by commas.
+  const ui = await $.ui.mount({ surface: 'terminal', ...PANE, props: { ...PANE.props, bodyColumns: 55 } })
+  await ui.press({ key: 'tab-health' })
+  expect(await ui.find({ type: 'Text', text: /^last \d\d:\d\d: $/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /advisor 59s, web_search 3s/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^\d+% of \$2\.00$/ })).toBeDefined()
+  expect((await ui.find({ type: 'Text', text: /^Resumed \d\d:\d\d – Claude Code gave no verdict/ }))?.props.wrap).toBe('wrap')
+  await ui.press({ key: 'tab-context' })
+  expect(await ui.find({ type: 'Text', text: /^Read ~?\/?work\/big\.log$|^Read \/work\/big\.log$/ })).toBeDefined()
+  expect(await ui.findAll({ type: 'Text', text: /^ !$/ })).toHaveLength(0)
+  await ui.press({ key: 'tab-overview' })
+  expect(await ui.find({ type: 'Text', text: /showing the last 3/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('tool labels: a long path keeps the tool word; MCP tools by their own name', () => {
+  const deep = `/Users/u/${'very-long-folder-name/'.repeat(5)}src/register.tsx`
+  const label = toolLabel('Read', { file_path: deep })
+  expect(label.startsWith('Read …/')).toBe(true)
+  expect(label.endsWith('/src/register.tsx')).toBe(true)
+  expect([...label].length).toBeLessThanOrEqual(80)
+  expect(shortTool('mcp__MCP_DOCKER__playwright__browser_snapshot')).toBe('browser_snapshot')
+  expect(shortTool('Read')).toBe('Read')
+  expect(shortTool('mcp__')).toBe('mcp__')
+})
+
+test('fitLabel: the file name always, a parent folder when there is room', () => {
+  expect(fitLabel('Read ~/a.ts', 20)).toBe('Read ~/a.ts')
+  expect(fitLabel('Read ~/Dateien/ai-webdev/site/src/hooks/register.tsx', 25)).toBe('Read …/hooks/register.tsx')
+  expect(fitLabel('Read ~/Dateien/ai-webdev/site/src/hooks/register.tsx', 19)).toBe('Read …/register.tsx')
+  // No room for the tool word: the file name wins.
+  expect(fitLabel('Read ~/Dateien/ai-webdev/site/src/hooks/register.tsx', 15)).toBe('…/register.tsx')
+  // A label stored without its tool word (an older version cut its start).
+  expect(fitLabel('…/ai-webdev/new-website/src/register.tsx', 20)).toBe('…/src/register.tsx')
+  // A masked part stops the climb: nothing is guessed behind "…".
+  expect(fitLabel('Read ~/x/…/keys/notes.md', 23)).toBe('Read …/keys/notes.md')
+  // No path: as it is, the renderer cuts it.
+  expect(fitLabel('Bash git', 4)).toBe('Bash git')
+  expect(fitLabel('browser_snapshot', 10)).toBe('browser_snapshot')
+})
+
+test('packParts: whole parts per line, a part split at its spaces only when wider than a line', () => {
+  const text = (lines: { text: string }[][]) => lines.map(l => l.map(p => p.text).join(' · '))
+  expect(text(packParts(['a', 'bb', 'ccc'], 20))).toEqual(['a · bb · ccc'])
+  expect(text(packParts(['$9.50 API value', '$3.17/h', '$2.38/prompt'], 26))).toEqual(['$9.50 API value · $3.17/h', '$2.38/prompt'])
+  expect(text(packParts(['off', 'option expiryNotice sends a notification before the cache expires'], 30))).toEqual([
+    'off',
+    'option expiryNotice sends a',
+    'notification before the cache',
+    'expires',
+  ])
+  // Empty parts are skipped, and the part index is kept for the styles.
+  expect(packParts(['x', '', 'y'], 10)).toEqual([[{ part: 0, text: 'x' }, { part: 2, text: 'y' }]])
+})
+
+test('report: MCP tools by their own name in both result lines', () => {
+  const md = reportMarkdown({
+    ...REPORT_BASE,
+    toolsByTool: [{ tool: 'mcp__MCP_DOCKER__playwright__browser_snapshot', count: 2, tokens: 25_000 }],
+    largest: [{ label: 'browser_snapshot', tokens: 25_000 }],
+    keepwarm: { pings: 0, readTokens: 0 },
+  } as never)
+  expect(md).toContain('- Tool results (≈ tokens, characters ÷ 4): browser_snapshot 25.0k in 2')
+  expect(md).not.toContain('mcp__')
+})
+
+test('fitParts: the last parts go first, the first always stays', () => {
+  expect(fitParts(['12:00', '100.0k in', '93% hit', 'first write', '6.0k written', 'out 500'], 41)).toBe('12:00 · 100.0k in · 93% hit · first write')
+  expect(fitParts(['12:00', '100.0k in'], 3)).toBe('12:00')
+  expect(fitParts(['a', '', 'b'], 10)).toBe('a · b')
+})
+
+test('/keepwarm stops when a ping reads under half the context', async ($, on) => {
+  const { clock, forks, toasts } = world(on, { forkRead: 40_000, forkWrite: 0 })
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  await run($, 'keepwarm', '')
+  await clock.advance(51 * 60_000)
+  await clock.settle()
+  expect(forks).toHaveLength(1)
+  expect(toasts.some(t => t.includes('the ping missed the cache (40.0k read'))).toBe(true)
+  await clock.advance(60 * 60_000)
+  expect(forks).toHaveLength(1)
+})
+
+test('warm miss: a warm request that adds tokens but reads more than it writes is no miss', async ($, on) => {
+  const { next, clock } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  next.write = 15_000
+  await clock.advance(2 * 60_000)
+  await step($)
+  expect(await healthText($, /re-written while warm/)).toBeUndefined()
+})
+
+test('cache saving: uncached input counts at the full price', () => {
+  expect(cacheSaving({ input: 100_000, read: 0, write: 0, output: 0 }, 0.1, 2)).toBe(0)
+  expect(cacheSaving({ input: 50_000, read: 50_000, write: 0, output: 0 }, 0.1, 2)).toBe(45)
+})
+
+test('subagent tokens stay out of the main conversation\'s totals', async ($, on) => {
+  world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($, 'agent-1')
+  await step($)
+  const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  await ui.press({ key: 'tab-overview' })
+  expect(await ui.find({ type: 'Text', text: /^read 93\.0k$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^read 186\.0k$/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+// The columns a drawn row takes: its texts, and a Button as "[ label ]".
+function drawnWidth(el: unknown): number {
+  if (typeof el === 'string') return [...el].length
+  const e = el as { type?: string; props?: { label?: string }; children?: unknown[] } | undefined
+  if (e?.type === 'Button' && typeof e.props?.label === 'string') return `[ ${e.props.label} ]`.length
+
+  return (e?.children ?? []).reduce<number>((a, c) => a + drawnWidth(c), 0)
+}
+
+test('band: the row never takes more columns than the band has', async ($, on) => {
+  const { next } = world(on)
+  next.usd = 2.5
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  await $.session.measure({ context: { tokens: 100_000, window: 1_000_000, percent: 10 }, rateLimits: [], cost: { usd: 2.5 }, changed: ['context', 'cost'] })
+  const wide: number[] = []
+  for (let cols = 50; cols <= 140; cols += 5) {
+    const ui = await $.ui.mount({ surface: 'terminal', ...band(cols) })
+    const tree = (await ui.drawn()) as { children?: unknown[] }
+    const width = drawnWidth(tree.children?.[0])
+    if (width > cols) wide.push(cols)
+    await ui.unmount()
+  }
+  expect(wide).toEqual([])
+})
+
+test('privacy: every credential prefix masks a path part and is never a label', () => {
+  const prefixes = ['ghp_', 'gho_', 'ghu_', 'ghr_', 'ghs_', 'gha_', 'github_pat_', 'sk-', 'sk_', 'rk_live_', 'rk_test_', 'xoxa-', 'xoxb-', 'xoxp-', 'xoxr-', 'xoxs-', 'xapp-', 'AKIA', 'ASIA', 'AIza', 'ya29.', 'glpat-', 'glrt-', 'glptt-', 'hf_', 'npm_', 'pypi-', 'dop_v1_', 'shpat_', 'tskey-', 'dckr_pat_', 'lin_api_', 'hvs.', 'AGE-SECRET-KEY-']
+  for (const p of prefixes) {
+    expect([p, isSecretLikePart(`${p}x1`)]).toEqual([p, true])
+    expect([p, toolLabel('Read', { file_path: `/srv/${p}x1.txt` })]).toEqual([p, 'Read /srv/…'])
+  }
+})
+
+test('warm miss: when the context estimate fails, the cause is "not checked", not a list it never ruled out', () => {
+  const none = { change: null, effortOnly: null, tools: null, idleMs: null, ttlMs: HOUR }
+  expect(breakCause({ ...none, isToolsUnknown: true })).toMatch(/^cause not checked: the context estimate failed/)
+  expect(breakCause({ ...none, isToolsUnknown: true, change: 'model a → b' })).toBe('model a → b – each splits the cache')
+})
+
+test('the Compact button starts the tool-result tally over, as a typed /compact does', async ($, on) => {
+  const { next } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  next.toolText = 'x'.repeat(8_000)
+  await toolCall($, { tool: 'Read', file_path: '/work/a.ts' })
+  next.toolText = null
+  expect(await contextText($, /^since the start$/)).toBeDefined()
+  const bar = await $.ui.mount({ surface: 'terminal', ...band(160) })
+  await bar.press({ key: 'compact' })
+  await bar.unmount()
+  expect(await contextText($, /^no tool results yet$/)).toBeDefined()
+  expect(await contextText($, /^since the compact at \d\d:\d\d$/)).toBeDefined()
 })

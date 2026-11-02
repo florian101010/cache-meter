@@ -2,6 +2,30 @@
 
 All notable changes to Cache Meter, a Claude Code mod. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.1] – 2026-11-02
+
+Nothing cut off in a narrow pane. Requires Claude Code 2.1.295 or later.
+
+### Fixed
+- **Overview and Health in a narrow pane:** rows that ran past the edge lost their end behind `…` – among them the session budget, the tokens per prompt, the expiry notice, the cache check, a warm miss's cause, the cost per hour and per prompt, agent time, the subagents' totals, the cold re-writes, the keepwarm card's line, the plan-limits note without a subscription, the API-error line and – in a wide pane's left column – the cache card's keepwarm legend. Such a row now continues on the next line (under its value where the row has a label), and a few whole sentences wrap; no figure is cut. Three tests mount the tabs at 55 and 48 columns over sessions with something in every card – plan limits or none, budget and notice on, server-side tools, errors, a relaunch, many cold re-writes – and check that no line is cut.
+- **Plan limits:** the forecast `full ≈ HH:MM at this pace` was cut off a narrow row; it gets a line of its own when there is no room.
+- **Tool labels kept their tool word:** a path over 80 characters lost its start – and with it `Read` or `Edit` – before it was stored, so the Context tab showed `…n/ai-web…ister.tsx`. Now the path loses its start and the tool word stays, and *Largest single results* shows the tool plus as many trailing folders as fit (`Read …/hooks/register.tsx`); in the narrowest column only the file name (`…/register.tsx`).
+- **Subagents in Health:** the agent's name came last and was the first thing a narrow pane dropped; it now comes first.
+- **Overview:** the subagents' line said `1 requests`; now `1 request`.
+- **The Compact button left the Context tab's tool results as they were:** Claude Code skips a mod's own hooks for a compaction the mod starts (*reference › The hook function*, `re-entry`), so the tally is now reset by the button too.
+- **Warm miss with an unread context:** when the context estimate a warm miss needs failed, Health listed causes it had never ruled out; it now says the cause was not checked.
+- **A plan-limit notification no longer holds up the answer** (option `limitNotice`): it is sent without waiting for the person's Notification hooks.
+- **Keepwarm right after a request:** a 15-second tick that fell between the end of a request and its bookkeeping could read the old cache start and send a ping the request had made needless.
+- **One redraw timer:** two overlapping callers could each start the once-a-second redraw, and the second ran until a reload.
+- **Agent time after updating mid-conversation:** a session that ran 0.12 before the update counted agent time from the update, but showed it as the whole session's; it now says *since HH:MM*.
+- **Failures leave a trace:** a refused settings read (`promptCacheTtl` ignored), a context breakdown of another shape, a failing `$.session.turns` or `$.session.usage`, and a failure inside the 15-second tick, the redraw timer or the auto-open now each leave one line in Claude Code's debug log (written when debug logging is on, e.g. `claude --debug`); the tick goes on.
+
+### Changed
+- **MCP tools by their own name:** `browser_snapshot` instead of `mcp__MCP_DOCKER__playwright__browser_snapshot`, in the Context tab, the toast and `/tokens report`.
+- **Results that flood the context** are marked in *Largest single results*: warning colour and a `!` – the same threshold as the toast (≥ 10k tokens and ≥ 2 % of the window).
+- **Wider names in a narrow pane:** the Context tab's name column takes half the width, so categories, agents and file names show whole.
+- **A request column's hover row** drops its least needed figures first when the pane is narrow.
+
 ## [0.13.0] – 2026-11-02
 
 Agent time in the `/tokens` pane, and a Context tab redrawn for a narrow pane. Requires Claude Code 2.1.295 or later.
@@ -324,6 +348,7 @@ Changes for Anthropic's plugin directory, whose validation blocked 0.5.1.
 - Pane `/tokens`: per-request token history, totals, plan limits, cost.
 - `/keepwarm`.
 
+[0.13.1]: https://github.com/florian101010/cache-meter/compare/cache-meter--v0.13.0...cache-meter--v0.13.1
 [0.13.0]: https://github.com/florian101010/cache-meter/compare/cache-meter--v0.12.3...cache-meter--v0.13.0
 [0.12.3]: https://github.com/florian101010/cache-meter/compare/cache-meter--v0.12.2...cache-meter--v0.12.3
 [0.12.2]: https://github.com/florian101010/cache-meter/compare/cache-meter--v0.12.1...cache-meter--v0.12.2

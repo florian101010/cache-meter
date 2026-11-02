@@ -1,7 +1,8 @@
 // Pure helpers of cache-meter: no `$`, so the tests call them directly.
 
+import type { ThemeKey } from 'claude-code'
 import type { CafeState } from './cafe'
-import type { CacheInfo, ContextMap, Limit, LimitStart, ToolResults, Usage4 } from './state'
+import type { CacheInfo, ContextMap, Limit, LimitStart, Measure, Step, ToolResults, Usage4 } from './state'
 
 export const HOUR = 3_600_000
 export const FIVE_MIN = 300_000
@@ -162,7 +163,7 @@ export function durationLabel(ms: number): string {
 /** When to ping: once this share of the TTL or less is left (≈ 10 min of 60m). */
 export const PING_SHARE = 0.17
 
-/** Most pings one /keepwarm run makes (8 h at one ping per ≈ 50 min is about ten). */
+/** Most pings one /keepwarm run makes (8 h at one ping per ≈ 50 min is about nine). */
 export const MAX_PINGS = 12
 
 /** A ping counts as a hit when it read at least this share of the context from the cache. */
@@ -282,7 +283,7 @@ export const HEALTH = { good: 0x40c070, fair: 0xf0b030, poor: 0xe05060 } as cons
 export const TRACK = 0x45475a
 
 /** A marker on a meter: the cell it sits on, its Raster color and the theme key the text bar uses. */
-export type Mark = { at: number; color: number; theme: string }
+export type Mark = { at: number; color: number; theme: ThemeKey }
 
 /** A run of same-role characters of a meter; `role` is the index of a mark for a marker cell. */
 export type Run = { text: string; role: 'fill' | 'track' | number }
@@ -541,7 +542,7 @@ export function limitForecast(
 export function turnLine(u: Usage4, requests: number, usd: number | null, isPlan: boolean): string {
   const hit = hitPct(u)
   const cost = usd === null || usd < 0.005 ? '' : `${isPlan ? '≈ ' : ''}$${usd.toFixed(2)} ${isPlan ? 'API value' : 'spent'} · `
-  const parts = [`${requests} request${requests === 1 ? '' : 's'}`, hit === null ? '' : `${hit}% from cache`, u.write >= 1000 ? `${short(u.write)} written to cache` : '']
+  const parts = [plural(requests, 'request'), hit === null ? '' : `${hit}% from cache`, u.write >= 1000 ? `${short(u.write)} written to cache` : '']
 
   return `◉ Cache Meter · ${cost}${parts.filter(Boolean).join(' · ')}`
 }
@@ -639,6 +640,8 @@ export function breakCause(i: {
   change: string | null
   effortOnly: string | null
   tools: { added: number; removed: number } | null
+  /** The context estimate the tool check needs failed: the tool set was not compared. */
+  isToolsUnknown?: boolean
   idleMs: number | null
   ttlMs: number
 }): string {
@@ -650,6 +653,8 @@ export function breakCause(i: {
     return `tool set changed (+${i.tools.added} / −${i.tools.removed} MCP tools)`
   }
   if (i.effortOnly !== null) return `${i.effortOnly} – keeps the cache on this model only with an API key or a subscription`
+  // Not "not observable": the tool set was not compared, so it is not ruled out.
+  if (i.isToolsUnknown === true) return 'cause not checked: the context estimate failed, so a tool-set change is not ruled out'
 
   return 'not observable here: fast mode turned on or off (also its fallback after a rate limit), a code-intelligence plugin (LSP tool), a tool deny rule, or removed images'
 }
@@ -709,7 +714,8 @@ export function cleanLabel(label: string): string {
 
 /**
  * A tool call's label: the tool, plus for the file tools the home-shortened path and for Bash only the
- * program name – a command's arguments, a URL or a token never become part of it.
+ * program name – a command's arguments, a URL or a token never become part of it. An MCP tool is its own
+ * name alone (`shortTool`). A path over 80 characters loses its start, never the tool word.
  */
 export function toolLabel(tool: string, input: Readonly<Record<string, unknown>>): string {
   const path = typeof input.file_path === 'string' ? input.file_path : typeof input.notebook_path === 'string' ? input.notebook_path : null
@@ -723,8 +729,16 @@ export function toolLabel(tool: string, input: Readonly<Record<string, unknown>>
       .map(part => (isSecretLikePart(part) ? '…' : part))
       .join('')
 
-    return cleanLabel(`${tool} ${shown}`)
+    const label = cleanLabel(`${tool} ${shown}`)
+    if (!label.startsWith('…')) return label
+    // Too long: the path loses its start – from a separator on (mid-name when no separator is left) –
+    // never the tool word; still at most 80 characters (PRIVACY.md).
+    const tail = cleanLabel(shown).slice(-(78 - tool.length))
+    const fromSeparator = tail.replace(/^[^\\/]*/, '')
+
+    return `${tool} …${fromSeparator === '' ? tail : fromSeparator}`
   }
+  if (tool.startsWith('mcp__')) return cleanLabel(shortTool(tool))
   if (tool === 'Bash' && typeof input.command === 'string') {
     // Words are split where bash splits them – space, tab, newline – not on every Unicode space: a
     // no-break space inside an assignment's value must not end the value. Plain VAR=value prefixes go;
@@ -741,6 +755,119 @@ export function toolLabel(tool: string, input: Readonly<Record<string, unknown>>
   }
 
   return tool
+}
+
+/**
+ * An MCP tool by its own name, the part after the last `__` of its wire name (`mcp__server__tool`):
+ * the server's part filled a narrow column before the tool's name showed. Any other tool as it is.
+ * Two servers' tools of the same name then look alike; the Context tab's MCP card names the servers.
+ */
+export function shortTool(tool: string): string {
+  if (!tool.startsWith('mcp__')) return tool
+  const own = tool.slice(tool.lastIndexOf('__') + 2)
+
+  return own === '' ? tool : own
+}
+
+/**
+ * Columns a text takes, as one per code point: wide characters (CJK, emoji) in a path or a task are
+ * under-counted, and the renderer's truncation catches what still overflows.
+ */
+export function columns(text: string): number {
+  return [...text].length
+}
+
+/**
+ * A stored label fitted to `width` columns: the tool word, then as many trailing path segments as fit
+ * after "…/" – the file name, and a parent folder when there is room. The tool word gives way first
+ * (`…/register.tsx`); a file name too wide even alone keeps the tool word (`Read …/<name>`) and is cut
+ * in the middle by the renderer. A label without a path (`Bash git`, an MCP tool) is returned as it is.
+ */
+export function fitLabel(label: string, width: number): string {
+  if (columns(label) <= width) return label
+  const m = /^([^\s…]\S*) (.*)$/.exec(label)
+  const tool = m?.[1] ?? ''
+  const path = m?.[2] ?? label
+  if (!/[\\/]/.test(path)) return label
+  const segments = path.split(/[\\/]/)
+  let tail = segments.pop() ?? ''
+  const head = tool === '' ? '…/' : `${tool} …/`
+  if (columns(head) + columns(tail) > width) {
+    // The tool word gives way first; a file name too wide even alone keeps it.
+    if (tool === '' || columns(tail) + 2 <= width) return `…/${tail}`
+
+    return head + tail
+  }
+  for (let i = segments.length - 1; i >= 0; i--) {
+    const next = `${segments[i]}/${tail}`
+    if (segments[i] === '' || segments[i] === '…' || columns(head) + columns(next) > width) break
+    tail = next
+  }
+
+  return head + tail
+}
+
+/** One piece of a packed line: the text of part `part`, or a slice of it when the part is wider than a line. */
+export type Piece = { part: number; text: string }
+
+/** A text cut at its spaces into chunks of at most `width` columns (a single longer word stays whole). */
+function wordChunks(text: string, width: number): string[] {
+  const chunks: string[] = []
+  let chunk = ''
+  for (const word of text.split(' ')) {
+    if (chunk !== '' && columns(chunk) + 1 + columns(word) > width) {
+      chunks.push(chunk)
+      chunk = word
+    } else chunk = chunk === '' ? word : `${chunk} ${word}`
+  }
+  if (chunk !== '') chunks.push(chunk)
+
+  return chunks
+}
+
+/**
+ * Parts laid out on lines of at most `width` columns, joined by `sep`: a part moves to the next line
+ * whole, and is split – at its spaces – only when it is wider than a line by itself. The pane's rows use
+ * it so a narrow pane breaks between figures instead of cutting the last ones off. Empty parts are skipped.
+ */
+export function packParts(parts: readonly string[], width: number, sep = ' · '): Piece[][] {
+  const lines: Piece[][] = []
+  let line: Piece[] = []
+  let used = 0
+  parts.forEach((text, part) => {
+    if (text === '') return
+    if (columns(text) > width) {
+      if (line.length > 0) lines.push(line)
+      const chunks = wordChunks(text, width)
+      for (const chunk of chunks.slice(0, -1)) lines.push([{ part, text: chunk }])
+      const lastChunk = chunks.at(-1) ?? ''
+      line = [{ part, text: lastChunk }]
+      used = columns(lastChunk)
+
+      return
+    }
+    const add = line.length === 0 ? columns(text) : columns(sep) + columns(text)
+    if (line.length > 0 && used + add > width) {
+      lines.push(line)
+      line = [{ part, text }]
+      used = columns(text)
+
+      return
+    }
+    line.push({ part, text })
+    used += add
+  })
+  if (line.length > 0) lines.push(line)
+
+  return lines
+}
+
+/** Parts joined by `sep`, the last ones left out until the line fits `width` (the first part always stays). */
+export function fitParts(parts: readonly string[], width: number, sep = ' · '): string {
+  const kept = parts.filter(t => t !== '')
+  while (kept.length > 1 && columns(kept.join(sep)) > width) kept.pop()
+
+  return kept.join(sep)
 }
 
 /** Adds one tool result to the tally: per tool, and the five largest single results. */
@@ -798,7 +925,7 @@ export type ReportData = {
   toolsByTool: { tool: string; count: number; tokens: number }[]
   largest: { label: string; tokens: number }[]
   agents: { label: string; steps: number; tokens: number; hit: number | null }[]
-  keepwarm: { pings: number; readTokens: number; auto?: number | null }
+  keepwarm: { pings: number; readTokens: number; auto: number | null }
 }
 
 /** A label as inline code in the report, so a crafted path or task cannot add Markdown. */
@@ -827,7 +954,7 @@ export function reportMarkdown(r: ReportData): string {
   if (r.memoryFiles.length > 0) lines.push(`- Memory files: ${r.memoryFiles.map(f => `${code(f.name)} ${short(f.tokens)}`).join(', ')}`)
   if (r.mcpServers.length > 0) lines.push(`- MCP servers: ${r.mcpServers.map(m => `${code(m.name)} ${short(m.tokens)} (${m.calls} calls)`).join(', ')}`)
   if (r.toolsByTool.length > 0) {
-    lines.push(`- Tool results (≈ tokens, characters ÷ 4): ${r.toolsByTool.map(t => `${t.tool} ${short(t.tokens)} in ${t.count}`).join(', ')}`)
+    lines.push(`- Tool results (≈ tokens, characters ÷ 4): ${r.toolsByTool.map(t => `${shortTool(t.tool)} ${short(t.tokens)} in ${t.count}`).join(', ')}`)
     lines.push(`- Largest: ${r.largest.map(l => `${code(l.label)} ${short(l.tokens)}`).join(', ')}`)
   }
   if (r.agents.length > 0) {
@@ -961,4 +1088,102 @@ export function dockTip(isFullscreen: boolean | undefined, columns: number | und
   }
 
   return null
+}
+
+export function autoCompactOf(
+  breakdown: { autoCompactThreshold?: number; isAutoCompactEnabled: boolean } | undefined,
+  window: number,
+): { pct: number | null; isOff: boolean; isKnown: boolean } {
+  if (!breakdown || window <= 0) return { pct: null, isOff: false, isKnown: false }
+  if (!breakdown.isAutoCompactEnabled) return { pct: null, isOff: true, isKnown: true }
+  if (!breakdown.autoCompactThreshold) return { pct: null, isOff: false, isKnown: false }
+
+  return { pct: Math.round((breakdown.autoCompactThreshold / window) * 100), isOff: false, isKnown: true }
+}
+
+export function limitName(kind: string): string {
+  if (kind === 'five_hour') return '5 hours'
+  if (kind === 'seven_day') return '7 days'
+  if (kind === 'spend_limit') return 'Spend limit'
+
+  return kind
+}
+
+export function resetLabel(iso: string): string {
+  const ms = Date.parse(iso)
+  if (Number.isNaN(ms)) return iso
+  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+
+  return `${days[new Date(ms).getDay()]} ${hhmm(ms)}`
+}
+
+export function usageParts(u: Usage4): string[] {
+  return [`read ${short(u.read)}`, `written ${short(u.write)}`, `new ${short(u.input)}`, `out ${short(u.output)}`]
+}
+
+/** A hit rate's tier: good from 80 %, fair from 50 %, poor below – one place for the cut-offs. */
+export function hitTier(pct: number): 'good' | 'fair' | 'poor' {
+  if (pct >= 80) return 'good'
+  if (pct >= 50) return 'fair'
+
+  return 'poor'
+}
+
+/** Green from 80 %, yellow from 50 %, red below; plain while unknown. */
+export function hitColor(pct: number | null): 'success' | 'warning' | 'error' | undefined {
+  if (pct === null) return undefined
+
+  return ({ good: 'success', fair: 'warning', poor: 'error' } as const)[hitTier(pct)]
+}
+
+/**
+ * A subscription: Claude Code reports plan limits only there (types: SessionMeasureInput.rateLimits,
+ * "empty off a subscription or before the first reading").
+ */
+export function isPlan(measure: Measure | null): boolean {
+  return (measure?.limits.length ?? 0) > 0
+}
+
+/** What the cost figure means here: a comparison value on a plan, real spend on an API key. */
+export function costLabel(measure: Measure | null, isLong: boolean): string {
+  if (isPlan(measure)) return isLong ? ' API value (API-key price)' : ' API value'
+
+  return isLong ? ' spent (as /cost)' : ' spent'
+}
+
+/**
+ * An MCP server's note in the context tab: its tools and how often they were called since the start,
+ * /clear, /resume or /branch. "unused so far" only after a few prompts in that span, so a fresh or
+ * resumed session does not call every server idle.
+ */
+export function mcpNote(tools: number, toolNames: readonly string[] | undefined, calls: Readonly<Record<string, number>>, prompts: number | null): string {
+  // Its share of each request (its tool definitions go out with every one) is the row's share column.
+  if (toolNames === undefined) return `${tools} tools`
+  const n = serverCalls(toolNames, calls)
+  const idle = n === 0 && prompts !== null && prompts >= 3 ? ' – unused so far' : ''
+
+  return `${tools} tools · ${plural(n, 'call')}${idle}`
+}
+
+/** One request column's details for its hover row, padded so it covers the time row beneath the chart. */
+export function columnDetail(s: Step, width: number): string {
+  const hit = hitPct(s)
+  const what = s.kind === 'first' ? 'first write' : s.kind === 'cold' ? 'cold re-write' : ''
+  // In order of need: what is dropped first when the row is narrow comes last.
+  const text = fitParts([hhmm(s.at), `${short(s.input + s.read + s.write)} in`, `${hit === null ? '–' : `${hit}%`} hit`, what, `${short(s.write)} written`, `out ${short(s.output)}`], width)
+
+  return text.padEnd(width)
+}
+
+/** `n word` or `n words`. */
+export function plural(n: number, word: string): string {
+  return `${n} ${word}${n === 1 ? '' : 's'}`
+}
+
+/** How far a cost is into a session budget: 100 at or past it, 80 from 80 % of it, else 0. */
+export function budgetLevel(usd: number, budget: number): 0 | 80 | 100 {
+  if (usd >= budget) return 100
+  if (usd >= budget * 0.8) return 80
+
+  return 0
 }
