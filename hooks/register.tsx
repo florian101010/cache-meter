@@ -1338,6 +1338,8 @@ export const register: Register = (on, options) => {
     // Agent time: the main turn's wall-clock length (TurnCompleteFields.durationMs, types), an interrupted
     // turn included – the time passed all the same. A subagent's turn runs inside a main one and is left
     // out, so nothing counts twice. Before every early return below: the line under the answer is optional.
+    // A keepwarm ping adds nothing: an event raised inside the timer's $.model.fork call skips this mod's
+    // hooks ('re-entry', reference › The hook function, next.error).
     if (isMain) {
       const ms = Number.isFinite(e.durationMs) ? Math.max(0, e.durationMs) : 0
       await update($, totalsA, t => ({ ...t, busyMs: (t.busyMs ?? 0) + ms, busyTurns: (t.busyTurns ?? 0) + 1 }))
