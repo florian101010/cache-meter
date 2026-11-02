@@ -48,6 +48,7 @@ import {
   isWarnedWindow,
   dockTip,
   parseKeepCommand,
+  clockLabel,
   durationLabel,
   reportMarkdown,
   MAX_PINGS,
@@ -3084,7 +3085,7 @@ test('commands: one taken name does not take the others with it', async ($, on) 
 })
 
 const REPORT_BASE = {
-  at: T0, ageMs: null, prompts: null, requests: 0, model: null, usd: null, isPlan: false, hit: null, saving: null,
+  at: T0, ageMs: null, prompts: null, requests: 0, busy: { ms: 0, turns: 0 }, model: null, usd: null, isPlan: false, hit: null, saving: null,
   cold: { count: 0, written: 0 }, warmMiss: { count: 0, cause: null },
   context: { percent: null, tokens: null, autoCompactPct: null, promptsLeft: null },
   limits: [], memoryFiles: [], mcpServers: [], toolsByTool: [], largest: [], agents: [],
@@ -3424,5 +3425,67 @@ test('band: no Keep warm without a screen', async ($, on) => {
   await clock.advance(52 * 60_000)
   const ui = await $.ui.mount({ surface: 'terminal', ...band(160) })
   expect(await ui.find({ type: 'Button', key: 'keepwarm-band' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('clockLabel: seconds while short, minutes and seconds, then hours and minutes', () => {
+  expect(clockLabel(0)).toBe('0s')
+  expect(clockLabel(-5_000)).toBe('0s')
+  expect(clockLabel(37_400)).toBe('37s')
+  expect(clockLabel(59_600)).toBe('1m 0s')
+  expect(clockLabel(184_000)).toBe('3m 4s')
+  expect(clockLabel(HOUR + 5 * 60_000 + 20_000)).toBe('1h 05m')
+})
+
+test('agent time: main turns summed (an interrupted one too), a subagent left out; overview, health, report', async ($, on) => {
+  const { next, clock } = world(on)
+  // A fresh session: no prompt in the transcript yet, so the time covers the whole session.
+  next.turns = 0
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  // Before the first answer: no line in the overview, and Health says when counting starts.
+  let ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  expect(await ui.find({ type: 'Text', text: /agent time/ })).toBeUndefined()
+  await ui.press({ key: 'tab-health' })
+  expect(await ui.find({ type: 'Text', text: ' · counted from the next answer' })).toBeDefined()
+  await ui.unmount()
+
+  await step($)
+  await $.turn.complete({ turnId: 't1', answer: 'ok', durationMs: 120_000, isAborted: false, usage: TURN_USAGE } as never)
+  // Interrupted: no line under the answer, but the time passed all the same.
+  await $.turn.complete({ turnId: 't2', answer: '', durationMs: 64_000, isAborted: true, usage: null } as never)
+  // A subagent's turn runs inside a main one: not counted again.
+  await $.turn.complete({ turnId: 't3', answer: 'report', durationMs: 999_000, isAborted: false, usage: TURN_USAGE, agentId: 'agent-1' } as never)
+  await clock.advance(10 * 60_000)
+  next.turns = 4
+  await $.session.measure({ context: { tokens: 100_000, window: 1_000_000, percent: 10 }, rateLimits: [], cost: { usd: 4 }, changed: ['context', 'cost'] })
+
+  ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  const has = async (text: string | RegExp) => expect([String(text), (await ui.find({ type: 'Text', text })) !== undefined]).toEqual([String(text), true])
+  // Overview: four prompts ($.session.turns()), 3m 4s over two main turns, $4 over four prompts.
+  await ui.press({ key: 'tab-overview' })
+  await has('4 prompts · agent time ')
+  await has('3m 4s')
+  await has(' · ⌀ $1.00 and 1m 32s per prompt')
+  await ui.press({ key: 'tab-health' })
+  // Ten minutes into the session, 184 s of them working.
+  await has(' · ⌀ 1m 32s/prompt · 31% of the session')
+  await ui.unmount()
+
+  await run($, 'tokens', 'report')
+  expect(next.copied[0] ?? '').toContain('- Agent time: 3m 4s · ⌀ 1m 32s/prompt')
+})
+
+test('agent time after a relaunch or /resume: counted from then on, and the pane says since when', async ($, on) => {
+  const { next } = world(on)
+  // The transcript already holds prompts when Cache Meter starts counting.
+  next.turns = 3
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  await $.turn.complete({ turnId: 't1', answer: 'ok', durationMs: 45_000, isAborted: false, usage: TURN_USAGE } as never)
+  const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  expect(await ui.find({ type: 'Text', text: /^ since \d\d:\d\d · ⌀ 45s per prompt$/ })).toBeDefined()
+  await ui.press({ key: 'tab-health' })
+  // No share of the session: the time before the relaunch is not known.
+  expect(await ui.find({ type: 'Text', text: /^ since \d\d:\d\d · ⌀ 45s\/prompt$/ })).toBeDefined()
   await ui.unmount()
 })

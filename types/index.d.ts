@@ -47,7 +47,18 @@ export type Measure = {
 }
 
 /** Session sums; the cold-rewrite count and tokens are kept apart from the (capped) list of cold rewrites. */
-export type Totals = { main: Usage4; sub: Usage4; mainSteps: number; subSteps: number; coldCount: number; coldWritten: number }
+export type Totals = {
+  main: Usage4
+  sub: Usage4
+  mainSteps: number
+  subSteps: number
+  coldCount: number
+  coldWritten: number
+  /** Wall-clock time of the main conversation's turns (turn.complete durationMs), aborted ones included. Absent in state an older version wrote. */
+  busyMs?: number
+  /** The main turns that time was summed over – the divisor for the time per prompt. Absent in state an older version wrote. */
+  busyTurns?: number
+}
 
 export type KeepWarm = {
   until: number | null

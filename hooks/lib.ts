@@ -183,6 +183,16 @@ export function duration(ms: number): string {
   return `${Math.max(0, Math.round(ms / 1000))}s`
 }
 
+/** Agent time as a clock reads it: `37s`, `3m 4s`, `1h 05m` – seconds count while the total is short. */
+export function clockLabel(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000))
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m}m ${s % 60}s`
+
+  return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`
+}
+
 export const ZERO: Usage4 = { input: 0, read: 0, write: 0, output: 0 }
 
 export function add(a: Usage4, b: Usage4): Usage4 {
@@ -747,6 +757,8 @@ export type ReportData = {
   ageMs: number | null
   prompts: number | null
   requests: number
+  /** Agent time: the main turns' wall-clock sum and how many turns it covers. */
+  busy: { ms: number; turns: number }
   model: string | null
   usd: number | null
   isPlan: boolean
@@ -777,6 +789,7 @@ export function reportMarkdown(r: ReportData): string {
   lines.push(`${new Date(r.at).toISOString().slice(0, 16).replace('T', ' ')} UTC${r.ageMs === null ? '' : ` · session ${duration(r.ageMs)}`}${r.model === null ? '' : ` · ${r.model}`}`, '')
   lines.push('## Cost and cache', '')
   lines.push(`- Cost: ${usd}${r.prompts ? ` · ${r.prompts} prompts · ${r.requests} requests` : ` · ${r.requests} requests`}`)
+  if (r.busy.turns > 0) lines.push(`- Agent time: ${clockLabel(r.busy.ms)} · ⌀ ${clockLabel(r.busy.ms / r.busy.turns)}/prompt`)
   lines.push(`- Cache hit rate: ${r.hit === null ? '–' : `${r.hit}%`}${r.saving === null ? '' : ` · cache saved ${r.saving}% of input cost`}`)
   lines.push(`- Cold re-writes: ${r.cold.count}${r.cold.count > 0 ? ` (${short(r.cold.written)} tokens)` : ''}`)
   lines.push(`- Warm misses: ${r.warmMiss.count}${r.warmMiss.cause === null ? '' : ` – last: ${r.warmMiss.cause}`}`)

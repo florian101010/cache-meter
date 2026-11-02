@@ -2,6 +2,17 @@
 
 All notable changes to Cache Meter, a Claude Code mod. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0] – 2026-11-02
+
+Agent time in the `/tokens` pane. Requires Claude Code 2.1.295 or later.
+
+### Added
+- **Agent time:** how long Claude worked on your prompts – the wall-clock length of each main turn (`turn.complete` `durationMs`, *events › Follow a turn*), an interrupted turn included, a subagent's left out because it runs inside a main turn.
+  - **Overview, Session card:** a new line `4 prompts · agent time 3m 4s · ⌀ $1.00 and 46s per prompt`.
+  - **Health, Session card:** a row *Agent time* with the time per prompt and its share of the session.
+  - **`/tokens report`:** a line *Agent time*.
+- Like the request count, agent time lives in the session state: `/clear`, `/resume`, `/branch` and a relaunch start it over, and the pane then says *since HH:MM*.
+
 ## [0.12.3] – 2026-11-02
 
 Kept up with the official documentation as of 2026-11-02 (issue #20). Requires Claude Code 2.1.295 or later.
