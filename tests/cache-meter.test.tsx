@@ -365,7 +365,7 @@ test('turn.step: a main request fills the band, a subagent only the totals', asy
   await ui.unmount()
 
   const pane = await $.ui.mount({ surface: 'desktop', ...PANE })
-  expect(await pane.find({ type: 'Text', text: /^subagents · .* · 1 request$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^subagents read .* · 1 request$/ })).toBeDefined()
   await pane.unmount()
 })
 
@@ -3601,23 +3601,36 @@ async function richSession($: Engine, on: On) {
   await $.session.measure(limits(20) as never)
   await clock.advance(HOUR)
   await $.session.measure(limits(45) as never)
+  // One more request: the cache is warm again, so the cache card shows what expiry would cost.
+  await step($)
 
   return w
 }
 
 // Every line that cuts instead of wrapping must fit the card (fullIn = bodyColumns − 4), at the widths of a
 // pane docked beside the chat on a tablet: nothing a reader needs is lost behind "…".
-// The texts a pane draws that would be cut at `cols`: every Text that truncates, longer than the card.
-async function cutLines($: Engine, cols: number, tabs: readonly string[]): Promise<string[]> {
+// The text a drawn element shows: its string children, and its child elements' in document order.
+function textOf(el: unknown): string {
+  if (typeof el === 'string') return el
+  const children = (el as { children?: unknown[] } | undefined)?.children ?? []
+
+  return children.map(textOf).join('')
+}
+
+// The texts a pane draws that would be cut: every Text that truncates and is wider than its card
+// (a single column: below 110 columns, register's tier 'wide').
+async function cutLines($: Engine, widths: readonly number[], tabs: readonly string[]): Promise<string[]> {
   const cut: string[] = []
-  for (const tab of tabs) {
-    const ui = await $.ui.mount({ surface: 'terminal', ...PANE, props: { ...PANE.props, bodyColumns: cols } })
-    await ui.press({ key: `tab-${tab}` })
-    for (const t of await ui.findAll({ type: 'Text' })) {
-      if (t.props.wrap === 'wrap') continue
-      if ([...t.text].length > cols - 4) cut.push(`${cols} ${tab}: ${t.text}`)
+  for (const cols of widths) {
+    for (const tab of tabs) {
+      const ui = await $.ui.mount({ surface: 'terminal', ...PANE, props: { ...PANE.props, bodyColumns: cols } })
+      await ui.press({ key: `tab-${tab}` })
+      for (const t of await ui.findAll({ type: 'Text' })) {
+        if (t.props.wrap === 'wrap') continue
+        if ([...t.text].length > cols - 4) cut.push(`${cols} ${tab}: ${t.text}`)
+      }
+      await ui.unmount()
     }
-    await ui.unmount()
   }
 
   return cut
@@ -3634,7 +3647,7 @@ test('narrow pane: no plan limits, API errors and unusual stops – nothing cut 
   await $.classic.StopFailure({ hook_event_name: 'StopFailure', error: 'overloaded' } as never)
   await $.classic.StopFailure({ hook_event_name: 'StopFailure', error: 'rate_limit' } as never)
   await $.session.measure({ context: { tokens: 100_000, window: 1_000_000, percent: 10 }, rateLimits: [], cost: { usd: 1 }, changed: ['context', 'cost'] })
-  const cut = [...(await cutLines($, 55, ['overview', 'health'])), ...(await cutLines($, 48, ['overview', 'health']))]
+  const cut = await cutLines($, [55, 48], ['overview', 'health'])
   expect(cut).toEqual([])
   const ui = await $.ui.mount({ surface: 'terminal', ...PANE, props: { ...PANE.props, bodyColumns: 48 } })
   // The pane keeps the tab last chosen (Health above): back to the Overview.
@@ -3646,10 +3659,24 @@ test('narrow pane: no plan limits, API errors and unusual stops – nothing cut 
 
 test('narrow pane: no line in Overview, Context or Health is cut', { timeoutMs: 20_000 }, async ($, on) => {
   await richSession($, on)
-  const cut = [...(await cutLines($, 55, ['overview', 'context', 'health'])), ...(await cutLines($, 48, ['overview', 'context', 'health']))]
-  // The wide tier splits 110 columns into two, each as narrow as a docked pane.
-  cut.push(...(await cutLines($, 110, ['overview'])))
+  const cut = await cutLines($, [55, 48], ['overview', 'context', 'health'])
   expect(cut).toEqual([])
+  // From 110 columns the Overview splits into two columns, each as narrow as a docked pane; the request
+  // chart and the footer stay full width, so one limit for every line does not fit there. The line that
+  // was cut on 0.13.0 – the cache card's, in the 50-column left column – is checked by itself.
+  const wide = await $.ui.mount({ surface: 'terminal', ...PANE, props: { ...PANE.props, bodyColumns: 110 } })
+  await wide.press({ key: 'tab-overview' })
+  const expiry = await wide.find({ type: 'Text', text: /^expiry costs a re-write of ≈ / })
+  expect([...String(expiry?.text)].length).toBeLessThanOrEqual(Math.floor((110 - 1) / 2) - 4)
+  expect(await wide.find({ type: 'Text', text: /^┃ keepwarm pings here$/ })).toBeDefined()
+  // The session card's rows, in the 51-column right column.
+  const rightIn = 110 - 1 - Math.floor((110 - 1) / 2) - 4
+  const session = (await wide.findAll({ type: 'Text' })).filter(
+    t => t.props.wrap === 'truncate-end' && /^(read |\d+ requests|\d+ prompts? · agent time|subagents |Cold |7 days| {11}\d\d:\d\d)/.test(t.text),
+  )
+  expect(session.length).toBeGreaterThan(5)
+  expect(session.filter(t => [...t.text].length > rightIn).map(t => t.text)).toEqual([])
+  await wide.unmount()
   const ui = await $.ui.mount({ surface: 'terminal', ...PANE, props: { ...PANE.props, bodyColumns: 48 } })
   // Every card the test means to reach is drawn.
   await ui.press({ key: 'tab-overview' })
@@ -3657,12 +3684,14 @@ test('narrow pane: no line in Overview, Context or Health is cut', { timeoutMs: 
   await ui.press({ key: 'tab-health' })
   expect(await ui.find({ type: 'Text', text: /^Warm miss {2}1× re-written while warm/ })).toBeDefined()
   await ui.press({ key: 'tab-context' })
-  // A fitted label fits its name column (half the card in a narrow pane).
+  // A fitted label fits its name column – half the card in a narrow pane, wide enough for the tool word.
+  // The name is the text of the row's first child (its name box), read from the drawn descriptions.
+  const nameOf = async (i: number) => textOf((await ui.find({ key: `large-${i}` }))?.children[0])
+  expect(await nameOf(1)).toBe('Read …/register.tsx')
   const nameW = Math.floor((48 - 4) / 2)
   for (const i of [0, 1, 2]) {
-    const row = await ui.find({ key: `large-${i}` })
-    const name = row === undefined ? '' : String((row.children[0] as { text?: string }).text ?? '')
-    expect([i, [...name].length <= nameW]).toEqual([i, true])
+    const name = await nameOf(i)
+    expect([i, name !== '' && [...name].length <= nameW]).toEqual([i, true])
   }
   // The MCP result (25k tokens, over 2 % of the 1M window) floods the context: by its own name, in the
   // warning colour, with a "!" – on that row alone; the Read row (3k) keeps the accent colour.
@@ -3680,6 +3709,12 @@ test('narrow pane: budget, notice, server tools, errors, relaunch, many colds �
   const { next, clock } = world(on)
   next.turns = 3
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  // A resume Claude Code gives no verdict on: the Health tab says so in a sentence that wraps.
+  await $.classic.SessionStart({ source: 'resume', seconds_since_last_response: 60, context_tokens: 100_000 })
+  // 15k tokens: over the 10k floor, under 2 % of the 1M window – no flood, no mark.
+  next.toolText = 'w'.repeat(60_000)
+  await toolCall($, { tool: 'Read', file_path: '/work/big.log' })
+  next.toolText = null
   next.server = [
     { id: 's1', name: 'advisor', input: {}, startedAt: T0, endedAt: T0 + 59_000 },
     { id: 's2', name: 'web_search', input: {}, startedAt: T0, endedAt: T0 + 3_000 },
@@ -3696,7 +3731,7 @@ test('narrow pane: budget, notice, server tools, errors, relaunch, many colds �
   next.write = 6_000
   await $.turn.complete({ turnId: 't1', answer: 'ok', durationMs: 95_000, isAborted: false, usage: TURN_USAGE } as never)
   await $.session.measure({ context: { tokens: 300_000, window: 1_000_000, percent: 30 }, rateLimits: [], cost: { usd: 1.7 }, changed: ['context', 'cost'] })
-  const cut = [...(await cutLines($, 55, ['overview', 'health'])), ...(await cutLines($, 48, ['overview', 'health']))]
+  const cut = await cutLines($, [55, 48], ['overview', 'health'])
   expect(cut).toEqual([])
   // 55 columns: the server-side calls fit on one line, joined by commas.
   const ui = await $.ui.mount({ surface: 'terminal', ...PANE, props: { ...PANE.props, bodyColumns: 55 } })
@@ -3704,6 +3739,10 @@ test('narrow pane: budget, notice, server tools, errors, relaunch, many colds �
   expect(await ui.find({ type: 'Text', text: /^last \d\d:\d\d: $/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /advisor 59s, web_search 3s/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^\d+% of \$2\.00$/ })).toBeDefined()
+  expect((await ui.find({ type: 'Text', text: /^Resumed \d\d:\d\d – Claude Code gave no verdict/ }))?.props.wrap).toBe('wrap')
+  await ui.press({ key: 'tab-context' })
+  expect(await ui.find({ type: 'Text', text: /^Read ~?\/?work\/big\.log$|^Read \/work\/big\.log$/ })).toBeDefined()
+  expect(await ui.findAll({ type: 'Text', text: /^ !$/ })).toHaveLength(0)
   await ui.press({ key: 'tab-overview' })
   expect(await ui.find({ type: 'Text', text: /showing the last 3/ })).toBeDefined()
   await ui.unmount()

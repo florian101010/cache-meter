@@ -22,6 +22,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { AgentUse, CacheInfo, ColdWrite, ContextMap, Health, KeepWarm, Measure, ServerToolCall, Step, ToolResults, Totals, TtlConfig, Usage4 } from './state'
 import {
   COLD_MIN,
+  columns as widthOf,
   packParts,
   shortTool,
   barCells,
@@ -1828,13 +1829,16 @@ export const register: Register = (on, options) => {
     const rightIn = Math.max(16, rightW - 4)
     const fullIn = Math.max(16, cols - 4)
 
-    // A row label: a dim name in an 11-column field, as in the Health tab.
+    // A row label: a dim name in an 11-column field (Health rows, the Overview's Cold and plan limits).
     const label = (text: string) => <Text dimColor>{text.padEnd(11)}</Text>
     // A row that never cuts a figure off: its parts joined by `sep`, and what does not fit goes to further
     // lines under the value (packParts) – the label on the first line only. `lead` and `tail` are dim
-    // words that belong to the part (`agent time ` before a time, ` API value` after a cost).
+    // words that belong to the part (`agent time ` before a time, ` API value` after a cost); a part split
+    // because it is wider than a line by itself is drawn whole in its own style. `sepColor` colours the
+    // separator where the row's state does (a warning, a success).
     type Part = { text: string; lead?: string; tail?: string; bold?: boolean; color?: string; dim?: boolean }
-    const packed = (key: string, rowLabel: string | null, parts: readonly Part[], width: number, sep = ' · ') => {
+    const dimPart = (text: string): Part => ({ text, dim: true })
+    const packed = (key: string, rowLabel: string | null, parts: readonly Part[], width: number, sep = ' · ', sepColor?: string) => {
       const indent = rowLabel === null ? 0 : 11
       const whole = (pt: Part) => `${pt.lead ?? ''}${pt.text}${pt.tail ?? ''}`
       const lines = packParts(
@@ -1851,15 +1855,17 @@ export const register: Register = (on, options) => {
             const pt = parts[piece.part]!
             const style = { bold: pt.bold, color: pt.color, dimColor: pt.dim }
             const k = `${key}-${li}-${j}`
-            const out = j > 0 ? [<Text key={`${k}-sep`} dimColor>{sep}</Text>] : []
-            if (piece.text !== whole(pt)) return [...out, <Text key={k} {...style}>{piece.text}</Text>]
+            const out = j > 0 ? [<Text key={`${k}-sep`} color={sepColor} dimColor={sepColor === undefined}>{sep}</Text>] : []
+            if (piece.text !== whole(pt)) {
+              out.push(<Text key={k} {...style}>{piece.text}</Text>)
 
-            return [
-              ...out,
-              ...(pt.lead === undefined ? [] : [<Text key={`${k}-lead`} dimColor>{pt.lead}</Text>]),
-              <Text key={k} {...style}>{pt.text}</Text>,
-              ...(pt.tail === undefined ? [] : [<Text key={`${k}-tail`} dimColor>{pt.tail}</Text>]),
-            ]
+              return out
+            }
+            if (pt.lead !== undefined) out.push(<Text key={`${k}-lead`} dimColor>{pt.lead}</Text>)
+            out.push(<Text key={k} {...style}>{pt.text}</Text>)
+            if (pt.tail !== undefined) out.push(<Text key={`${k}-tail`} dimColor>{pt.tail}</Text>)
+
+            return out
           })}
         </Text>
       ))
@@ -1975,7 +1981,7 @@ export const register: Register = (on, options) => {
             null,
             [
               { text: `expiry costs a re-write of ≈ ${stake}`, dim: true },
-              { text: pingMarks.length > 0 && tier !== 'narrow' ? '┃ keepwarm pings here' : '', dim: true },
+              dimPart(pingMarks.length > 0 && tier !== 'narrow' ? '┃ keepwarm pings here' : ''),
             ],
             leftIn,
           )}
@@ -2137,7 +2143,7 @@ export const register: Register = (on, options) => {
             </Text>
           )}
         </Box>
-        {packed('usage', null, usageParts(totals.main).map(text => ({ text, dim: true })), rightIn)}
+        {packed('usage', null, usageParts(totals.main).map(dimPart), rightIn)}
         {packed(
           'requests',
           null,
@@ -2151,13 +2157,13 @@ export const register: Register = (on, options) => {
           ],
           rightIn,
         )}
-        {/* Kept in $.state: /clear, /resume, /branch and a relaunch start it over, as the requests above. */}
         {busyTurns > 0 &&
           packed(
             'agent-time',
             null,
             [
               { text: promptCount ? `${promptCount} prompt${promptCount === 1 ? '' : 's'}` : '', dim: true },
+              // Kept in $.state: /clear, /resume, /branch and a relaunch start it over, as the requests above.
               { lead: 'agent time ', text: clockLabel(busyMs), bold: true, tail: historySince === null ? undefined : ` since ${hhmm(historySince)}` },
               { text: perPrompt === '' ? '' : `⌀ ${perPrompt} per prompt`, dim: true },
             ],
@@ -2168,9 +2174,8 @@ export const register: Register = (on, options) => {
             'subagents',
             null,
             [
-              { text: 'subagents', dim: true },
-              ...usageParts(totals.sub).map(text => ({ text, dim: true })),
-              { text: `${totals.subSteps} request${totals.subSteps === 1 ? '' : 's'}`, dim: true },
+              ...usageParts(totals.sub).map((text, i) => ({ ...dimPart(text), lead: i === 0 ? 'subagents ' : undefined })),
+              dimPart(`${totals.subSteps} request${totals.subSteps === 1 ? '' : 's'}`),
             ],
             rightIn,
           )}
@@ -2184,6 +2189,7 @@ export const register: Register = (on, options) => {
             ],
             rightIn,
             ' – ',
+            'warning',
           )}
         {totals.mainSteps === 0 ? null : colds.length === 0 ? (
           <Text wrap="truncate-end">
@@ -2197,8 +2203,8 @@ export const register: Register = (on, options) => {
               'Cold',
               [
                 { text: `Total ${totals.coldCount}× · ${short(totals.coldWritten)} tokens`, color: 'warning', bold: true },
-                { text: isKeepwarmOn && colds.some(c => c.cause === 'pause') ? '/keepwarm before a break prevents this' : '', dim: true },
-                { text: totals.coldCount > 3 ? 'showing the last 3' : '', dim: true },
+                dimPart(isKeepwarmOn && colds.some(c => c.cause === 'pause') ? '/keepwarm before a break prevents this' : ''),
+                dimPart(totals.coldCount > 3 ? 'showing the last 3' : ''),
               ],
               rightIn,
             )}
@@ -2207,7 +2213,7 @@ export const register: Register = (on, options) => {
                 `cold-${i}`,
                 '',
                 [
-                  { text: hhmm(c.at), dim: true },
+                  dimPart(hhmm(c.at)),
                   { text: short(c.written), color: 'warning', tail: ' re-written' },
                   {
                     text:
@@ -2230,8 +2236,8 @@ export const register: Register = (on, options) => {
             'no-limits',
             null,
             [
-              { text: 'Plan limits: no reading', dim: true },
-              { text: '(no subscription, or no answer yet)', dim: true },
+              dimPart('Plan limits: no reading'),
+              dimPart('(no subscription, or no answer yet)'),
             ],
             rightIn,
             ' ',
@@ -2242,7 +2248,9 @@ export const register: Register = (on, options) => {
 
           const resets = l.resetsAt ? ` · resets ${resetLabel(l.resetsAt)}` : ''
           const fullText = full === null ? '' : `full ≈ ${hhmm(full)} at this pace`
-          const isOwnLine = fullText !== '' && 11 + limitBar + 5 + resets.length + 3 + fullText.length > rightIn
+          // The row as drawn: label (11), bar, ' 100%' (5), resets; the forecast needs ' · ' more.
+          const rowW = 11 + limitBar + 5 + widthOf(resets)
+          const isOwnLine = fullText !== '' && rowW + widthOf(` · ${fullText}`) > rightIn
 
           return (
             <Box key={`limit-${l.kind}`} flexDirection="column">
@@ -2574,6 +2582,34 @@ export const register: Register = (on, options) => {
     const agentRows = Object.values(agents)
       .sort((a, b) => b.input + b.read + b.write + b.output - (a.input + a.read + a.write + a.output))
       .slice(0, 5)
+    // Three Health rows whose words, separator and its colour depend on one state: decided together here.
+    type Row = { parts: Part[]; sep: string; sepColor?: string }
+    const budgetRow: Row =
+      budget <= 0
+        ? { parts: [dimPart('off'), dimPart('option sessionBudget warns at 80 % and 100 %')], sep: ' – ' }
+        : usd === null
+          ? { parts: [dimPart('cost unknown yet'), dimPart(`budget $${budget.toFixed(2)}`)], sep: ' · ' }
+          : { parts: [{ text: `${Math.round((usd / budget) * 100)}% of $${budget.toFixed(2)}`, color: usd >= budget ? 'error' : usd >= budget * 0.8 ? 'warning' : 'success' }], sep: ' · ' }
+    const lastMiss = `${unexpected.lastAt === null ? '' : `last ${hhmm(unexpected.lastAt)}`}${unexpected.lastIdleMs == null ? '' : ` after ${duration(unexpected.lastIdleMs)} idle`}`.trim()
+    const warmRow: Row =
+      unexpected.count === 0 && totals.mainSteps === 0
+        ? { parts: [dimPart('no request measured yet')], sep: ' · ' }
+        : unexpected.count === 0
+          ? { parts: [{ text: 'none', color: 'success' }, { text: 'every warm request read the cache', color: 'success' }], sep: ' – ', sepColor: 'success' }
+          : {
+              parts: [
+                { text: `${unexpected.count}× re-written while warm`, color: 'warning' },
+                { text: `${short(unexpected.written)} tokens`, color: 'warning' },
+                { text: lastMiss, color: 'warning' },
+              ],
+              sep: ' · ',
+              sepColor: 'warning',
+            }
+    const noticeRow: Row = !expiryNotice
+      ? { parts: [dimPart('off'), dimPart('option expiryNotice sends a notification before the cache expires')], sep: ' – ' }
+      : notice.lastReason !== null
+        ? { parts: [{ text: `not sent: ${notice.lastReason}`, color: 'warning' }, { text: `${notice.sent} sent`, color: 'warning' }], sep: ' · ', sepColor: 'warning' }
+        : { parts: [{ text: 'on', color: 'success' }, { text: `${notice.sent} sent`, color: 'success' }], sep: ' · ', sepColor: 'success' }
     const healthView = (
       <Box flexDirection="column">
         <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="column">
@@ -2598,7 +2634,7 @@ export const register: Register = (on, options) => {
             'agent',
             'Agent time',
             busyTurns === 0
-              ? [{ text: '–', bold: true }, { text: 'counted from the next answer', dim: true }]
+              ? [{ text: '–', bold: true }, dimPart('counted from the next answer')]
               : [
                   { text: clockLabel(busyMs), bold: true, tail: historySince === null ? undefined : ` since ${hhmm(historySince)}` },
                   { text: `⌀ ${clockLabel(busyMs / busyTurns)}/prompt`, dim: true },
@@ -2616,23 +2652,13 @@ export const register: Register = (on, options) => {
             ],
             fullIn,
           )}
-          {packed(
-            'budget',
-            'Budget',
-            budget <= 0
-              ? [{ text: 'off', dim: true }, { text: 'option sessionBudget warns at 80 % and 100 %', dim: true }]
-              : usd === null
-                ? [{ text: 'cost unknown yet', dim: true }, { text: `budget $${budget.toFixed(2)}`, dim: true }]
-                : [{ text: `${Math.round((usd / budget) * 100)}% of $${budget.toFixed(2)}`, color: usd >= budget ? 'error' : usd >= budget * 0.8 ? 'warning' : 'success' }],
-            fullIn,
-            budget <= 0 ? ' – ' : ' · ',
-          )}
+          {packed('budget', 'Budget', budgetRow.parts, fullIn, budgetRow.sep)}
           {packed(
             'tokens',
             'Tokens',
             [
               { text: prompts && totals.mainSteps > 0 ? short(Math.round(tokensAll / prompts)) : '–', bold: true, tail: ' per prompt' },
-              { text: '(main conversation, in + out)', dim: true },
+              dimPart('(main conversation, in + out)'),
             ],
             fullIn,
             ' ',
@@ -2663,7 +2689,7 @@ export const register: Register = (on, options) => {
             'server',
             'Server',
             serverNames.length === 0
-              ? [{ text: 'no server-side tool calls', dim: true }, { text: '(advisor, …)', dim: true }]
+              ? [dimPart('no server-side tool calls'), dimPart('(advisor, …)')]
               : serverNames.map(([n, v]) => ({ text: `${n} ${v.count}× · ${duration(v.ms)}` })),
             fullIn,
             serverNames.length === 0 ? ' ' : '  ',
@@ -2737,24 +2763,7 @@ export const register: Register = (on, options) => {
               </Text>
             </Box>
           )}
-          {packed(
-            'warm-miss',
-            'Warm miss',
-            unexpected.count === 0 && totals.mainSteps === 0
-              ? [{ text: 'no request measured yet', dim: true }]
-              : unexpected.count === 0
-                ? [{ text: 'none', color: 'success' }, { text: 'every warm request read the cache', color: 'success' }]
-                : [
-                    { text: `${unexpected.count}× re-written while warm`, color: 'warning' },
-                    { text: `${short(unexpected.written)} tokens`, color: 'warning' },
-                    {
-                      text: `${unexpected.lastAt === null ? '' : `last ${hhmm(unexpected.lastAt)}`}${unexpected.lastIdleMs == null ? '' : ` after ${duration(unexpected.lastIdleMs)} idle`}`.trim(),
-                      color: 'warning',
-                    },
-                  ],
-            fullIn,
-            unexpected.count === 0 && totals.mainSteps > 0 ? ' – ' : ' · ',
-          )}
+          {packed('warm-miss', 'Warm miss', warmRow.parts, fullIn, warmRow.sep, warmRow.sepColor)}
           {/* The cause is why this row exists: it wraps under the value rather than losing its end. */}
           {unexpected.count > 0 && (
             <Box marginLeft={11}>
@@ -2763,17 +2772,7 @@ export const register: Register = (on, options) => {
               </Text>
             </Box>
           )}
-          {packed(
-            'notice',
-            'Notice',
-            !expiryNotice
-              ? [{ text: 'off', dim: true }, { text: 'option expiryNotice sends a notification before the cache expires', dim: true }]
-              : notice.lastReason !== null
-                ? [{ text: `not sent: ${notice.lastReason}`, color: 'warning' }, { text: `${notice.sent} sent`, color: 'warning' }]
-                : [{ text: 'on', color: 'success' }, { text: `${notice.sent} sent`, color: 'success' }],
-            fullIn,
-            !expiryNotice ? ' – ' : ' · ',
-          )}
+          {packed('notice', 'Notice', noticeRow.parts, fullIn, noticeRow.sep, noticeRow.sepColor)}
         </Box>
       </Box>
     )

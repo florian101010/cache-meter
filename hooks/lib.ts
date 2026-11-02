@@ -726,8 +726,8 @@ export function toolLabel(tool: string, input: Readonly<Record<string, unknown>>
 
     const label = cleanLabel(`${tool} ${shown}`)
     if (!label.startsWith('…')) return label
-    // Too long: the path loses its start – from a separator on – never the tool word; still at most
-    // 80 characters (PRIVACY.md).
+    // Too long: the path loses its start – from a separator on (mid-name when no separator is left) –
+    // never the tool word; still at most 80 characters (PRIVACY.md).
     const tail = cleanLabel(shown).slice(-(78 - tool.length))
     const fromSeparator = tail.replace(/^[^\\/]*/, '')
 
@@ -775,8 +775,8 @@ export function columns(text: string): number {
 /**
  * A stored label fitted to `width` columns: the tool word, then as many trailing path segments as fit
  * after "…/" – the file name, and a parent folder when there is room. The tool word gives way first
- * (`…/register.tsx`); a file name wider than the column keeps it and is cut in the middle by the
- * renderer. A label without a path (`Bash git`, an MCP tool) is returned as it is.
+ * (`…/register.tsx`); a file name too wide even alone keeps the tool word (`Read …/<name>`) and is cut
+ * in the middle by the renderer. A label without a path (`Bash git`, an MCP tool) is returned as it is.
  */
 export function fitLabel(label: string, width: number): string {
   if (columns(label) <= width) return label
@@ -787,7 +787,12 @@ export function fitLabel(label: string, width: number): string {
   const segments = path.split(/[\\/]/)
   let tail = segments.pop() ?? ''
   const head = tool === '' ? '…/' : `${tool} …/`
-  if (columns(head) + columns(tail) > width) return columns(tail) + 2 <= width || tool === '' ? `…/${tail}` : `${tool} …/${tail}`
+  if (columns(head) + columns(tail) > width) {
+    // The tool word gives way first; a file name too wide even alone keeps it.
+    if (tool === '' || columns(tail) + 2 <= width) return `…/${tail}`
+
+    return head + tail
+  }
   for (let i = segments.length - 1; i >= 0; i--) {
     const next = `${segments[i]}/${tail}`
     if (segments[i] === '' || segments[i] === '…' || columns(head) + columns(next) > width) break
