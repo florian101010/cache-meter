@@ -22,6 +22,8 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { AgentUse, CacheInfo, ColdWrite, ContextMap, Health, KeepWarm, Measure, ServerToolCall, Step, ToolResults, Totals, TtlConfig, Usage4 } from './state'
 import {
   COLD_MIN,
+  packParts,
+  shortTool,
   barCells,
   clockLabel,
   FIVE_MIN,
@@ -53,6 +55,8 @@ import {
   turnLine,
   cacheStatus,
   duration,
+  fitLabel,
+  fitParts,
   foldSmall,
   forecast,
   hhmm,
@@ -1975,7 +1979,7 @@ export const register: Register = (on, options) => {
             )
           )}
         </Box>
-        <Text dimColor wrap="truncate-end">
+        <Text dimColor wrap="wrap">
           {isAutoOn
             ? isKeeping
               ? `${keep.pausePings}/${MAX_PINGS} pings this break · ${keep.pings} in all · next if away ~${remainingLabel(pingIn)}`
@@ -2065,6 +2069,42 @@ export const register: Register = (on, options) => {
     const limits = measure?.limits ?? []
     // Name (11) + bar + ' 100%' (5) + ' · resets Mon 17:10' (19): the bar takes what the column leaves.
     const limitBar = Math.max(6, Math.min(24, rightIn - 35))
+    // A row label: a dim name in an 11-column field, as in the Health tab.
+    const label = (text: string) => <Text dimColor>{text.padEnd(11)}</Text>
+    // A row that never cuts a figure off: its parts joined by `sep`, and what does not fit goes to further
+    // lines under the value (packParts) – the label on the first line only. `lead` and `tail` are dim
+    // words that belong to the part (`agent time ` before a time, ` API value` after a cost).
+    type Part = { text: string; lead?: string; tail?: string; bold?: boolean; color?: string; dim?: boolean }
+    const packed = (key: string, rowLabel: string | null, parts: readonly Part[], width: number, sep = ' · ') => {
+      const indent = rowLabel === null ? 0 : 11
+      const whole = (pt: Part) => `${pt.lead ?? ''}${pt.text}${pt.tail ?? ''}`
+      const lines = packParts(
+        parts.map(pt => (pt.text === '' ? '' : whole(pt))),
+        width - indent,
+        sep,
+      )
+
+      return lines.map((pieces, li) => (
+        <Text key={`${key}-${li}`} wrap="truncate-end">
+          {rowLabel !== null && (li === 0 ? label(rowLabel) : <Text>{' '.repeat(indent)}</Text>)}
+          {/* Flat, no wrapper per part: a part's own Text carries its colour. */}
+          {pieces.flatMap((piece, j) => {
+            const pt = parts[piece.part]!
+            const style = { bold: pt.bold, color: pt.color, dimColor: pt.dim }
+            const k = `${key}-${li}-${j}`
+            const out = j > 0 ? [<Text key={`${k}-sep`} dimColor>{sep}</Text>] : []
+            if (piece.text !== whole(pt)) return [...out, <Text key={k} {...style}>{piece.text}</Text>]
+
+            return [
+              ...out,
+              ...(pt.lead === undefined ? [] : [<Text key={`${k}-lead`} dimColor>{pt.lead}</Text>]),
+              <Text key={k} {...style}>{pt.text}</Text>,
+              ...(pt.tail === undefined ? [] : [<Text key={`${k}-tail`} dimColor>{pt.tail}</Text>]),
+            ]
+          })}
+        </Text>
+      ))
+    }
     // Agent time: summed in turn.complete; state an older version wrote has no such fields (read as 0).
     const busyMs = totals.busyMs ?? 0
     const busyTurns = totals.busyTurns ?? 0
@@ -2091,34 +2131,43 @@ export const register: Register = (on, options) => {
             </Text>
           )}
         </Box>
-        <Text dimColor wrap="truncate-end">
-          {usageLine(totals.main)}
-        </Text>
-        <Text wrap="truncate-end">
-          <Text dimColor>
-            {totals.mainSteps} requests{historySince === null ? '' : ` since ${hhmm(historySince)}`} ·{' '}
-          </Text>
-          <Text bold>{usdShown === null ? '–' : `${isPlan(measure) ? '≈ ' : ''}$${usdShown.toFixed(2)}`}</Text>
-          <Text dimColor>{measure?.usd == null ? '' : costLabel(measure, tier !== 'narrow')}</Text>
-        </Text>
-        {busyTurns > 0 && (
-          <Text wrap="truncate-end">
-            <Text dimColor>
-              {promptCount ? `${promptCount} prompt${promptCount === 1 ? '' : 's'} · ` : ''}agent time{' '}
-            </Text>
-            <Text bold>{clockLabel(busyMs)}</Text>
-            <Text dimColor>
-              {/* Kept in $.state: /clear, /resume, /branch and a relaunch start it over, as the requests above. */}
-              {historySince === null ? '' : ` since ${hhmm(historySince)}`}
-              {perPrompt === '' ? '' : ` · ⌀ ${perPrompt} per prompt`}
-            </Text>
-          </Text>
+        {packed('usage', null, usageParts(totals.main).map(text => ({ text, dim: true })), rightIn)}
+        {packed(
+          'requests',
+          null,
+          [
+            { text: `${totals.mainSteps} requests${historySince === null ? '' : ` since ${hhmm(historySince)}`}`, dim: true },
+            {
+              text: usdShown === null ? '–' : `${isPlan(measure) ? '≈ ' : ''}$${usdShown.toFixed(2)}`,
+              bold: true,
+              tail: measure?.usd == null ? undefined : costLabel(measure, tier !== 'narrow'),
+            },
+          ],
+          rightIn,
         )}
-        {totals.subSteps > 0 && (
-          <Text dimColor wrap="truncate-end">
-            subagents {usageLine(totals.sub)} · {totals.subSteps} requests
-          </Text>
-        )}
+        {/* Kept in $.state: /clear, /resume, /branch and a relaunch start it over, as the requests above. */}
+        {busyTurns > 0 &&
+          packed(
+            'agent-time',
+            null,
+            [
+              { text: promptCount ? `${promptCount} prompt${promptCount === 1 ? '' : 's'}` : '', dim: true },
+              { lead: 'agent time ', text: clockLabel(busyMs), bold: true, tail: historySince === null ? undefined : ` since ${hhmm(historySince)}` },
+              { text: perPrompt === '' ? '' : `⌀ ${perPrompt} per prompt`, dim: true },
+            ],
+            rightIn,
+          )}
+        {totals.subSteps > 0 &&
+          packed(
+            'subagents',
+            null,
+            [
+              { text: 'subagents', dim: true },
+              ...usageParts(totals.sub).map(text => ({ text, dim: true })),
+              { text: `${totals.subSteps} request${totals.subSteps === 1 ? '' : 's'}`, dim: true },
+            ],
+            rightIn,
+          )}
         {issues !== '' && (
           <Text color="warning" wrap="truncate-end">
             {issues} – see 3: Health
@@ -2131,30 +2180,37 @@ export const register: Register = (on, options) => {
           </Text>
         ) : (
           <Box flexDirection="column">
-            <Text wrap="truncate-end">
-              <Text dimColor>{'Cold       '}</Text>
-              <Text color="warning" bold>
-                Total {totals.coldCount}× · {short(totals.coldWritten)} tokens
-              </Text>
-              <Text dimColor>
-                {isKeepwarmOn && colds.some(c => c.cause === 'pause') ? ' · /keepwarm before a break prevents this' : ''}
-                {totals.coldCount > 3 ? ' · showing the last 3' : ''}
-              </Text>
-            </Text>
-            {colds.slice(-3).map(c => (
-              <Text wrap="truncate-end">
-                <Text dimColor>{'           '}{hhmm(c.at)} </Text>
-                <Text color="warning">{short(c.written)}</Text>
-                <Text dimColor>
-                  {' '}re-written
-                  {c.cause === 'model'
-                    ? ' (after a model switch)'
-                    : c.cause === 'resume'
-                      ? ` (after resume${c.idleMs === null ? '' : `, ${duration(c.idleMs)} idle`})`
-                      : ` after ${duration(c.idleMs ?? 0)} idle`}
-                </Text>
-              </Text>
-            ))}
+            {packed(
+              'cold-total',
+              'Cold',
+              [
+                { text: `Total ${totals.coldCount}× · ${short(totals.coldWritten)} tokens`, color: 'warning', bold: true },
+                { text: isKeepwarmOn && colds.some(c => c.cause === 'pause') ? '/keepwarm before a break prevents this' : '', dim: true },
+                { text: totals.coldCount > 3 ? 'showing the last 3' : '', dim: true },
+              ],
+              rightIn,
+            )}
+            {colds.slice(-3).map((c, i) =>
+              packed(
+                `cold-${i}`,
+                '',
+                [
+                  { text: hhmm(c.at), dim: true },
+                  { text: short(c.written), color: 'warning', tail: ' re-written' },
+                  {
+                    text:
+                      c.cause === 'model'
+                        ? '(after a model switch)'
+                        : c.cause === 'resume'
+                          ? `(after resume${c.idleMs === null ? '' : `, ${duration(c.idleMs)} idle`})`
+                          : `after ${duration(c.idleMs ?? 0)} idle`,
+                    dim: true,
+                  },
+                ],
+                rightIn,
+                ' ',
+              ),
+            )}
           </Box>
         )}
         {limits.length === 0 && (
@@ -2166,15 +2222,27 @@ export const register: Register = (on, options) => {
           const used = Math.max(0, Math.min(limitBar, Math.round((l.percentUsed / 100) * limitBar)))
           const full = limitForecast(measure?.limitStart?.[l.kind], l.percentUsed, now, l.resetsAt)
 
+          const resets = l.resetsAt ? ` · resets ${resetLabel(l.resetsAt)}` : ''
+          const fullText = full === null ? '' : `full ≈ ${hhmm(full)} at this pace`
+          const isOwnLine = fullText !== '' && 11 + limitBar + 5 + resets.length + 3 + fullText.length > rightIn
+
           return (
-            <Text wrap="truncate-end">
-              <Text dimColor>{limitName(l.kind).padEnd(11)}</Text>
-              <Text color={l.percentUsed >= 90 ? 'error' : l.percentUsed >= 70 ? 'warning' : 'success'}>{'█'.repeat(used)}</Text>
-              <Text color="inactive">{'░'.repeat(limitBar - used)}</Text>
-              <Text bold> {right(`${l.percentUsed}%`, 4)}</Text>
-              <Text dimColor>{l.resetsAt ? ` · resets ${resetLabel(l.resetsAt)}` : ''}</Text>
-              {full !== null && <Text color="warning">{` · full ≈ ${hhmm(full)} at this pace`}</Text>}
-            </Text>
+            <Box key={`limit-${l.kind}`} flexDirection="column">
+              <Text wrap="truncate-end">
+                <Text dimColor>{limitName(l.kind).padEnd(11)}</Text>
+                <Text color={l.percentUsed >= 90 ? 'error' : l.percentUsed >= 70 ? 'warning' : 'success'}>{'█'.repeat(used)}</Text>
+                <Text color="inactive">{'░'.repeat(limitBar - used)}</Text>
+                <Text bold> {right(`${l.percentUsed}%`, 4)}</Text>
+                <Text dimColor>{resets}</Text>
+                {fullText !== '' && !isOwnLine && <Text color="warning">{` · ${fullText}`}</Text>}
+              </Text>
+              {isOwnLine && (
+                <Text wrap="truncate-end">
+                  {label('')}
+                  <Text color="warning">{fullText}</Text>
+                </Text>
+              )}
+            </Box>
           )
         })}
       </Box>
@@ -2294,8 +2362,15 @@ export const register: Register = (on, options) => {
     // figures never shrink, only the note gives way (minWidth 0), so a row cannot wrap: a long MCP note
     // used to squeeze the bar and push the figure onto a second line. One bar width per card (`noteW`),
     // so the figures of a card stay in one column.
-    const nameW = Math.max(12, Math.min(30, Math.floor(fullIn * 0.36)))
-    const itemRow = (key: string, name: string, tokens: number, top: number, opts: { share?: string; note?: string; noteW?: number; isPath?: boolean } = {}) => {
+    // A narrow pane gives the names half its width: their ends were what got lost, the bars stay readable.
+    const nameW = tier === 'narrow' ? Math.floor(fullIn / 2) : Math.max(12, Math.min(30, Math.floor(fullIn * 0.36)))
+    const itemRow = (
+      key: string,
+      name: string,
+      tokens: number,
+      top: number,
+      opts: { share?: string; note?: string; noteW?: number; isPath?: boolean; color?: string; noteColor?: string } = {},
+    ) => {
       const barW = Math.max(4, Math.min(24, fullIn - nameW - ROW_FIGURES - (opts.noteW ?? 0)))
 
       return (
@@ -2305,13 +2380,13 @@ export const register: Register = (on, options) => {
             <Text wrap={opts.isPath ? 'truncate-middle' : 'truncate-end'}>{name}</Text>
           </Box>
           <Box key={`${key}-figures`} flexShrink={0}>
-            <Text color="suggestion"> {barCells(tokens, top, barW)}</Text>
+            <Text color={opts.color ?? 'suggestion'}> {barCells(tokens, top, barW)}</Text>
             <Text bold> {right(short(tokens), 6)}</Text>
             <Text dimColor>{right(opts.share ?? '', 5)}</Text>
           </Box>
           {opts.note !== undefined && opts.note !== '' && (
             <Box key={`${key}-note`} flexShrink={1} minWidth={0}>
-              <Text dimColor wrap="truncate-end">
+              <Text color={opts.noteColor} dimColor={opts.noteColor === undefined} bold={opts.noteColor !== undefined} wrap="truncate-end">
                 {` ${opts.note}`}
               </Text>
             </Box>
@@ -2413,9 +2488,20 @@ export const register: Register = (on, options) => {
           ) : (
             <Box flexDirection="column">
               {caption('Tool results by tool', '≈ characters ÷ 4')}
-              {resultTools.map(([tool, v]) => itemRow(`tool-${tool}`, tool, v.tokens, topResult, { share: shareOf(v.tokens), note: `${v.count}×`, noteW: maxCount + 1 }))}
+              {resultTools.map(([tool, v]) => itemRow(`tool-${tool}`, shortTool(tool), v.tokens, topResult, { share: shareOf(v.tokens), note: `${v.count}×`, noteW: maxCount + 1 }))}
               {caption('Largest single results')}
-              {results.largest.map((l, i) => itemRow(`large-${i}`, l.label, l.tokens, topLargest, { share: shareOf(l.tokens), noteW: maxCount + 1, isPath: true }))}
+              {/* A single result that floods the context – the toast's own threshold, against the window now – in
+                  the warning colour and with a "!" in the note column, so the colour is not the only sign. */}
+              {results.largest.map((l, i) => {
+                const isHog = isContextHog(l.tokens, measure?.window ?? 0)
+
+                return itemRow(`large-${i}`, fitLabel(l.label, nameW), l.tokens, topLargest, {
+                  share: shareOf(l.tokens),
+                  noteW: maxCount + 1,
+                  isPath: true,
+                  ...(isHog ? { color: 'warning', note: '!', noteColor: 'warning' } : {}),
+                })
+              })}
             </Box>
           )}
         </Box>
@@ -2456,7 +2542,6 @@ export const register: Register = (on, options) => {
     )
 
     // --- health tab: rates, stops, errors, server-side tools, Claude Code's cache verdict ---------
-    const label = (text: string) => <Text dimColor>{text.padEnd(11)}</Text>
     const age = measure?.startedAt == null ? null : Math.max(0, now - measure.startedAt)
     const hours = age === null ? 0 : age / HOUR
     const prompts = measure?.prompts ?? null
@@ -2490,53 +2575,49 @@ export const register: Register = (on, options) => {
             <Text bold>{age === null ? '–' : duration(age)}</Text>
             <Text dimColor>{measure?.startedAt == null ? '' : ` · since ${hhmm(measure.startedAt)}`}</Text>
           </Text>
-          <Text wrap="truncate-end">
-            {label('Prompts')}
-            <Text bold>{prompts ?? '–'}</Text>
-            <Text dimColor>
-              {' '}
-              · {totals.mainSteps} requests{historySince === null ? '' : ` since ${hhmm(historySince)}`}
-            </Text>
-          </Text>
-          <Text wrap="truncate-end">
-            {label('Agent time')}
-            <Text bold>{busyTurns === 0 ? '–' : clockLabel(busyMs)}</Text>
-            <Text dimColor>
-              {busyTurns === 0
-                ? ' · counted from the next answer'
-                : `${historySince === null ? '' : ` since ${hhmm(historySince)}`} · ⌀ ${clockLabel(busyMs / busyTurns)}/prompt${
-                    historySince === null && age !== null && age > 0 && busyMs <= age ? ` · ${Math.round((busyMs / age) * 100)}% of the session` : ''
-                  }`}
-            </Text>
-          </Text>
-          <Text wrap="truncate-end">
-            {label('Cost')}
-            <Text bold>{usd === null ? '–' : `${isPlan(measure) ? '≈ ' : ''}$${usd.toFixed(2)}`}</Text>
-            <Text dimColor>
-              {usd === null ? '' : costLabel(measure, false)}
-              {usd !== null && hours >= 0.05 ? ` · $${(usd / hours).toFixed(2)}/h` : ''}
-              {usd !== null && prompts ? ` · $${(usd / prompts).toFixed(2)}/prompt` : ''}
-            </Text>
-          </Text>
-          <Text wrap="truncate-end">
-            {label('Budget')}
-            {budget <= 0 ? (
-              <Text dimColor>off – option sessionBudget warns at 80 % and 100 %</Text>
-            ) : (
-              usd === null ? (
-                <Text dimColor>cost unknown yet · budget ${budget.toFixed(2)}</Text>
-              ) : (
-                <Text color={usd >= budget ? 'error' : usd >= budget * 0.8 ? 'warning' : 'success'}>
-                  {Math.round((usd / budget) * 100)}% of ${budget.toFixed(2)}
-                </Text>
-              )
-            )}
-          </Text>
-          <Text wrap="truncate-end">
-            {label('Tokens')}
-            <Text bold>{prompts && totals.mainSteps > 0 ? short(Math.round(tokensAll / prompts)) : '–'}</Text>
-            <Text dimColor> per prompt (main conversation, in + out)</Text>
-          </Text>
+          {packed('prompts', 'Prompts', [{ text: String(prompts ?? '–'), bold: true }, { text: `${totals.mainSteps} requests${historySince === null ? '' : ` since ${hhmm(historySince)}`}`, dim: true }], fullIn)}
+          {packed(
+            'agent',
+            'Agent time',
+            busyTurns === 0
+              ? [{ text: '–', bold: true }, { text: 'counted from the next answer', dim: true }]
+              : [
+                  { text: clockLabel(busyMs), bold: true, tail: historySince === null ? undefined : ` since ${hhmm(historySince)}` },
+                  { text: `⌀ ${clockLabel(busyMs / busyTurns)}/prompt`, dim: true },
+                  { text: historySince === null && age !== null && age > 0 && busyMs <= age ? `${Math.round((busyMs / age) * 100)}% of the session` : '', dim: true },
+                ],
+            fullIn,
+          )}
+          {packed(
+            'cost',
+            'Cost',
+            [
+              { text: usd === null ? '–' : `${isPlan(measure) ? '≈ ' : ''}$${usd.toFixed(2)}`, bold: true, tail: usd === null ? undefined : costLabel(measure, false) },
+              { text: usd !== null && hours >= 0.05 ? `$${(usd / hours).toFixed(2)}/h` : '', dim: true },
+              { text: usd !== null && prompts ? `$${(usd / prompts).toFixed(2)}/prompt` : '', dim: true },
+            ],
+            fullIn,
+          )}
+          {packed(
+            'budget',
+            'Budget',
+            budget <= 0
+              ? [{ text: 'off', dim: true }, { text: 'option sessionBudget warns at 80 % and 100 %', dim: true }]
+              : usd === null
+                ? [{ text: 'cost unknown yet', dim: true }, { text: `budget $${budget.toFixed(2)}`, dim: true }]
+                : [{ text: `${Math.round((usd / budget) * 100)}% of $${budget.toFixed(2)}`, color: usd >= budget ? 'error' : usd >= budget * 0.8 ? 'warning' : 'success' }],
+            fullIn,
+            budget <= 0 ? ' – ' : ' · ',
+          )}
+          {packed(
+            'tokens',
+            'Tokens',
+            [
+              { text: prompts && totals.mainSteps > 0 ? short(Math.round(tokensAll / prompts)) : '–', bold: true, tail: ' per prompt' },
+              { text: '(main conversation, in + out)', dim: true },
+            ],
+            fullIn,
+          )}
         </Box>
         <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="column">
           <Text color="claude" bold>
@@ -2550,24 +2631,35 @@ export const register: Register = (on, options) => {
               <Text color="warning">{tally(health.stops, stopLabel)}</Text>
             )}
           </Text>
-          <Text wrap="truncate-end">
-            {label('Errors')}
-            {errorCount === 0 ? <Text color="success">none</Text> : <Text color="error">{tally(health.errors, errorLabel)}</Text>}
-            <Text dimColor>{subErrors === '' ? '' : ` · subagents: ${subErrors}`}</Text>
-          </Text>
-          <Text wrap="truncate-end">
-            {label('Server')}
-            {serverNames.length === 0 ? (
-              <Text dimColor>no server-side tool calls (advisor, …)</Text>
-            ) : (
-              <Text>{serverNames.map(([n, v]) => `${n} ${v.count}× · ${duration(v.ms)}`).join('  ')}</Text>
-            )}
-          </Text>
-          {health.lastServerTools !== null && (
-            <Text dimColor wrap="truncate-end">
-              {''.padEnd(10)}last {hhmm(health.lastServerTools.at)}: {health.lastServerTools.calls.map(c => `${c.name} ${c.ms === null ? '–' : duration(c.ms)}`).join(', ')}
-            </Text>
+          {packed(
+            'errors',
+            'Errors',
+            [
+              errorCount === 0 ? { text: 'none', color: 'success' } : { text: tally(health.errors, errorLabel), color: 'error' },
+              { text: subErrors === '' ? '' : `subagents: ${subErrors}`, dim: true },
+            ],
+            fullIn,
           )}
+          {packed(
+            'server',
+            'Server',
+            serverNames.length === 0
+              ? [{ text: 'no server-side tool calls', dim: true }, { text: '(advisor, …)', dim: true }]
+              : serverNames.map(([n, v]) => ({ text: `${n} ${v.count}× · ${duration(v.ms)}` })),
+            fullIn,
+            serverNames.length === 0 ? ' ' : '  ',
+          )}
+          {health.lastServerTools !== null &&
+            packed(
+              'server-last',
+              '',
+              [
+                { text: `last ${hhmm(health.lastServerTools.at)}:`, dim: true },
+                ...health.lastServerTools.calls.map(c => ({ text: `${c.name} ${c.ms === null ? '–' : duration(c.ms)}`, dim: true })),
+              ],
+              fullIn,
+              ' ',
+            )}
         </Box>
         <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="column">
           <Text color="claude" bold>
@@ -2581,14 +2673,17 @@ export const register: Register = (on, options) => {
             const saved = cacheSaving(a, readMultiplier(a.model), writeMultiplier(subagentTtl))
             const hit = hitPct(a)
 
-            return (
-              <Text wrap="truncate-end">
-                <Text bold>{short(a.input + a.read + a.write + a.output)}</Text>
-                <Text dimColor> tok · {a.steps} req · </Text>
-                <Text color={hitColor(hit)}>{hit === null ? '–' : `${hit}%`}</Text>
-                <Text dimColor> hit{saved === null ? '' : saved >= 0 ? ` · cache saved ${saved}%` : ` · cache cost +${-saved}%`} · </Text>
-                <Text>{a.label}</Text>
-              </Text>
+            return packed(
+              `agent-${a.label}`,
+              null,
+              [
+                { text: a.label },
+                { text: short(a.input + a.read + a.write + a.output), bold: true, tail: ' tok' },
+                { text: `${a.steps} req`, dim: true },
+                { text: hit === null ? '–' : `${hit}%`, color: hitColor(hit), tail: ' hit' },
+                { text: saved === null ? '' : saved >= 0 ? `cache saved ${saved}%` : `cache cost +${-saved}%`, dim: true },
+              ],
+              fullIn,
             )
           })}
           {Object.keys(agents).length > agentRows.length && (
@@ -2600,11 +2695,11 @@ export const register: Register = (on, options) => {
             Cache check
           </Text>
           {lastCheck === null && lastResumeAt !== null ? (
-            <Text dimColor wrap="truncate-end">
+            <Text dimColor wrap="wrap">
               Resumed {hhmm(lastResumeAt)} – Claude Code gave no verdict on the cache then; the countdown counts from its last answer.
             </Text>
           ) : lastCheck === null ? (
-            <Text dimColor wrap="truncate-end">
+            <Text dimColor wrap="wrap">
               No model switch or resume yet – Claude Code reports its own verdict on the cache then.
             </Text>
           ) : (
@@ -2616,42 +2711,49 @@ export const register: Register = (on, options) => {
                     : `Claude Code differed ${health.checks.differed} of ${health.checks.agreed + health.checks.differed} times`}
                 </Text>
               </Text>
-              <Text dimColor wrap="truncate-end">
+              <Text dimColor wrap="wrap">
                 last {hhmm(lastCheck.at)} ({lastCheck.source === 'model' ? 'model switch' : 'resume'}): Claude Code {lastCheck.engineWarm ? 'warm' : 'cold'},
                 Cache Meter {lastCheck.ourWarm ? 'warm' : 'cold'}
               </Text>
             </Box>
           )}
-          <Text wrap="truncate-end">
-            {label('Warm miss')}
-            {unexpected.count === 0 && totals.mainSteps === 0 ? (
-              <Text dimColor>no request measured yet</Text>
-            ) : unexpected.count === 0 ? (
-              <Text color="success">none – every warm request read the cache</Text>
-            ) : (
-              <Text color="warning">
-                {unexpected.count}× re-written while warm · {short(unexpected.written)} tokens
-                {unexpected.lastAt === null ? '' : ` · last ${hhmm(unexpected.lastAt)}`}
-                {unexpected.lastIdleMs == null ? '' : ` after ${duration(unexpected.lastIdleMs)} idle`}
-              </Text>
-            )}
-          </Text>
-          {unexpected.count > 0 && (
-            <Text dimColor wrap="truncate-end">
-              {''.padEnd(10)}
-              {unexpected.lastCause ?? 'after seconds: model, effort, fast mode (on or off) or the tool set changed (not CLAUDE.md edits); after minutes: the cache lives shorter than assumed (option cacheTtl)'}
-            </Text>
+          {packed(
+            'warm-miss',
+            'Warm miss',
+            unexpected.count === 0 && totals.mainSteps === 0
+              ? [{ text: 'no request measured yet', dim: true }]
+              : unexpected.count === 0
+                ? [{ text: 'none', color: 'success' }, { text: 'every warm request read the cache', color: 'success' }]
+                : [
+                    { text: `${unexpected.count}× re-written while warm`, color: 'warning' },
+                    { text: `${short(unexpected.written)} tokens`, color: 'warning' },
+                    {
+                      text: `${unexpected.lastAt === null ? '' : `last ${hhmm(unexpected.lastAt)}`}${unexpected.lastIdleMs == null ? '' : ` after ${duration(unexpected.lastIdleMs)} idle`}`.trim(),
+                      color: 'warning',
+                    },
+                  ],
+            fullIn,
+            unexpected.count === 0 && totals.mainSteps > 0 ? ' – ' : ' · ',
           )}
-          <Text wrap="truncate-end">
-            {label('Notice')}
-            {!expiryNotice ? (
-              <Text dimColor>off – option expiryNotice sends a notification before the cache expires</Text>
-            ) : notice.lastReason !== null ? (
-              <Text color="warning">not sent: {notice.lastReason} · {notice.sent} sent</Text>
-            ) : (
-              <Text color="success">on · {notice.sent} sent</Text>
-            )}
-          </Text>
+          {/* The cause is why this row exists: it wraps under the value rather than losing its end. */}
+          {unexpected.count > 0 && (
+            <Box marginLeft={11}>
+              <Text dimColor wrap="wrap">
+                {unexpected.lastCause ?? 'after seconds: model, effort, fast mode (on or off) or the tool set changed (not CLAUDE.md edits); after minutes: the cache lives shorter than assumed (option cacheTtl)'}
+              </Text>
+            </Box>
+          )}
+          {packed(
+            'notice',
+            'Notice',
+            !expiryNotice
+              ? [{ text: 'off', dim: true }, { text: 'option expiryNotice sends a notification before the cache expires', dim: true }]
+              : notice.lastReason !== null
+                ? [{ text: `not sent: ${notice.lastReason}`, color: 'warning' }, { text: `${notice.sent} sent`, color: 'warning' }]
+                : [{ text: 'on', color: 'success' }, { text: `${notice.sent} sent`, color: 'success' }],
+            fullIn,
+            !expiryNotice ? ' – ' : ' · ',
+          )}
         </Box>
       </Box>
     )
@@ -2805,8 +2907,8 @@ function resetLabel(iso: string): string {
   return `${days[new Date(ms).getDay()]} ${hhmm(ms)}`
 }
 
-function usageLine(u: Usage4) {
-  return `read ${short(u.read)} · written ${short(u.write)} · new ${short(u.input)} · out ${short(u.output)}`
+function usageParts(u: Usage4): string[] {
+  return [`read ${short(u.read)}`, `written ${short(u.write)}`, `new ${short(u.input)}`, `out ${short(u.output)}`]
 }
 
 /** Green from 80 %, yellow from 50 %, red below; plain while unknown. */
@@ -2855,8 +2957,9 @@ function mcpNote(tools: number, toolNames: readonly string[] | undefined, calls:
 /** One request column's details for its hover row, padded so it covers the time row beneath the chart. */
 function columnDetail(s: Step, width: number): string {
   const hit = hitPct(s)
-  const what = s.kind === 'first' ? ' · first write' : s.kind === 'cold' ? ' · cold re-write' : ''
-  const text = `${hhmm(s.at)} · ${short(s.input + s.read + s.write)} in · ${hit === null ? '–' : `${hit}%`} hit · ${short(s.write)} written · out ${short(s.output)}${what}`
+  const what = s.kind === 'first' ? 'first write' : s.kind === 'cold' ? 'cold re-write' : ''
+  // In order of need: what is dropped first when the row is narrow comes last.
+  const text = fitParts([hhmm(s.at), `${short(s.input + s.read + s.write)} in`, `${hit === null ? '–' : `${hit}%`} hit`, what, `${short(s.write)} written`, `out ${short(s.output)}`], width)
 
   return text.padEnd(width)
 }

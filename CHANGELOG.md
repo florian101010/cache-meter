@@ -2,6 +2,22 @@
 
 All notable changes to Cache Meter, a Claude Code mod. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.1] – 2026-11-02
+
+Nothing cut off in a narrow pane. Requires Claude Code 2.1.295 or later.
+
+### Fixed
+- **Overview and Health in a narrow pane:** rows that ran past the edge lost their end behind `…` – the session budget, the tokens per prompt, the expiry notice, the cache check, a warm miss's cause, the cost per hour and per prompt, the cold re-writes and the keepwarm hint. Such a row now continues on the next line, under its value; no figure is cut. A test mounts all three tabs at 55 and 48 columns and checks that no line is cut.
+- **Plan limits:** the forecast `full ≈ HH:MM at this pace` was always cut off a narrow row; it gets a line of its own when there is no room.
+- **Tool labels kept their tool word:** a path over 80 characters lost its start – and with it `Read` or `Edit` – before it was stored, so the Context tab showed `…n/ai-web…ister.tsx`. Now the path loses its start and the tool word stays, and *Largest single results* shows the tool plus as many trailing folders as fit (`Read …/hooks/register.tsx`).
+- **Subagents in Health:** the agent's name came last and was the first thing a narrow pane dropped; it now comes first.
+
+### Changed
+- **MCP tools by their own name:** `browser_snapshot` instead of `mcp__MCP_DOCKER__playwright__browser_snapshot`, in the Context tab, the toast and `/tokens report`.
+- **Results that flood the context** are marked in *Largest single results*: warning colour and a `!` – the same threshold as the toast (≥ 10k tokens and ≥ 2 % of the window).
+- **Wider names in a narrow pane:** the Context tab's name column takes half the width, so categories, agents and file names show whole.
+- **A request column's hover row** drops its least needed figures first when the pane is narrow.
+
 ## [0.13.0] – 2026-11-02
 
 Agent time in the `/tokens` pane, and a Context tab redrawn for a narrow pane. Requires Claude Code 2.1.295 or later.
@@ -324,6 +340,7 @@ Changes for Anthropic's plugin directory, whose validation blocked 0.5.1.
 - Pane `/tokens`: per-request token history, totals, plan limits, cost.
 - `/keepwarm`.
 
+[0.13.1]: https://github.com/florian101010/cache-meter/compare/cache-meter--v0.13.0...cache-meter--v0.13.1
 [0.13.0]: https://github.com/florian101010/cache-meter/compare/cache-meter--v0.12.3...cache-meter--v0.13.0
 [0.12.3]: https://github.com/florian101010/cache-meter/compare/cache-meter--v0.12.2...cache-meter--v0.12.3
 [0.12.2]: https://github.com/florian101010/cache-meter/compare/cache-meter--v0.12.1...cache-meter--v0.12.2

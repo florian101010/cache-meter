@@ -723,8 +723,16 @@ export function toolLabel(tool: string, input: Readonly<Record<string, unknown>>
       .map(part => (isSecretLikePart(part) ? '…' : part))
       .join('')
 
-    return cleanLabel(`${tool} ${shown}`)
+    const label = cleanLabel(`${tool} ${shown}`)
+    if (!label.startsWith('…')) return label
+    // Too long: the path loses its start – from a separator on – never the tool word; still at most
+    // 80 characters (PRIVACY.md).
+    const tail = cleanLabel(shown).slice(-(78 - tool.length))
+    const fromSeparator = tail.replace(/^[^\\/]*/, '')
+
+    return `${tool} …${fromSeparator === '' ? tail : fromSeparator}`
   }
+  if (tool.startsWith('mcp__')) return cleanLabel(shortTool(tool))
   if (tool === 'Bash' && typeof input.command === 'string') {
     // Words are split where bash splits them – space, tab, newline – not on every Unicode space: a
     // no-break space inside an assignment's value must not end the value. Plain VAR=value prefixes go;
@@ -741,6 +749,109 @@ export function toolLabel(tool: string, input: Readonly<Record<string, unknown>>
   }
 
   return tool
+}
+
+/**
+ * An MCP tool by its own name, the part after the last `__` of its wire name (`mcp__server__tool`):
+ * the server's part filled a narrow column before the tool's name showed. Any other tool as it is.
+ */
+export function shortTool(tool: string): string {
+  if (!tool.startsWith('mcp__')) return tool
+  const own = tool.slice(tool.lastIndexOf('__') + 2)
+
+  return own === '' ? tool : own
+}
+
+/** Columns a text takes: one per code point (the pane's texts hold no wide characters). */
+export function columns(text: string): number {
+  return [...text].length
+}
+
+/**
+ * A stored label fitted to `width` columns: the tool word, then as many trailing path segments as fit
+ * after "…/" – so the file name always shows and a parent folder when there is room. A label without a
+ * path (`Bash git`, an MCP tool) is returned as it is; the renderer cuts it if it must.
+ */
+export function fitLabel(label: string, width: number): string {
+  if (columns(label) <= width) return label
+  const m = /^([^\s…]\S*) (.*)$/.exec(label)
+  const tool = m?.[1] ?? ''
+  const path = m?.[2] ?? label
+  if (!/[\\/]/.test(path)) return label
+  const segments = path.split(/[\\/]/)
+  let tail = segments.pop() ?? ''
+  const head = tool === '' ? '…/' : `${tool} …/`
+  if (columns(head) + columns(tail) > width) return columns(tail) + 2 <= width || tool === '' ? `…/${tail}` : `${tool} …/${tail}`
+  for (let i = segments.length - 1; i >= 0; i--) {
+    const next = `${segments[i]}/${tail}`
+    if (segments[i] === '' || segments[i] === '…' || columns(head) + columns(next) > width) break
+    tail = next
+  }
+
+  return head + tail
+}
+
+/** One piece of a packed line: the text of part `part`, or a slice of it when the part is wider than a line. */
+export type Piece = { part: number; text: string }
+
+/** A text cut at its spaces into chunks of at most `width` columns (a single longer word stays whole). */
+function wordChunks(text: string, width: number): string[] {
+  const chunks: string[] = []
+  let chunk = ''
+  for (const word of text.split(' ')) {
+    if (chunk !== '' && columns(chunk) + 1 + columns(word) > width) {
+      chunks.push(chunk)
+      chunk = word
+    } else chunk = chunk === '' ? word : `${chunk} ${word}`
+  }
+  if (chunk !== '') chunks.push(chunk)
+
+  return chunks
+}
+
+/**
+ * Parts laid out on lines of at most `width` columns, joined by `sep`: a part moves to the next line
+ * whole, and is split – at its spaces – only when it is wider than a line by itself. The pane's rows use
+ * it so a narrow pane breaks between figures instead of cutting the last ones off. Empty parts are skipped.
+ */
+export function packParts(parts: readonly string[], width: number, sep = ' · '): Piece[][] {
+  const lines: Piece[][] = []
+  let line: Piece[] = []
+  let used = 0
+  parts.forEach((text, part) => {
+    if (text === '') return
+    if (columns(text) > width) {
+      if (line.length > 0) lines.push(line)
+      const chunks = wordChunks(text, width)
+      for (const chunk of chunks.slice(0, -1)) lines.push([{ part, text: chunk }])
+      const lastChunk = chunks.at(-1) ?? ''
+      line = [{ part, text: lastChunk }]
+      used = columns(lastChunk)
+
+      return
+    }
+    const add = line.length === 0 ? columns(text) : columns(sep) + columns(text)
+    if (line.length > 0 && used + add > width) {
+      lines.push(line)
+      line = [{ part, text }]
+      used = columns(text)
+
+      return
+    }
+    line.push({ part, text })
+    used += add
+  })
+  if (line.length > 0) lines.push(line)
+
+  return lines
+}
+
+/** Parts joined by `sep`, the last ones left out until the line fits `width` (the first part always stays). */
+export function fitParts(parts: readonly string[], width: number, sep = ' · '): string {
+  const kept = parts.filter(t => t !== '')
+  while (kept.length > 1 && columns(kept.join(sep)) > width) kept.pop()
+
+  return kept.join(sep)
 }
 
 /** Adds one tool result to the tally: per tool, and the five largest single results. */

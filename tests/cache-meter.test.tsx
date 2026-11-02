@@ -14,7 +14,11 @@ import {
   cafeState,
   barCells,
   compactNote,
+  fitLabel,
+  fitParts,
   foldSmall,
+  packParts,
+  shortTool,
   hogNote,
   isContextHog,
   shareOfRequest,
@@ -361,7 +365,7 @@ test('turn.step: a main request fills the band, a subagent only the totals', asy
   await ui.unmount()
 
   const pane = await $.ui.mount({ surface: 'desktop', ...PANE })
-  expect(await pane.find({ type: 'Text', text: / · 1 requests/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^subagents · .* · 1 request$/ })).toBeDefined()
   await pane.unmount()
 })
 
@@ -1089,7 +1093,7 @@ test('limit forecast drawn in the overview once the pace is known', async ($, on
   await clock.advance(HOUR)
   await $.session.measure(at(40) as never)
   ui = await $.ui.mount({ surface: 'terminal', ...PANE })
-  expect(await ui.find({ type: 'Text', text: ` · full ≈ ${hhmm(T0 + 4 * HOUR)} at this pace` })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: `full ≈ ${hhmm(T0 + 4 * HOUR)} at this pace` })).toBeDefined()
   await ui.unmount()
 })
 
@@ -1279,7 +1283,7 @@ test('warm miss: the cause is named – effort, tool set, or a shorter TTL', asy
   next.read = 10_000
   await clock.advance(60_000)
   await stepWith($, 'claude-opus-5', 'medium')
-  expect(await healthText($, /^ +effort high → medium – each splits the cache$/)).toBeDefined()
+  expect(await healthText($, /^effort high → medium – each splits the cache$/)).toBeDefined()
   // The tool set changed between two requests.
   next.tools = [{ name: 'mcp__linear__x', serverName: 'linear', tokens: 900, isLoaded: true }]
   await clock.advance(60_000)
@@ -1333,8 +1337,8 @@ test('subagents: tokens, requests and cache hit per agent, named by type and tas
   await step($, 'agent-1')
   await step($, 'agent-1')
   await step($, 'agent-unknown-123456')
-  expect(await healthText($, /201\.0k tok · 2 req · .*Explore: find the tests$/)).toBeDefined()
-  expect(await healthText($, /1 req .*agent-unknow$/)).toBeDefined()
+  expect(await healthText($, /^Explore: find the tests · 201\.0k tok · 2 req · /)).toBeDefined()
+  expect(await healthText($, /^agent-unknow.* · 1 req · /)).toBeDefined()
 })
 
 test('turnLine off: no line under the answer', { options: { turnLine: 'off' } }, async ($, on) => {
@@ -1395,7 +1399,7 @@ test('tool labels: path or program name, never arguments', async () => {
   expect(toolLabel('Read', { file_path: 'C:\\Users\\carol\\notes.md' })).toBe('Read ~\\notes.md')
   expect(toolLabel('Read', { file_path: '/root/.bashrc' })).toBe('Read ~/.bashrc')
   expect(toolLabel('Grep', { pattern: 'password' })).toBe('Grep')
-  expect(toolLabel('mcp__github__get_file', { path: 'x' })).toBe('mcp__github__get_file')
+  expect(toolLabel('mcp__github__get_file', { path: 'x' })).toBe('get_file')
 })
 
 test('what the conversation holds: tool results of the main conversation, reset by a compaction', async ($, on) => {
@@ -1499,7 +1503,7 @@ test('warm miss: with tool search active a loaded tool is no cause', async ($, o
   await clock.advance(60_000)
   await stepWith($, 'claude-opus-5', 'high')
   expect(await healthText($, /tool set changed/)).toBeUndefined()
-  expect(await healthText($, /^ +not observable here/)).toBeDefined()
+  expect(await healthText($, /^not observable here/)).toBeDefined()
 })
 
 test('a /model switch warns once: no second note at the request, no warm miss', async ($, on) => {
@@ -1573,9 +1577,9 @@ test('subagents: a failed name lookup is tried again', async ($, on) => {
   const { next } = world(on)
   next.agentListFails = 1
   await step($, 'agent-1')
-  expect(await healthText($, / agent-1$/)).toBeDefined()
+  expect(await healthText($, /^agent-1 · /)).toBeDefined()
   await step($, 'agent-1')
-  expect(await healthText($, /Explore: find the tests$/)).toBeDefined()
+  expect(await healthText($, /^Explore: find the tests · /)).toBeDefined()
 })
 
 test('last stretch: the dot pulses once a second; a redraw timer runs only then', async ($, on) => {
@@ -1640,7 +1644,7 @@ test('request chart: a hover area per column reveals its details over the time r
   expect(detail?.props).toMatchObject({ position: 'absolute', display: 'none' })
   const row = await ui.find({ type: 'Text', text: /^\d\d:\d\d · 100\.0k in · 93% hit · 6\.0k written · out 500 *$/ })
   expect(String(row?.text).length).toBe(Number(detail?.props.width))
-  expect(await ui.find({ type: 'Text', text: /· first write *$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /· 93% hit · first write · / })).toBeDefined()
   await ui.unmount()
 })
 
@@ -1703,8 +1707,8 @@ test('privacy round 2: Unicode spaces, token-like names, home dirs and URLs neve
   expect(toolLabel('Bash', { command: 'TOKEN=a\tnpm test' })).toBe('Bash npm')
   expect(toolLabel('Bash', { command: './scripts/deploy.sh --prod' })).toBe('Bash deploy.sh')
   // file_path only for the file tools, never a URL, no query or fragment
-  expect(toolLabel('mcp__x__upload', { file_path: 'https://h/up?sig=SECRET' })).toBe('mcp__x__upload')
-  expect(toolLabel('mcp__x__upload', { file_path: '/Users/carol/contract-mueller.pdf' })).toBe('mcp__x__upload')
+  expect(toolLabel('mcp__x__upload', { file_path: 'https://h/up?sig=SECRET' })).toBe('upload')
+  expect(toolLabel('mcp__x__upload', { file_path: '/Users/carol/contract-mueller.pdf' })).toBe('upload')
   expect(toolLabel('Read', { file_path: 'https://h/up?sig=SECRET' })).toBe('Read')
   expect(toolLabel('Read', { file_path: '/Users/carol/a.md?token=SECRET#x' })).toBe('Read ~/a.md')
   expect(toolLabel('Read', { file_path: '/tmp/ghp_SECRET123.txt' })).toBe('Read /tmp/…')
@@ -1797,7 +1801,7 @@ test('live during a turn: an empty limit list keeps the plan limits and the fore
   await $.session.measure(at(40) as never)
   const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
   expect(await ui.find({ type: 'Text', text: /5 hours/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: ` · full ≈ ${hhmm(T0 + 4 * HOUR)} at this pace` })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: `full ≈ ${hhmm(T0 + 4 * HOUR)} at this pace` })).toBeDefined()
   await ui.unmount()
 })
 
@@ -1873,7 +1877,7 @@ test('after a relaunch (/tui, --resume): the pane says the history starts over, 
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
   expect(await ui.find({ type: 'Text', text: /^No request since \d\d:\d\d: Cache Meter keeps its history in memory only/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /^0 requests since \d\d:\d\d · $/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^0 requests since \d\d:\d\d · / })).toBeDefined()
   await ui.unmount()
   // Nothing measured: Health does not call that a clean record.
   const miss = await healthText($, /^no request measured yet$/)
@@ -1890,7 +1894,7 @@ test('a fresh session: no restart note, and the history note leaves once request
   await ui.unmount()
   await step($)
   ui = await $.ui.mount({ surface: 'terminal', ...PANE })
-  expect(await ui.find({ type: 'Text', text: /^1 requests · $/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^1 requests · / })).toBeDefined()
   await ui.unmount()
   expect(await healthText($, /every warm request read the cache/)).toBeDefined()
 })
@@ -3492,10 +3496,10 @@ test('agent time after a relaunch or /resume: counted from then on, and the pane
   await step($)
   await $.turn.complete({ turnId: 't1', answer: 'ok', durationMs: 45_000, isAborted: false, usage: TURN_USAGE } as never)
   const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
-  expect(await ui.find({ type: 'Text', text: /^ since \d\d:\d\d · ⌀ 45s per prompt$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^agent time 45s since \d\d:\d\d · ⌀ 45s per prompt$/ })).toBeDefined()
   await ui.press({ key: 'tab-health' })
   // No share of the session: the time before the relaunch is not known.
-  expect(await ui.find({ type: 'Text', text: /^ since \d\d:\d\d · ⌀ 45s\/prompt$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^Agent time 45s since \d\d:\d\d · ⌀ 45s\/prompt$/ })).toBeDefined()
   await ui.unmount()
 })
 
@@ -3547,4 +3551,121 @@ test('context tab rows cannot wrap: name, bar and figures keep their width, only
   // The server's tools and calls on their own line beneath its row.
   expect(await ui.find({ type: 'Text', text: /^ {2}2 tools · 0 calls$/ })).toBeDefined()
   await ui.unmount()
+})
+
+// A session with something in every card: plan limit with a forecast, cold re-writes (pause, resume),
+// a model switch, a warm miss, a subagent, a long path, an MCP result that floods the context.
+async function richSession($: Engine, on: On) {
+  const w = world(on)
+  const { next, clock } = w
+  next.turns = 0
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  await step($)
+  next.toolText = 'x'.repeat(12_000)
+  await toolCall($, { tool: 'Read', file_path: '/Users/u/Dateien/ai-webdev/new-website-floriangrimmer/src/components/hooks/register.tsx' })
+  next.toolText = 'y'.repeat(100_000)
+  await toolCall($, { tool: 'mcp__MCP_DOCKER__playwright__browser_snapshot' })
+  next.toolText = 'z'.repeat(9_000)
+  await toolCall($, { tool: 'Bash', command: 'git status' })
+  next.toolText = null
+  await step($, 'agent-1')
+  const limits = (pct: number) => ({ context: { tokens: 300_000, window: 1_000_000, percent: 30 }, rateLimits: [{ kind: 'seven_day', percentUsed: pct, resetsAt: '2026-10-17T18:00:00Z' }], cost: { usd: 9.5 }, changed: ['context', 'rateLimits', 'cost'] })
+  await $.session.measure(limits(20) as never)
+  await clock.advance(HOUR)
+  await $.session.measure(limits(40) as never)
+  // A warm miss: warm by the clock, yet it wrote more than it read.
+  next.read = 0
+  next.write = 50_000
+  await step($)
+  next.read = 93_000
+  next.write = 6_000
+  // Two hours away: a cold re-write.
+  await clock.advance(2 * HOUR)
+  next.write = 120_000
+  await step($)
+  next.write = 6_000
+  await $.classic.PostModelSwitch({ hook_event_name: 'PostModelSwitch', from_model: 'a', to_model: 'b', requested_model: null, source: 'command', context_tokens: 100_000, prompt_cache_warm: true, cache_ttl: '1h', estimated_cache_write_usd: 0.4, pricing: 'catalog' } as never)
+  await $.classic.SessionStart({ source: 'resume', seconds_since_last_response: 4_800, prompt_cache_likely_expired: true, context_tokens: 150_000 } as never)
+  next.write = 150_000
+  await step($)
+  next.write = 6_000
+  await $.turn.complete({ turnId: 't1', answer: 'ok', durationMs: 184_000, isAborted: false, usage: TURN_USAGE } as never)
+  next.turns = 4
+  await $.session.measure(limits(45) as never)
+
+  return w
+}
+
+// Every line that cuts instead of wrapping must fit the card (fullIn = bodyColumns − 4), at the widths of a
+// pane docked beside the chat on a tablet: nothing a reader needs is lost behind "…".
+test('narrow pane: no line in Overview, Context or Health is cut', { timeoutMs: 20_000 }, async ($, on) => {
+  await richSession($, on)
+  const cut: string[] = []
+  for (const cols of [55, 48]) {
+    for (const tab of ['overview', 'context', 'health']) {
+      const ui = await $.ui.mount({ surface: 'terminal', ...PANE, props: { ...PANE.props, bodyColumns: cols } })
+      await ui.press({ key: `tab-${tab}` })
+      for (const t of await ui.findAll({ type: 'Text' })) {
+        if (t.props.wrap === 'wrap') continue
+        if ([...t.text].length > cols - 4) cut.push(`${cols} ${tab}: ${t.text}`)
+      }
+      await ui.unmount()
+    }
+  }
+  expect(cut).toEqual([])
+  // The MCP result (25k tokens, over 2 % of the 1M window) floods the context: by its own name, in the
+  // warning colour, with a "!" so the colour is not the only sign.
+  const ui = await $.ui.mount({ surface: 'terminal', ...PANE, props: { ...PANE.props, bodyColumns: 55 } })
+  await ui.press({ key: 'tab-context' })
+  expect(await ui.find({ type: 'Text', text: 'browser_snapshot' })).toBeDefined()
+  const mark = await ui.find({ type: 'Text', text: ' !' })
+  expect([mark?.props.color, mark?.props.bold]).toEqual(['warning', true])
+  await ui.unmount()
+})
+
+test('tool labels: a long path keeps the tool word; MCP tools by their own name', () => {
+  const deep = `/Users/u/${'very-long-folder-name/'.repeat(5)}src/register.tsx`
+  const label = toolLabel('Read', { file_path: deep })
+  expect(label.startsWith('Read …/')).toBe(true)
+  expect(label.endsWith('/src/register.tsx')).toBe(true)
+  expect([...label].length).toBeLessThanOrEqual(80)
+  expect(shortTool('mcp__MCP_DOCKER__playwright__browser_snapshot')).toBe('browser_snapshot')
+  expect(shortTool('Read')).toBe('Read')
+  expect(shortTool('mcp__')).toBe('mcp__')
+})
+
+test('fitLabel: the file name always, a parent folder when there is room', () => {
+  expect(fitLabel('Read ~/a.ts', 20)).toBe('Read ~/a.ts')
+  expect(fitLabel('Read ~/Dateien/ai-webdev/site/src/hooks/register.tsx', 25)).toBe('Read …/hooks/register.tsx')
+  expect(fitLabel('Read ~/Dateien/ai-webdev/site/src/hooks/register.tsx', 19)).toBe('Read …/register.tsx')
+  // No room for the tool word: the file name wins.
+  expect(fitLabel('Read ~/Dateien/ai-webdev/site/src/hooks/register.tsx', 15)).toBe('…/register.tsx')
+  // A label stored without its tool word (an older version cut its start).
+  expect(fitLabel('…/ai-webdev/new-website/src/register.tsx', 20)).toBe('…/src/register.tsx')
+  // A masked part stops the climb: nothing is guessed behind "…".
+  expect(fitLabel('Read ~/…/keys/notes.md', 18)).toBe('Read …/keys/notes.md'.length <= 18 ? 'Read …/keys/notes.md' : 'Read …/notes.md')
+  // No path: as it is, the renderer cuts it.
+  expect(fitLabel('Bash git', 4)).toBe('Bash git')
+  expect(fitLabel('browser_snapshot', 10)).toBe('browser_snapshot')
+})
+
+test('packParts: whole parts per line, a part split at its spaces only when wider than a line', () => {
+  const text = (lines: { text: string }[][]) => lines.map(l => l.map(p => p.text).join(' · '))
+  expect(text(packParts(['a', 'bb', 'ccc'], 20))).toEqual(['a · bb · ccc'])
+  expect(text(packParts(['$9.50 API value', '$3.17/h', '$2.38/prompt'], 26))).toEqual(['$9.50 API value · $3.17/h', '$2.38/prompt'])
+  expect(text(packParts(['off', 'option expiryNotice sends a notification before the cache expires'], 30))).toEqual([
+    'off',
+    'option expiryNotice sends a',
+    'notification before the cache',
+    'expires',
+  ])
+  // Empty parts are skipped, and the part index is kept for the styles.
+  expect(packParts(['x', '', 'y'], 10)).toEqual([[{ part: 0, text: 'x' }, { part: 2, text: 'y' }]])
+})
+
+test('fitParts: the last parts go first, the first always stays', () => {
+  expect(fitParts(['12:00', '100.0k in', '93% hit', 'first write', '6.0k written', 'out 500'], 41)).toBe('12:00 · 100.0k in · 93% hit · first write')
+  expect(fitParts(['12:00', '100.0k in'], 3)).toBe('12:00')
+  expect(fitParts(['a', '', 'b'], 10)).toBe('a · b')
 })
