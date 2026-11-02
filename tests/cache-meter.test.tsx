@@ -67,6 +67,10 @@ function band(bodyColumns: number, isWorking = false) {
   }
 }
 
+// Fires tool.call with a partial event. Through the typed overloads, a literal checked against the newer
+// declarations (2.1.316) is "excessively deep" for tsc (TS2589); the kit only needs the fields given.
+const toolCall = ($: Engine, e: Record<string, unknown>) => ($.tool.call as unknown as (e: unknown) => Promise<unknown>)(e)
+
 const PANE = {
   plugin: 'cache-meter',
   component: 'Pane' as const,
@@ -1089,12 +1093,12 @@ test('limit forecast drawn in the overview once the pace is known', async ($, on
 test('MCP servers: calls counted per server, idle ones marked after a few prompts', async ($, on) => {
   const { next } = world(on)
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
-  await $.tool.call({ tool: 'mcp__github__a' } as never)
-  await $.tool.call({ tool: 'mcp__github__a' } as never)
-  await $.tool.call({ tool: 'mcp__github__b' } as never)
+  await toolCall($, { tool: 'mcp__github__a' })
+  await toolCall($, { tool: 'mcp__github__a' })
+  await toolCall($, { tool: 'mcp__github__b' })
   // A refused call did not run: not counted.
   next.deny = true
-  await $.tool.call({ tool: 'mcp__github__b' } as never)
+  await toolCall($, { tool: 'mcp__github__b' })
   next.deny = false
   await $.session.measure({ context: { tokens: 100_000, window: 1_000_000, percent: 10 }, rateLimits: [], changed: ['context'] })
   const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
@@ -1239,7 +1243,7 @@ test('break cause: model or effort first, then the TTL, then tools, then the eff
   expect(breakCause({ ...none, tools: { added: 0, removed: 0 }, idleMs: 12 * 60_000 })).toBe('after 12m idle: the real TTL is likely 5m, not 1h00m (option cacheTtl)')
   expect(breakCause({ ...none, idleMs: 12 * 60_000, ttlMs: FIVE_MIN })).toMatch(/^not observable here/)
   expect(breakCause({ ...none, effortOnly: 'effort high → low' })).toMatch(/only with an API key or a subscription$/)
-  expect(breakCause(none)).toBe('not observable here: fast mode turned on, a code-intelligence plugin (LSP tool), a tool deny rule, or removed images')
+  expect(breakCause(none)).toBe('not observable here: fast mode turned on or off (also its fallback after a rate limit), a code-intelligence plugin (LSP tool), a tool deny rule, or removed images')
   expect(agentLabel(undefined, 'abcdefghijklmnop')).toBe('abcdefghijkl')
   expect(agentLabel({ type: 'Explore', description: '' }, 'x')).toBe('Explore')
 })
@@ -1395,14 +1399,14 @@ test('what the conversation holds: tool results of the main conversation, reset 
   const { next } = world(on)
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   next.toolText = 'x'.repeat(4_000)
-  await $.tool.call({ tool: 'Read', file_path: '/Users/u/project/a.ts' } as never)
+  await toolCall($, { tool: 'Read', file_path: '/Users/u/project/a.ts' })
   next.toolText = 'y'.repeat(40_000)
-  await $.tool.call({ tool: 'Bash', command: 'SECRET=1 npm test --silent' } as never)
+  await toolCall($, { tool: 'Bash', command: 'SECRET=1 npm test --silent' })
   // A subagent's result stays in its own context.
-  await $.tool.call({ tool: 'Read', file_path: '/Users/u/other.ts', agentId: 'agent-1' } as never)
+  await toolCall($, { tool: 'Read', file_path: '/Users/u/other.ts', agentId: 'agent-1' })
   // Another mod answered without core's text: nothing to measure.
   next.toolText = null
-  await $.tool.call({ tool: 'Read', file_path: '/Users/u/third.ts' } as never)
+  await toolCall($, { tool: 'Read', file_path: '/Users/u/third.ts' })
   expect(await contextText($, /all messages 80\.0k$/)).toBeDefined()
   for (const name of ['Bash', 'Read', 'Bash npm', 'Read ~/project/a.ts']) expect(await contextText($, new RegExp(`^${name}$`))).toBeDefined()
   expect(await contextText($, /^ +10\.0k$/)).toBeDefined()
@@ -1441,10 +1445,10 @@ test('/tokens report: Markdown on the clipboard, the pane untouched, nothing in 
   await step($)
   await step($, 'agent-1')
   next.toolText = 'x'.repeat(8_000)
-  await $.tool.call({ tool: 'Read', file_path: '/Users/u/project/a.ts' } as never)
+  await toolCall($, { tool: 'Read', file_path: '/Users/u/project/a.ts' })
   next.toolText = 'y'.repeat(40_000)
-  await $.tool.call({ tool: 'Bash', command: 'SECRET="a b" npm test --token=xyz' } as never)
-  await $.tool.call({ tool: 'Read', file_path: '/Users/u/other.ts', agentId: 'agent-1' } as never)
+  await toolCall($, { tool: 'Bash', command: 'SECRET="a b" npm test --token=xyz' })
+  await toolCall($, { tool: 'Read', file_path: '/Users/u/other.ts', agentId: 'agent-1' })
   const answer = await run($, 'tokens', 'report')
   expect(answer.text).toMatch(/^Copied the session report \(\d+ lines of Markdown\) to the clipboard – paste it to check/)
   expect(answer.text).not.toMatch(/# Cache Meter/)
@@ -2069,6 +2073,18 @@ test('pane header: the key hint stays visible when a tall tab cuts the footer of
   await ui.unmount()
 })
 
+// interface › Draw in the VS Code extension: the panel draws the pane, but buttons have no hotkeys.
+test('pane in VS Code: draws, and its hints name clicks, not keys', async ($, on) => {
+  world(on)
+  await $.session.start({ surface: 'vscode', isInteractive: true, cwd: '/work' })
+  for (const isFocused of [false, true]) {
+    const ui = await $.ui.mount({ surface: 'vscode', ...PANE, props: { ...PANE.props, bodyColumns: 140, isFocused } })
+    expect(await ui.find({ type: 'Text', text: 'click a tab or /tokens context | health' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /ctrl\+x|keys here/ })).toBeUndefined()
+    await ui.unmount()
+  }
+})
+
 test('pane footer: a narrow sidebar (iPad) still names the key to reach the pane', async ($, on) => {
   world(on)
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
@@ -2264,14 +2280,14 @@ test('context hog: a toast for one large result in the main conversation – not
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   // 4,000 characters ≈ 1k tokens: no word.
   next.toolText = 'x'.repeat(4_000)
-  await $.tool.call({ tool: 'Read', file_path: '/Users/u/project/a.ts' } as never)
+  await toolCall($, { tool: 'Read', file_path: '/Users/u/project/a.ts' })
   expect(toasts.some(t => /into the context/.test(t))).toBe(false)
   // 200,000 characters ≈ 50k tokens: one toast, with the short label.
   next.toolText = 'y'.repeat(200_000)
-  await $.tool.call({ tool: 'Read', file_path: '/Users/u/project/big.ts' } as never)
+  await toolCall($, { tool: 'Read', file_path: '/Users/u/project/big.ts' })
   expect(toasts.filter(t => /into the context/.test(t))).toEqual(['Read ~/project/big.ts put ≈ 50.0k tokens into the context – sent again with every request until /compact'])
   // A subagent's result stays in its own context.
-  await $.tool.call({ tool: 'Read', file_path: '/Users/u/other.ts', agentId: 'agent-1' } as never)
+  await toolCall($, { tool: 'Read', file_path: '/Users/u/other.ts', agentId: 'agent-1' })
   expect(toasts.filter(t => /into the context/.test(t))).toHaveLength(1)
 })
 
@@ -2280,15 +2296,15 @@ test('context hog: the window counts (15k of 1M is no word); one toast per 20 se
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   // 60,000 characters ≈ 15k tokens: over 10k, but under 2 % of the measured 1M window.
   next.toolText = 'z'.repeat(60_000)
-  await $.tool.call({ tool: 'Read', file_path: '/Users/u/project/mid.ts' } as never)
+  await toolCall($, { tool: 'Read', file_path: '/Users/u/project/mid.ts' })
   expect(toasts.some(t => /into the context/.test(t))).toBe(false)
   next.toolText = 'y'.repeat(200_000)
-  await $.tool.call({ tool: 'Read', file_path: '/Users/u/project/a.ts' } as never)
+  await toolCall($, { tool: 'Read', file_path: '/Users/u/project/a.ts' })
   await clock.advance(5_000)
-  await $.tool.call({ tool: 'Read', file_path: '/Users/u/project/b.ts' } as never)
+  await toolCall($, { tool: 'Read', file_path: '/Users/u/project/b.ts' })
   expect(toasts.filter(t => /into the context/.test(t))).toHaveLength(1)
   await clock.advance(20_000)
-  await $.tool.call({ tool: 'Read', file_path: '/Users/u/project/c.ts' } as never)
+  await toolCall($, { tool: 'Read', file_path: '/Users/u/project/c.ts' })
   expect(toasts.filter(t => /into the context/.test(t))).toHaveLength(2)
 })
 
@@ -2296,7 +2312,7 @@ test('context hog: no toast without a screen', async ($, on) => {
   const { next, toasts } = world(on)
   await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/work' })
   next.toolText = 'y'.repeat(200_000)
-  await $.tool.call({ tool: 'Read', file_path: '/Users/u/project/big.ts' } as never)
+  await toolCall($, { tool: 'Read', file_path: '/Users/u/project/big.ts' })
   expect(toasts.some(t => /into the context/.test(t))).toBe(false)
 })
 
@@ -2348,6 +2364,19 @@ test('limit warning: a notification too with limitNotice = on', { options: { lim
   await clock.advance(HOUR)
   await $.session.measure(limitAt(60) as never)
   expect(notifies.filter(n => /^5 hours limit at 60%/.test(n))).toHaveLength(1)
+})
+
+// reference › Limits, $.ui.toast: in the classic renderer a newer toast takes the place of the older one.
+test('budget and limit warnings due at once share one toast', { options: { sessionBudget: 2 } }, async ($, on) => {
+  const { clock, toasts } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await $.session.measure({ ...limitAt(20), cost: { usd: 1 }, changed: ['rateLimits', 'cost'] } as never)
+  await clock.advance(HOUR)
+  const before = toasts.length
+  await $.session.measure({ ...limitAt(60), cost: { usd: 1.7 }, changed: ['rateLimits', 'cost'] } as never)
+  const raised = toasts.slice(before)
+  expect(raised).toHaveLength(1)
+  expect(raised[0]).toMatch(/^Session at 85% of its budget: \$1\.70 API value of \$2\.00 · 5 hours limit at 60% – full/)
 })
 
 test('limit warning: a reload in the same window stays quiet', async ($, on) => {

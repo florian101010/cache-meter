@@ -596,7 +596,9 @@ export function toolDiff(before: readonly string[], after: readonly string[]): {
  * Why a warm cache was re-written, from what is observable: the model, an effort that splits the
  * cache, a pause longer than the real TTL, the tool set (only without tool search), an effort change on a model that keeps the
  * cache only with an API key or a subscription. The rest is named, not guessed
- * (prompt-caching › Actions that invalidate the cache).
+ * (prompt-caching › Actions that invalidate the cache; › Turning on fast mode: fast and standard speed
+ * keep separate caches, and Claude Code's own fallback to standard speed after a rate limit and its
+ * return count as switches too).
  */
 export function breakCause(i: {
   change: string | null
@@ -614,7 +616,7 @@ export function breakCause(i: {
   }
   if (i.effortOnly !== null) return `${i.effortOnly} – keeps the cache on this model only with an API key or a subscription`
 
-  return 'not observable here: fast mode turned on, a code-intelligence plugin (LSP tool), a tool deny rule, or removed images'
+  return 'not observable here: fast mode turned on or off (also its fallback after a rate limit), a code-intelligence plugin (LSP tool), a tool deny rule, or removed images'
 }
 
 /** The expiry notification's text; the /keepwarm tip only while the option offers the command. */

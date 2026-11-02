@@ -632,8 +632,7 @@ async function refreshMeasure($: EngineInterface) {
           limitStart: hasLimits ? nextLimitStarts(m.limitStart ?? {}, usage.rateLimits, now) : m.limitStart,
         },
   )
-  await checkBudget($)
-  await checkLimits($)
+  await checkWarnings($)
 }
 
 // Option sessionBudget: a toast when the session's cost (Claude Code's figure, as in the band) passes
@@ -658,11 +657,20 @@ async function notify($: EngineInterface, text: string, what: string) {
   }
 }
 
-// A plan limit that fills up before it resets: one toast per limit window (and, with limitNotice, a
-// notification), from the same pace forecast the Overview shows. Only where a person reads it. `quiet`
-// takes the windows that already qualify without a word – after a reload in a running session.
-async function checkLimits($: EngineInterface, quiet = false) {
-  if (!isInteractive) return
+// The budget and plan-limit warnings due now, in one toast: in the classic renderer a mod's newer toast
+// takes the place of its older one that is showing or waiting (reference › Limits, $.ui.toast;
+// troubleshoot › "Your mod raised a newer toast": "put them in one toast").
+async function checkWarnings($: EngineInterface) {
+  const lines = [await checkBudget($), ...(await checkLimits($))].filter((l): l is string => l !== null)
+  if (lines.length > 0) $.ui.toast(lines.join(' · '), { timeoutMs: 10_000 })
+}
+
+// A plan limit that fills up before it resets: one line per limit window for checkWarnings' toast (and,
+// with limitNotice, a notification), from the same pace forecast the Overview shows. Only where a person
+// reads it. `quiet` takes the windows that already qualify without a word – after a reload in a running session.
+async function checkLimits($: EngineInterface, quiet = false): Promise<string[]> {
+  const lines: string[] = []
+  if (!isInteractive) return lines
   const measure = await read($, measureA)
   const now = await $.clock.now()
   for (const l of measure?.limits ?? []) {
@@ -675,9 +683,11 @@ async function checkLimits($: EngineInterface, quiet = false) {
     if (quiet) continue
     const name = l.kind === 'spend_limit' ? 'Spend limit' : `${limitName(l.kind)} limit`
     const text = `${name} at ${l.percentUsed}% – full ≈ ${hhmm(full)} at this pace (resets ${resetLabel(l.resetsAt)})`
-    $.ui.toast(text, { timeoutMs: 10_000 })
+    lines.push(text)
     if (limitNotice) await notify($, text, 'limit')
   }
+
+  return lines
 }
 
 // A conversation begins (a fresh session, /clear, /resume, /branch): its figures start at zero, its
@@ -713,22 +723,20 @@ async function conversationSummary($: EngineInterface): Promise<string | null> {
   return `Conversation cleared – ${since} came to ${parts.join(' · ')}`
 }
 
-async function checkBudget($: EngineInterface) {
+async function checkBudget($: EngineInterface): Promise<string | null> {
   // Only where a person reads it: no toast under -p or the SDK.
-  if (budget <= 0 || !isInteractive) return
+  if (budget <= 0 || !isInteractive) return null
   const measure = await read($, measureA)
   const usd = measure?.usd ?? null
-  if (usd === null) return
+  if (usd === null) return null
   const level = usd >= budget ? 100 : usd >= budget * 0.8 ? 80 : 0
-  if (level <= budgetWarned) return
+  if (level <= budgetWarned) return null
   budgetWarned = level
   const what = isPlan(measure) ? 'API value' : 'spent'
-  $.ui.toast(
-    level === 100
-      ? `Session budget reached: $${usd.toFixed(2)} ${what} of $${budget.toFixed(2)}`
-      : `Session at ${Math.round((usd / budget) * 100)}% of its budget: $${usd.toFixed(2)} ${what} of $${budget.toFixed(2)}`,
-    { timeoutMs: 10_000 },
-  )
+
+  return level === 100
+    ? `Session budget reached: $${usd.toFixed(2)} ${what} of $${budget.toFixed(2)}`
+    : `Session at ${Math.round((usd / budget) * 100)}% of its budget: $${usd.toFixed(2)} ${what} of $${budget.toFixed(2)}`
 }
 
 // Every second while the cache is in its last stretch (17 % of the TTL) or a heartbeat shows; off
@@ -811,8 +819,9 @@ async function hardStop($: EngineInterface, why: string) {
 // window to "now + the break" and starts a new break's ping count. While you work no ping is due anyway
 // (each request refreshes the cache); they come only once you have been away long enough.
 async function rearmAuto($: EngineInterface, isOwnPrompt = false) {
-  // A request while a ping is in flight may be the ping itself (undocumented whether a fork raises a
-  // main-thread turn.step); a prompt the person typed never is.
+  // A request while a ping is in flight is not the ping: since v2.1.292 an event from a mods API call
+  // made by the mod's own code, a timer's included, skips its hooks (reference › next.error, re-entry).
+  // The guard stays as a precaution; a prompt the person typed is never the ping.
   if (isPinging && !isOwnPrompt) return
   const keep = await read($, keepA)
   if (keep.auto === null) return
@@ -1154,9 +1163,9 @@ export const register: Register = (on, options) => {
   })
 
   // Each model request: the four token counts as the API reported them (events § Follow a turn).
-  // Whether a keepwarm fork raises turn.step is undocumented ('re-entry' covers a hook's own call,
-  // and the ping comes from a timer). Worst case it shows as one row in the history; no real request
-  // is filtered out here, because a filter would drop requests that end during a ping.
+  // A keepwarm fork's own turn.step, if it raises one, skips this hook: 're-entry' covers a mods API call
+  // by the mod's code outside its hooks, keepwarm's timer included (reference › next.error, v2.1.292+).
+  // No real request is filtered out here, because a filter would drop requests that end during a ping.
   on('turn.step', async function* ($, e, next) {
     const isMain = e.agentId === undefined
     // Counted before the first await, so a turn.complete that follows cannot be overtaken.
@@ -1432,8 +1441,7 @@ export const register: Register = (on, options) => {
 
       return measured
     })
-    await checkBudget($)
-    await checkLimits($)
+    await checkWarnings($)
 
     return result
   })
@@ -2542,7 +2550,7 @@ export const register: Register = (on, options) => {
           {unexpected.count > 0 && (
             <Text dimColor wrap="truncate-end">
               {''.padEnd(10)}
-              {unexpected.lastCause ?? 'after seconds: model, effort, fast mode or the tool set changed (not CLAUDE.md edits); after minutes: the cache lives shorter than assumed (option cacheTtl)'}
+              {unexpected.lastCause ?? 'after seconds: model, effort, fast mode (on or off) or the tool set changed (not CLAUDE.md edits); after minutes: the cache lives shorter than assumed (option cacheTtl)'}
             </Text>
           )}
           <Text wrap="truncate-end">
@@ -2560,8 +2568,11 @@ export const register: Register = (on, options) => {
     )
 
     // Clicks reach a pane only in Claude Code's fullscreen renderer, which captures the mouse
-    // (fullscreen › Use the mouse); in the classic renderer the terminal keeps it.
-    const canClick = e.viewport?.isFullscreen === true
+    // (fullscreen › Use the mouse); in the classic renderer the terminal keeps it. The VS Code panel takes
+    // clicks and Enter on a focused button, but has no hotkeys and no Ctrl+X Tab (interface › Draw in the
+    // VS Code extension: "buttons have no hotkeys"), so its hints name clicks only.
+    const isVscode = e.surface === 'vscode'
+    const canClick = e.viewport?.isFullscreen === true || isVscode
     const dockLine = e.props.placement === 'inline' && e.surface === 'terminal' ? dockTip(e.viewport?.isFullscreen, e.viewport?.columns, cols >= 108 ? 'line' : 'short') : null
     const tabButton = (id: typeof tab, name: string, hotkey: string, warn = false) => (
       <Button
@@ -2601,7 +2612,7 @@ export const register: Register = (on, options) => {
           {/* The key hint sits in the header too: the footer is the first row a too-tall tab cuts off. */}
           <Text wrap="truncate-end">
             {tier === 'wide' && <Text dimColor>prompt cache · tokens · </Text>}
-            {tier === 'narrow' ? null : e.props.isFocused ? (
+            {tier === 'narrow' || isVscode ? null : e.props.isFocused ? (
               <Text color="claude" bold>
                 {tier === 'wide' ? 'keys here · ↓ scroll · esc' : '↓ scroll · esc'}
               </Text>
@@ -2649,7 +2660,11 @@ export const register: Register = (on, options) => {
         <Box flexDirection="row" justifyContent="space-between">
           {/* Ctrl+X Tab walks the focus band → each open pane → prompt (keybindings › abovePrompt:focus), so
               the pane says when it has the keyboard (Pane.isFocused): digits typed before that reach the chat. */}
-          {e.props.isFocused ? (
+          {isVscode ? (
+            <Text dimColor wrap="truncate-end">
+              {tier === 'narrow' ? 'click a tab' : `click a tab or /tokens ${TABS.filter(t => t !== tab).join(' | ')}`}
+            </Text>
+          ) : e.props.isFocused ? (
             <Text color="claude" bold wrap="truncate-end">
               {tier === 'narrow'
                 ? 'keys here · 1–3 · ↓ · esc'
