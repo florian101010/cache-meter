@@ -2,6 +2,24 @@
 
 All notable changes to Cache Meter, a Claude Code mod. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.3] – 2026-11-02
+
+Kept up with the official documentation as of 2026-11-02 (issue #20). Requires Claude Code 2.1.295 or later.
+
+### Fixed
+- **Minimum version:** the pane's tab and keepwarm buttons carry styled text, which Claude Code draws only from 2.1.295 (*reference › Elements*); on 2.1.287–2.1.294 the `/tokens` pane could stay empty. The stated minimum is now 2.1.295 (README, AGENTS.md, CONTRIBUTING.md, llms.txt).
+- **Budget and limit warnings due at once share one toast:** in the classic renderer a mod's newer toast takes the place of its older one (*reference › Limits*), so a limit warning could hide the budget warning raised just before it.
+- **Warm-miss cause:** fast mode and standard speed keep separate caches, so turning fast mode off – or Claude Code's own fallback to standard speed after a rate limit and its return – splits the cache too (*prompt caching › Turning on fast mode*); the unobservable cause now says so.
+- **VS Code:** the extension draws a mod's pane from 2.1.299, with no hotkeys; the pane's hints there name clicks instead of `ctrl+x tab` and digit keys (*interface › Draw in the VS Code extension*).
+
+### Docs
+- Requirements: the VS Code extension draws the `/tokens` pane, not the band; with managed settings or a Team or Enterprise `/login` the built-in guard skips the hooks on settings hook events and `session.compact` – what Cache Meter then misses (README, SECURITY.md, how-it-works).
+- Keepwarm: a ping at the other speed misses after a fast-mode switch; idle compaction (`idleCompaction`) re-writes the cache of an idle conversation on the one-hour TTL.
+- The one-hour TTL through the Claude apps gateway (by gateway policy); `$.settings.read({ key })` still reads the whole object (PRIVACY.md); a keepwarm ping skips the mod's own hooks (`re-entry`, how-it-works); types are written by an interactive session.
+
+### CI
+- Pinned Claude Code 2.1.316. The weekly docs check keeps the pages it compares on the branch `upstream-docs` and puts the diff into its issue.
+
 ## [0.12.2] – 2026-10-29
 
 For the review of Anthropic's plugin directory: 0.12.1 passed the automatic checks and is held for a reviewer. No change in behaviour.
@@ -280,6 +298,7 @@ Changes for Anthropic's plugin directory, whose validation blocked 0.5.1.
 - Pane `/tokens`: per-request token history, totals, plan limits, cost.
 - `/keepwarm`.
 
+[0.12.3]: https://github.com/florian101010/cache-meter/compare/cache-meter--v0.12.2...cache-meter--v0.12.3
 [0.12.2]: https://github.com/florian101010/cache-meter/compare/cache-meter--v0.12.1...cache-meter--v0.12.2
 [0.12.1]: https://github.com/florian101010/cache-meter/compare/cache-meter--v0.12.0...cache-meter--v0.12.1
 [0.12.0]: https://github.com/florian101010/cache-meter/compare/c369531...cache-meter--v0.12.0

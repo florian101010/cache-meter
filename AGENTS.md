@@ -14,12 +14,12 @@ Guide for AI coding agents (Claude Code, Codex, Cursor, …) that were given thi
 - docked beside the chat, animates a small **café** under the request chart (a barista and a cup acting out the cache) and flashes the countdown at each new minute – option `animations`, `on` by default; the animation file gets only the cache's state word.
 - shows a hint after a cold rewrite. It never rewrites or drops prompts, never approves tool calls, writes no files, makes no network calls of its own – only the keepwarm pings and, on a press, the Context tab's exact count.
 
-Version and requirements: `.claude-plugin/plugin.json` (`version`), Claude Code ≥ 2.1.287 (terminal) or ≥ 2.1.286 (Desktop Code tab), tested with 2.1.296.
+Version and requirements: `.claude-plugin/plugin.json` (`version`), Claude Code ≥ 2.1.295 (terminal or Desktop Code tab; the pane's buttons carry styled text, drawn from 2.1.295), tested with 2.1.316. In the VS Code extension (≥ 2.1.299) the pane draws, the band does not. With managed settings or a Team/Enterprise `/login` the built-in guard skips its hooks on `classic.*` events and `session.compact` (README › Requirements).
 
 ## Install it for a user
 
-1. Check the version: `claude --version` must be ≥ 2.1.287.
-2. Install from GitHub (shell, non-interactive – this form needs Claude Code ≥ 2.1.292; below that use the in-session form underneath):
+1. Check the version: `claude --version` must be ≥ 2.1.295.
+2. Install from GitHub (shell, non-interactive):
 
    ```bash
    claude plugin install cache-meter --marketplace florian101010/cache-meter --scope user
@@ -47,7 +47,7 @@ End-to-end smoke test (one tiny model request): every `cache-meter` hook in the 
 D=$(mktemp -d); claude -p "Reply with: ok" --settings '{"env":{"CLAUDE_CODE_PLUGIN_DIRS":"/absolute/path/to/this/checkout"}}' --debug-file "$D/debug.log"; grep cache-meter "$D/debug.log"; rm -rf "$D"
 ```
 
-Type check (needs `tsc` ≥ 5.4 and the types Claude Code writes into `.claude-plugin/types/` the first time it loads the mod, e.g. after the smoke test): `tsc -p .`
+Type check (needs `tsc` ≥ 5.4 and the types Claude Code writes into `.claude-plugin/types/` when it loads the mod in an interactive session, e.g. `claude --plugin-dir .`): `tsc -p .`
 
 Visual check needs a real terminal session: the band, `/tokens`, and `/usage` → *Prompt cache (main)* to confirm the TTL assumption.
 

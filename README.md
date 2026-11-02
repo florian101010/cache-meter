@@ -6,7 +6,7 @@
 [![Release](https://img.shields.io/github/v/release/florian101010/cache-meter?display_name=release)](https://github.com/florian101010/cache-meter/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Claude Code mod](https://img.shields.io/badge/Claude%20Code-mod-d97757)
-![Claude Code ≥ 2.1.287](https://img.shields.io/badge/Claude%20Code-%E2%89%A5%202.1.287-555)
+![Claude Code ≥ 2.1.295](https://img.shields.io/badge/Claude%20Code-%E2%89%A5%202.1.295-555)
 
 *An independent project – not affiliated with or endorsed by Anthropic.*
 
@@ -69,13 +69,13 @@ Type **`/keepwarm`** before lunch or a meeting. Shortly before expiry one ping �
 
 ## Quickstart
 
-**1 · Install** – in your shell (Claude Code 2.1.292 or later for this command):
+**1 · Install** – in your shell:
 
 ```bash
 claude plugin install cache-meter --marketplace florian101010/cache-meter --scope user
 ```
 
-On an older Claude Code, type `/plugin install cache-meter --marketplace florian101010/cache-meter` in a session instead.
+Or type `/plugin install cache-meter --marketplace florian101010/cache-meter` in a session.
 
 Or let Claude Code do it – paste this into a session (it runs the same command; Claude Code may ask you to approve it):
 
@@ -187,6 +187,8 @@ Each ping also pays for its few uncached tokens and its answer – one word, plu
 - Cache Meter knows the TTL is five minutes (option `cacheTtl` `5m`, Claude Code's TTL settings, or a plan limit reached) – it refuses to start there. With `auto` on an API key it assumes an hour unless told otherwise, so a first ping can miss the cache and keepwarm then stops: set `5m` there, or `promptCacheTtl` `1h`.
 
 It runs only in interactive sessions, never drops a message, and after an expensive cold re-write it only *suggests* `/keepwarm` – it never switches itself on.
+
+**Two things a ping cannot keep** ([prompt caching](https://code.claude.com/docs/en/prompt-caching)): fast mode and standard speed keep separate caches, and a mod cannot see which speed a ping goes out at – after a switch (yours, or Claude Code's own fallback to standard speed after a rate limit) a ping can miss, writes the conversation once, and keepwarm switches itself off by the first rule above. And Claude Code can compact a long conversation left idle on the one-hour TTL (*idle compaction*, from 2.1.290) – which re-writes the cache anyway; set `idleCompaction` to `false` in your settings if you keep the cache warm through long breaks.
 
 **Don't want keepwarm at all?** Set the option `keepwarm` to `off` (`/config` → `cache-meter.keepwarm`): both commands and every keepwarm tip are gone, and Cache Meter sends no request of its own. It applies at once – see [Configuration](#configuration).
 
@@ -324,10 +326,10 @@ Four more places, only when there is something to say:
 
 ## Requirements
 
-- **Claude Code 2.1.287 or later** in the terminal, or 2.1.286 or later in the Code tab of the Desktop app (see [where mods run](https://code.claude.com/docs/en/plugins/mods/overview#where-mods-run)). Tested with **2.1.296**.
+- **Claude Code 2.1.295 or later**, in the terminal or the Code tab of the Desktop app (see [where mods run](https://code.claude.com/docs/en/plugins/mods/overview#where-mods-run)). The pane's buttons carry styled text, which Claude Code draws from 2.1.295 ([reference › Elements](https://code.claude.com/docs/en/plugins/mods/reference#elements)). Tested with **2.1.316**.
 - Mods enabled – the default; see [turn mods on or off](https://code.claude.com/docs/en/plugins/mods/overview#turn-mods-on-or-off).
-- In the VS Code extension and under `claude -p` the hooks run but nothing is drawn, and `/keepwarm` refuses to start.
-- The Health tab's server-side tool calls (e.g. the advisor) need Claude Code 2.1.290 or later; earlier versions do not report them.
+- In the VS Code extension (2.1.299 or later) the `/tokens` pane draws, the band above the prompt does not, and buttons are clicked rather than keyed ([interface › Draw in the VS Code extension](https://code.claude.com/docs/en/plugins/mods/interface#draw-in-the-vs-code-extension)). Under `claude -p` the hooks run but nothing is drawn, and `/keepwarm` refuses to start.
+- **With managed settings or a Team or Enterprise `/login`**, Claude Code's built-in guard keeps an installed mod's hooks on settings hook events and on compaction from running ([admin › Know which hooks of a user's mod don't run](https://code.claude.com/docs/en/plugins/mods/admin#know-which-hooks-of-a-users-mod-dont-run)). Cache Meter then misses `/clear`, `/resume`, `/branch`, model switches, compactions and the errors a turn ends on: the countdown can read *warm* after a model switch or a compaction although the cache is cold, and the Health tab counts no API errors. `/plugin` says so in the plugin's details and its **Errors** tab (Claude Code 2.1.299 or later); an administrator can install the mod as one of the organization's mods, where these hooks run.
 
 ## Installation
 
@@ -339,7 +341,7 @@ In a Claude Code terminal session:
 /plugin install cache-meter --marketplace florian101010/cache-meter
 ```
 
-Answer `y` to add the marketplace, then pick a scope. Or from your shell (Claude Code 2.1.292 or later – [cli-reference › plugin install](https://code.claude.com/docs/en/plugins/cli-reference)):
+Answer `y` to add the marketplace, then pick a scope. Or from your shell ([cli-reference › plugin install](https://code.claude.com/docs/en/plugins/cli-reference)):
 
 ```bash
 claude plugin install cache-meter --marketplace florian101010/cache-meter --scope user
@@ -401,7 +403,7 @@ Eight options. Set them with `/config` → `cache-meter.<option>`, or in `~/.cla
 | `limitNotice` | `off` (default), `on` | `on`: a terminal notification through your own channel when a plan limit (5 hours, 7 days, spend limit) is at least half used and would be full before it resets at the pace since its window started (measured over at least 10 minutes) – once per window. The toast in Claude Code comes either way |
 | `animations` | `on` (default), `off` | `on`: in the docked dashboard a small café under the request chart acts out the cache; on the Overview the countdown flashes and its bar shines at each new minute, new request columns grow in, cost and saving count up, and the keepwarm arrow turns while it runs. `off`: none of it – for a calm screen, or a terminal app that leaves traces when parts of the screen redraw |
 
-With `auto`, Cache Meter follows Claude Code's own TTL controls and your plan state ([full order](docs/how-it-works.md#how-the-ttl-is-derived)). On an API key or a cloud provider Claude Code's default is five minutes: set `cacheTtl` to `5m` – or set Claude Code's `promptCacheTtl` to `1h` to give the main conversation a one-hour cache ([prompt caching › Choose the TTL yourself](https://code.claude.com/docs/en/prompt-caching#choose-the-ttl-yourself)); then `/keepwarm` works there too, where your provider offers the one-hour TTL (not through the Claude apps gateway; on Amazon Bedrock it depends on the model). One-hour cache writes cost 2× the input price instead of 1.25× ([pricing](https://platform.claude.com/docs/en/about-claude/pricing#prompt-caching)).
+With `auto`, Cache Meter follows Claude Code's own TTL controls and your plan state ([full order](docs/how-it-works.md#how-the-ttl-is-derived)). On an API key or a cloud provider Claude Code's default is five minutes: set `cacheTtl` to `5m` – or set Claude Code's `promptCacheTtl` to `1h` to give the main conversation a one-hour cache ([prompt caching › Choose the TTL yourself](https://code.claude.com/docs/en/prompt-caching#choose-the-ttl-yourself)); then `/keepwarm` works there too, where your provider offers the one-hour TTL (through the Claude apps gateway when an administrator requests it in a gateway policy; on Amazon Bedrock it depends on the model). One-hour cache writes cost 2× the input price instead of 1.25× ([pricing](https://platform.claude.com/docs/en/about-claude/pricing#prompt-caching)).
 
 ## Privacy, cost and permissions
 
@@ -545,7 +547,7 @@ Yes. Claude Code's default TTL there is five minutes; set `cacheTtl` to `5m` (se
 <details>
 <summary><b>Where does it work?</b></summary>
 
-In the Claude Code terminal and the Code tab of the Desktop app. In the VS Code extension and under `claude -p` it runs but draws nothing.
+In the Claude Code terminal and the Code tab of the Desktop app. In the VS Code extension (2.1.299 or later) the `/tokens` pane draws, the band does not. Under `claude -p` it runs but draws nothing.
 </details>
 
 <details>
