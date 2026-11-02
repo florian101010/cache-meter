@@ -2,3 +2,7 @@
 # Von Claude Code beim Laden erzeugte Typdeklarationen
 .claude-plugin/types/
 node_modules/
+
+# upstream-docs.sh: the copies of the official pages (branch upstream-docs) and the last diff
+.upstream-docs/
+upstream-docs.diff

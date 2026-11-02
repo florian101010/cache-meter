@@ -457,7 +457,7 @@ For Anthropic's directory review, every call that could send something, and what
 What it reads never goes into these: `$.settings.read()` is read for one value, `promptCacheTtl` (the cache lifetime); `$.session.turns()` returns a number, how many turns the session has. Neither value is sent anywhere.
 
 **Files the scan reads that Claude Code never loads:**
-- `.github/scripts/directory-checks.sh` and `.github/workflows/` run on GitHub's CI only. They read the mod's files (`hooks/`, `.claude-plugin/plugin.json`) to check them before a release and write nothing into them; `.github/scripts/upstream-docs.sh` downloads Claude Code's documentation pages to compare them, and runs nothing it downloads.
+- `.github/scripts/directory-checks.sh` and `.github/workflows/` run on GitHub's CI only. They read the mod's files (`hooks/`, `.claude-plugin/plugin.json`) to check them before a release and write nothing into them; `.github/scripts/upstream-docs.sh` downloads Claude Code's documentation pages to compare them with the copies on the branch `upstream-docs`, and runs nothing it downloads.
 - `hooks/lib.ts` holds a list of how credentials begin (`ghp_`, `sk-` and others) for one purpose: a tool label that looks like one is shown as `…`. It reads no credential from your machine or environment.
 - `tests/` holds the test kit's calls (see the hooks table above) and test strings shaped like credentials, to check that they are never shown.
 
