@@ -1,7 +1,8 @@
 // Pure helpers of cache-meter: no `$`, so the tests call them directly.
 
+import type { ThemeKey } from 'claude-code'
 import type { CafeState } from './cafe'
-import type { CacheInfo, ContextMap, Limit, LimitStart, ToolResults, Usage4 } from './state'
+import type { CacheInfo, ContextMap, Limit, LimitStart, Measure, Step, ToolResults, Usage4 } from './state'
 
 export const HOUR = 3_600_000
 export const FIVE_MIN = 300_000
@@ -162,7 +163,7 @@ export function durationLabel(ms: number): string {
 /** When to ping: once this share of the TTL or less is left (≈ 10 min of 60m). */
 export const PING_SHARE = 0.17
 
-/** Most pings one /keepwarm run makes (8 h at one ping per ≈ 50 min is about ten). */
+/** Most pings one /keepwarm run makes (8 h at one ping per ≈ 50 min is about nine). */
 export const MAX_PINGS = 12
 
 /** A ping counts as a hit when it read at least this share of the context from the cache. */
@@ -282,7 +283,7 @@ export const HEALTH = { good: 0x40c070, fair: 0xf0b030, poor: 0xe05060 } as cons
 export const TRACK = 0x45475a
 
 /** A marker on a meter: the cell it sits on, its Raster color and the theme key the text bar uses. */
-export type Mark = { at: number; color: number; theme: string }
+export type Mark = { at: number; color: number; theme: ThemeKey }
 
 /** A run of same-role characters of a meter; `role` is the index of a mark for a marker cell. */
 export type Run = { text: string; role: 'fill' | 'track' | number }
@@ -541,7 +542,7 @@ export function limitForecast(
 export function turnLine(u: Usage4, requests: number, usd: number | null, isPlan: boolean): string {
   const hit = hitPct(u)
   const cost = usd === null || usd < 0.005 ? '' : `${isPlan ? '≈ ' : ''}$${usd.toFixed(2)} ${isPlan ? 'API value' : 'spent'} · `
-  const parts = [`${requests} request${requests === 1 ? '' : 's'}`, hit === null ? '' : `${hit}% from cache`, u.write >= 1000 ? `${short(u.write)} written to cache` : '']
+  const parts = [plural(requests, 'request'), hit === null ? '' : `${hit}% from cache`, u.write >= 1000 ? `${short(u.write)} written to cache` : '']
 
   return `◉ Cache Meter · ${cost}${parts.filter(Boolean).join(' · ')}`
 }
@@ -639,6 +640,8 @@ export function breakCause(i: {
   change: string | null
   effortOnly: string | null
   tools: { added: number; removed: number } | null
+  /** The context estimate the tool check needs failed: the tool set was not compared. */
+  isToolsUnknown?: boolean
   idleMs: number | null
   ttlMs: number
 }): string {
@@ -650,6 +653,8 @@ export function breakCause(i: {
     return `tool set changed (+${i.tools.added} / −${i.tools.removed} MCP tools)`
   }
   if (i.effortOnly !== null) return `${i.effortOnly} – keeps the cache on this model only with an API key or a subscription`
+  // Not "not observable": the tool set was not compared, so it is not ruled out.
+  if (i.isToolsUnknown === true) return 'cause not checked: the context estimate failed, so a tool-set change is not ruled out'
 
   return 'not observable here: fast mode turned on or off (also its fallback after a rate limit), a code-intelligence plugin (LSP tool), a tool deny rule, or removed images'
 }
@@ -920,7 +925,7 @@ export type ReportData = {
   toolsByTool: { tool: string; count: number; tokens: number }[]
   largest: { label: string; tokens: number }[]
   agents: { label: string; steps: number; tokens: number; hit: number | null }[]
-  keepwarm: { pings: number; readTokens: number; auto?: number | null }
+  keepwarm: { pings: number; readTokens: number; auto: number | null }
 }
 
 /** A label as inline code in the report, so a crafted path or task cannot add Markdown. */
@@ -1083,4 +1088,102 @@ export function dockTip(isFullscreen: boolean | undefined, columns: number | und
   }
 
   return null
+}
+
+export function autoCompactOf(
+  breakdown: { autoCompactThreshold?: number; isAutoCompactEnabled: boolean } | undefined,
+  window: number,
+): { pct: number | null; isOff: boolean; isKnown: boolean } {
+  if (!breakdown || window <= 0) return { pct: null, isOff: false, isKnown: false }
+  if (!breakdown.isAutoCompactEnabled) return { pct: null, isOff: true, isKnown: true }
+  if (!breakdown.autoCompactThreshold) return { pct: null, isOff: false, isKnown: false }
+
+  return { pct: Math.round((breakdown.autoCompactThreshold / window) * 100), isOff: false, isKnown: true }
+}
+
+export function limitName(kind: string): string {
+  if (kind === 'five_hour') return '5 hours'
+  if (kind === 'seven_day') return '7 days'
+  if (kind === 'spend_limit') return 'Spend limit'
+
+  return kind
+}
+
+export function resetLabel(iso: string): string {
+  const ms = Date.parse(iso)
+  if (Number.isNaN(ms)) return iso
+  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+
+  return `${days[new Date(ms).getDay()]} ${hhmm(ms)}`
+}
+
+export function usageParts(u: Usage4): string[] {
+  return [`read ${short(u.read)}`, `written ${short(u.write)}`, `new ${short(u.input)}`, `out ${short(u.output)}`]
+}
+
+/** A hit rate's tier: good from 80 %, fair from 50 %, poor below – one place for the cut-offs. */
+export function hitTier(pct: number): 'good' | 'fair' | 'poor' {
+  if (pct >= 80) return 'good'
+  if (pct >= 50) return 'fair'
+
+  return 'poor'
+}
+
+/** Green from 80 %, yellow from 50 %, red below; plain while unknown. */
+export function hitColor(pct: number | null): 'success' | 'warning' | 'error' | undefined {
+  if (pct === null) return undefined
+
+  return ({ good: 'success', fair: 'warning', poor: 'error' } as const)[hitTier(pct)]
+}
+
+/**
+ * A subscription: Claude Code reports plan limits only there (types: SessionMeasureInput.rateLimits,
+ * "empty off a subscription or before the first reading").
+ */
+export function isPlan(measure: Measure | null): boolean {
+  return (measure?.limits.length ?? 0) > 0
+}
+
+/** What the cost figure means here: a comparison value on a plan, real spend on an API key. */
+export function costLabel(measure: Measure | null, isLong: boolean): string {
+  if (isPlan(measure)) return isLong ? ' API value (API-key price)' : ' API value'
+
+  return isLong ? ' spent (as /cost)' : ' spent'
+}
+
+/**
+ * An MCP server's note in the context tab: its tools and how often they were called since the start,
+ * /clear, /resume or /branch. "unused so far" only after a few prompts in that span, so a fresh or
+ * resumed session does not call every server idle.
+ */
+export function mcpNote(tools: number, toolNames: readonly string[] | undefined, calls: Readonly<Record<string, number>>, prompts: number | null): string {
+  // Its share of each request (its tool definitions go out with every one) is the row's share column.
+  if (toolNames === undefined) return `${tools} tools`
+  const n = serverCalls(toolNames, calls)
+  const idle = n === 0 && prompts !== null && prompts >= 3 ? ' – unused so far' : ''
+
+  return `${tools} tools · ${plural(n, 'call')}${idle}`
+}
+
+/** One request column's details for its hover row, padded so it covers the time row beneath the chart. */
+export function columnDetail(s: Step, width: number): string {
+  const hit = hitPct(s)
+  const what = s.kind === 'first' ? 'first write' : s.kind === 'cold' ? 'cold re-write' : ''
+  // In order of need: what is dropped first when the row is narrow comes last.
+  const text = fitParts([hhmm(s.at), `${short(s.input + s.read + s.write)} in`, `${hit === null ? '–' : `${hit}%`} hit`, what, `${short(s.write)} written`, `out ${short(s.output)}`], width)
+
+  return text.padEnd(width)
+}
+
+/** `n word` or `n words`. */
+export function plural(n: number, word: string): string {
+  return `${n} ${word}${n === 1 ? '' : 's'}`
+}
+
+/** How far a cost is into a session budget: 100 at or past it, 80 from 80 % of it, else 0. */
+export function budgetLevel(usd: number, budget: number): 0 | 80 | 100 {
+  if (usd >= budget) return 100
+  if (usd >= budget * 0.8) return 80
+
+  return 0
 }

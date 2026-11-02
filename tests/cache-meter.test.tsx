@@ -312,6 +312,10 @@ test('TTL: own option, then Claude Code controls, then overage, then reported va
   expect(resolveTtl({ ...NO_TTL, setting: '5m', reported: '1h' }).ms).toBe(FIVE_MIN)
   expect(resolveTtl({ ...NO_TTL, force5m: true, enable1h: true }).source).toBe('FORCE_PROMPT_CACHING_5M')
   expect(resolveTtl({ ...NO_TTL, envTtl: '5m', settingTtl: '1h' }).source).toBe('CLAUDE_CODE_PROMPT_CACHE_TTL')
+  // By value too: the variable wins over the setting, both ways round.
+  expect(resolveTtl({ ...NO_TTL, envTtl: '5m', settingTtl: '1h' }).ms).toBe(FIVE_MIN)
+  expect(resolveTtl({ ...NO_TTL, envTtl: '1h', settingTtl: '5m' }).ms).toBe(HOUR)
+  expect(resolveTtl({ ...NO_TTL, enable1h: true, limits: [{ kind: 'five_hour', percentUsed: 100 }] }).source).toBe('ENABLE_PROMPT_CACHING_1H')
   expect(resolveTtl({ ...NO_TTL, settingTtl: '5m' }).ms).toBe(FIVE_MIN)
   expect(resolveTtl({ ...NO_TTL, envTtl: 'bogus' }).ms).toBe(HOUR)
   expect(resolveTtl({ ...NO_TTL, reported: '1h', limits: [{ kind: 'five_hour', percentUsed: 100 }] }).ms).toBe(FIVE_MIN)
@@ -684,7 +688,7 @@ test('drawing helpers: tall digits, raster cells, meter', async () => {
   expect(rasterCells([[0x2588, 0xff8800, 0x01000000]])).toBe('iCUAAACI/wAAAAAB')
   expect(rasterCells([[0x2588, 0x00ff00, 0x01000000], [0x2591, 0x585b70, 0x01000000]])).toBe('iCUAAAD/AAAAAAABkSUAAHBbWAAAAAAB')
   // 4.5 of 10 cells: four full, a half block, a marker on cell 7, the rest track.
-  const mark = { at: 7, color: 0xff6b81, theme: 'error' }
+  const mark = { at: 7, color: 0xff6b81, theme: 'error' as const }
   const runs = meterRuns(10, 0.45, [mark])
   expect(runs.map(r => r.text).join('')).toBe('████▌░░┃░░')
   expect(runs.map(r => r.role)).toEqual(['fill', 'track', 0, 'track'])
@@ -1228,14 +1232,17 @@ async function stepWith($: Engine, model: string, effort?: string, agentId?: str
   return next.value
 }
 
-async function healthText($: Engine, pattern: RegExp) {
+// The first Text on a pane tab that shows `pattern`, from a fresh mount.
+async function tabText($: Engine, tab: 'health' | 'context', pattern: RegExp) {
   const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
-  await ui.press({ key: 'tab-health' })
+  await ui.press({ key: `tab-${tab}` })
   const found = await ui.find({ type: 'Text', text: pattern })
   await ui.unmount()
 
   return found
 }
+
+const healthText = ($: Engine, pattern: RegExp) => tabText($, 'health', pattern)
 
 test('cache-splitting change: what splits it, what keeps it', async () => {
   expect(effortKeepsCache('claude-opus-5-5')).toBe(true)
@@ -1367,14 +1374,7 @@ test('warm miss after an effort change on a model that keeps the cache: named wi
   expect(await healthText($, /effort high → low – keeps the cache on this model only with an API key or a subscription$/)).toBeDefined()
 })
 
-async function contextText($: Engine, pattern: RegExp) {
-  const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
-  await ui.press({ key: 'tab-context' })
-  const found = await ui.find({ type: 'Text', text: pattern })
-  await ui.unmount()
-
-  return found
-}
+const contextText = ($: Engine, pattern: RegExp) => tabText($, 'context', pattern)
 
 test('tool labels: path or program name, never arguments', async () => {
   expect(toolLabel('Read', { file_path: '/Users/u/project/a.ts' })).toBe('Read ~/project/a.ts')
@@ -3803,4 +3803,99 @@ test('fitParts: the last parts go first, the first always stays', () => {
   expect(fitParts(['12:00', '100.0k in', '93% hit', 'first write', '6.0k written', 'out 500'], 41)).toBe('12:00 · 100.0k in · 93% hit · first write')
   expect(fitParts(['12:00', '100.0k in'], 3)).toBe('12:00')
   expect(fitParts(['a', '', 'b'], 10)).toBe('a · b')
+})
+
+test('/keepwarm stops when a ping reads under half the context', async ($, on) => {
+  const { clock, forks, toasts } = world(on, { forkRead: 40_000, forkWrite: 0 })
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  await run($, 'keepwarm', '')
+  await clock.advance(51 * 60_000)
+  await clock.settle()
+  expect(forks).toHaveLength(1)
+  expect(toasts.some(t => t.includes('the ping missed the cache (40.0k read'))).toBe(true)
+  await clock.advance(60 * 60_000)
+  expect(forks).toHaveLength(1)
+})
+
+test('warm miss: a warm request that adds tokens but reads more than it writes is no miss', async ($, on) => {
+  const { next, clock } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  next.write = 15_000
+  await clock.advance(2 * 60_000)
+  await step($)
+  expect(await healthText($, /re-written while warm/)).toBeUndefined()
+})
+
+test('cache saving: uncached input counts at the full price', () => {
+  expect(cacheSaving({ input: 100_000, read: 0, write: 0, output: 0 }, 0.1, 2)).toBe(0)
+  expect(cacheSaving({ input: 50_000, read: 50_000, write: 0, output: 0 }, 0.1, 2)).toBe(45)
+})
+
+test('subagent tokens stay out of the main conversation\'s totals', async ($, on) => {
+  world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($, 'agent-1')
+  await step($)
+  const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
+  await ui.press({ key: 'tab-overview' })
+  expect(await ui.find({ type: 'Text', text: /^read 93\.0k$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^read 186\.0k$/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+// The columns a drawn row takes: its texts, and a Button as "[ label ]".
+function drawnWidth(el: unknown): number {
+  if (typeof el === 'string') return [...el].length
+  const e = el as { type?: string; props?: { label?: string }; children?: unknown[] } | undefined
+  if (e?.type === 'Button' && typeof e.props?.label === 'string') return `[ ${e.props.label} ]`.length
+
+  return (e?.children ?? []).reduce<number>((a, c) => a + drawnWidth(c), 0)
+}
+
+test('band: the row never takes more columns than the band has', async ($, on) => {
+  const { next } = world(on)
+  next.usd = 2.5
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  await $.session.measure({ context: { tokens: 100_000, window: 1_000_000, percent: 10 }, rateLimits: [], cost: { usd: 2.5 }, changed: ['context', 'cost'] })
+  const wide: number[] = []
+  for (let cols = 50; cols <= 140; cols += 5) {
+    const ui = await $.ui.mount({ surface: 'terminal', ...band(cols) })
+    const tree = (await ui.drawn()) as { children?: unknown[] }
+    const width = drawnWidth(tree.children?.[0])
+    if (width > cols) wide.push(cols)
+    await ui.unmount()
+  }
+  expect(wide).toEqual([])
+})
+
+test('privacy: every credential prefix masks a path part and is never a label', () => {
+  const prefixes = ['ghp_', 'gho_', 'ghu_', 'ghr_', 'ghs_', 'gha_', 'github_pat_', 'sk-', 'sk_', 'rk_live_', 'rk_test_', 'xoxa-', 'xoxb-', 'xoxp-', 'xoxr-', 'xoxs-', 'xapp-', 'AKIA', 'ASIA', 'AIza', 'ya29.', 'glpat-', 'glrt-', 'glptt-', 'hf_', 'npm_', 'pypi-', 'dop_v1_', 'shpat_', 'tskey-', 'dckr_pat_', 'lin_api_', 'hvs.', 'AGE-SECRET-KEY-']
+  for (const p of prefixes) {
+    expect([p, isSecretLikePart(`${p}x1`)]).toEqual([p, true])
+    expect([p, toolLabel('Read', { file_path: `/srv/${p}x1.txt` })]).toEqual([p, 'Read /srv/…'])
+  }
+})
+
+test('warm miss: when the context estimate fails, the cause is "not checked", not a list it never ruled out', () => {
+  const none = { change: null, effortOnly: null, tools: null, idleMs: null, ttlMs: HOUR }
+  expect(breakCause({ ...none, isToolsUnknown: true })).toMatch(/^cause not checked: the context estimate failed/)
+  expect(breakCause({ ...none, isToolsUnknown: true, change: 'model a → b' })).toBe('model a → b – each splits the cache')
+})
+
+test('the Compact button starts the tool-result tally over, as a typed /compact does', async ($, on) => {
+  const { next } = world(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  next.toolText = 'x'.repeat(8_000)
+  await toolCall($, { tool: 'Read', file_path: '/work/a.ts' })
+  next.toolText = null
+  expect(await contextText($, /^since the start$/)).toBeDefined()
+  const bar = await $.ui.mount({ surface: 'terminal', ...band(160) })
+  await bar.press({ key: 'compact' })
+  await bar.unmount()
+  expect(await contextText($, /^no tool results yet$/)).toBeDefined()
+  expect(await contextText($, /^since the compact at \d\d:\d\d$/)).toBeDefined()
 })

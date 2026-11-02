@@ -1,5 +1,8 @@
 export type Usage4 = { input: number; read: number; write: number; output: number }
 
+/** What made a cache cold although the clock cannot say: a model switch or a resume. */
+export type ColdCause = 'model' | 'resume'
+
 /** One main-thread model request as the API counted it, timed at the request's start. */
 export type Step = Usage4 & { at: number; model: string; kind?: 'first' | 'cold' }
 
@@ -13,8 +16,8 @@ export type CacheInfo = {
   /** What re-caching would cost, when the engine estimated it (resume, model switch). */
   rewriteUsd: number | null
   /** Why the cache is known cold although the clock cannot say (lastAt 0): a model switch or a resume. */
-  coldReason: 'model' | 'resume' | null
-  /** On a cold resume: how long the session had been idle, as Claude Code reported it. */
+  coldReason: ColdCause | null
+  /** On a resume (warm or cold): how long the session had been idle, as Claude Code reported it. */
   idleBeforeMs: number | null
 }
 
@@ -41,8 +44,10 @@ export type Measure = {
   startedAt: number | null
   /** Prompts the user has sent this session ($.session.turns()). */
   prompts: number | null
-  /** Per plan limit, the first reading of this window: the start of the pace for the forecast. */
-  /** Absent in state an older version of the module wrote (it survives a reload). */
+  /**
+   * Per plan limit, the first reading of this window: the start of the pace for the forecast. Absent in
+   * state an older version of the module wrote (it survives a reload).
+   */
   limitStart?: Record<string, LimitStart>
 }
 
@@ -58,6 +63,8 @@ export type Totals = {
   busyMs?: number
   /** The main turns that time was summed over – the divisor for the time per prompt. Absent in state an older version wrote. */
   busyTurns?: number
+  /** When agent time began to count in a conversation that was already running – state from before 0.13 had none. */
+  busySince?: number
 }
 
 export type KeepWarm = {
@@ -73,7 +80,7 @@ export type KeepWarm = {
 }
 
 /** A main request that found the cache expired and wrote it anew: after a pause, a model switch, or a resume. */
-export type ColdWrite = { at: number; written: number; cause: 'pause' | 'model' | 'resume'; idleMs: number | null }
+export type ColdWrite = { at: number; written: number; cause: ColdCause | 'pause'; idleMs: number | null }
 
 /** A named share of the context, in tokens. */
 export type ContextItem = { name: string; tokens: number }
@@ -86,8 +93,10 @@ export type ContextMap = {
   /** Categories that hold tokens (kind 'used'), heaviest first. */
   categories: ContextItem[]
   memoryFiles: ContextItem[]
-  /** Loaded MCP tools summed per server; `tools` counts them. */
-  /** `toolNames` is absent in a map an older version wrote; it is rewritten at the next reading. */
+  /**
+   * Loaded MCP tools summed per server; `tools` counts them. `toolNames` is absent in a map an older
+   * version wrote; it is rewritten at the next reading.
+   */
   mcpServers: (ContextItem & { tools: number; toolNames?: string[] })[]
   /** MCP tools behind tool search, not in the context until loaded. */
   deferredMcpTools: number
@@ -120,13 +129,14 @@ export type Health = {
   /** The expiry notification (option expiryNotice): how many went out and why the last one did not. */
   notice?: { sent: number; lastReason: string | null }
   /** Claude Code's own verdict on the cache against Cache Meter's, at model switches and resumes. */
-  checks: { agreed: number; differed: number; last: { at: number; engineWarm: boolean; ourWarm: boolean; source: 'model' | 'resume' } | null }
+  checks: { agreed: number; differed: number; last: { at: number; engineWarm: boolean; ourWarm: boolean; source: ColdCause } | null }
 }
 
 /**
  * What tool results added to the main conversation since the start or the last compaction, by tool and
  * the largest single ones. Sizes are estimates (characters ÷ 4) of the text the model reads; the label
- * is the tool and, for file tools, the home-shortened path or, for Bash, the program name – never content.
+ * is the tool and, for file tools, the home-shortened path or, for Bash, the program name; an MCP tool is its
+ * own name alone (after the last `__`) – never content.
  */
 export type ToolResults = {
   byTool: Record<string, { count: number; tokens: number }>
@@ -134,8 +144,10 @@ export type ToolResults = {
   since: number | null
 }
 
-/** One subagent's requests, summed: what it read from and wrote to its own cache. */
-/** `model` is the last one seen; `isNamed` false while the type and task could not be looked up yet. */
+/**
+ * One subagent's requests, summed: what it read from and wrote to its own cache. `model` is the last one
+ * seen; `isNamed` false while the type and task could not be looked up yet.
+ */
 export type AgentUse = Usage4 & { steps: number; label: string; model: string; isNamed?: boolean }
 
 /** The TTL controls Claude Code documents (prompt-caching § Choose the TTL yourself), read at start. */

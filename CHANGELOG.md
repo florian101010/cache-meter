@@ -12,6 +12,13 @@ Nothing cut off in a narrow pane. Requires Claude Code 2.1.295 or later.
 - **Tool labels kept their tool word:** a path over 80 characters lost its start – and with it `Read` or `Edit` – before it was stored, so the Context tab showed `…n/ai-web…ister.tsx`. Now the path loses its start and the tool word stays, and *Largest single results* shows the tool plus as many trailing folders as fit (`Read …/hooks/register.tsx`); in the narrowest column only the file name (`…/register.tsx`).
 - **Subagents in Health:** the agent's name came last and was the first thing a narrow pane dropped; it now comes first.
 - **Overview:** the subagents' line said `1 requests`; now `1 request`.
+- **The Compact button left the Context tab's tool results as they were:** Claude Code skips a mod's own hooks for a compaction the mod starts (*reference › The hook function*, `re-entry`), so the tally is now reset by the button too.
+- **Warm miss with an unread context:** when the context estimate a warm miss needs failed, Health listed causes it had never ruled out; it now says the cause was not checked.
+- **A plan-limit notification no longer holds up the answer** (option `limitNotice`): it is sent without waiting for the person's Notification hooks.
+- **Keepwarm right after a request:** a 15-second tick that fell between the end of a request and its bookkeeping could read the old cache start and send a ping the request had made needless.
+- **One redraw timer:** two overlapping callers could each start the once-a-second redraw, and the second ran until a reload.
+- **Agent time after updating mid-conversation:** a session that ran 0.12 before the update counted agent time from the update, but showed it as the whole session's; it now says *since HH:MM*.
+- **Failures leave a trace:** a refused settings read (`promptCacheTtl` ignored), a context breakdown of another shape, a failing `$.session.turns` or `$.session.usage`, and a failure inside the 15-second tick, the redraw timer or the auto-open now each leave one line in Claude Code's debug log (written when debug logging is on, e.g. `claude --debug`); the tick goes on.
 
 ### Changed
 - **MCP tools by their own name:** `browser_snapshot` instead of `mcp__MCP_DOCKER__playwright__browser_snapshot`, in the Context tab, the toast and `/tokens report`.

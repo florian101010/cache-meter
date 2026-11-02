@@ -17,11 +17,23 @@
 // (the engine's own cache_ttl and re-cache estimate).
 
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register } from 'claude-code'
+import type { EngineInterface, Register, ThemeKey } from 'claude-code'
 
 import type { AgentUse, CacheInfo, ColdWrite, ContextMap, Health, KeepWarm, Measure, ServerToolCall, Step, ToolResults, Totals, TtlConfig, Usage4 } from './state'
 import {
   COLD_MIN,
+  autoCompactOf,
+  budgetLevel,
+  columnDetail,
+  costLabel,
+  hitColor,
+  hitTier,
+  isPlan,
+  limitName,
+  mcpNote,
+  plural,
+  resetLabel,
+  usageParts,
   columns as widthOf,
   packParts,
   shortTool,
@@ -195,7 +207,9 @@ let budget = 0
 let budgetWarned = 0
 // Prompts already in the transcript when this load or /clear, /resume, /branch began: MCP calls are
 // counted from then on ($.state resets there, $.session.turns() does not), so "unused" counts from there too.
-let promptBase = 0
+let promptBase: number | null = 0
+// paceRedraws runs one caller at a time.
+let isPacing = false
 // When this process started counting requests, if the transcript already held prompts then: the
 // history lives in memory only (nothing on disk), so a relaunch – /tui switches renderer that way
 // (fullscreen › Enable fullscreen rendering), or claude --resume – starts it over. Null otherwise.
@@ -237,7 +251,7 @@ let pendingSummary: string | null = null
 // The conversation's own figures, kept beside $.state so they survive whatever /clear resets first:
 // main requests, their four token counts, cold re-writes; and the session cost when it began (null when
 // unknown – after a reload in a running conversation – then the summary names no cost).
-let convo = { steps: 0, main: { input: 0, read: 0, write: 0, output: 0 } as Usage4, coldCount: 0, coldWritten: 0 }
+let convo = { steps: 0, main: ZERO, coldCount: 0, coldWritten: 0 }
 let convoUsdBase: number | null = null
 // A resumed or branched conversation is counted from there on: its earlier requests are not in this session.
 let convoFrom: 'start' | 'resume' | 'fork' = 'start'
@@ -278,8 +292,11 @@ async function loadTtlConfig($: EngineInterface) {
   try {
     const settings: Record<string, unknown> = await $.settings.read()
     settingTtl = typeof settings.promptCacheTtl === 'string' ? settings.promptCacheTtl : null
-  } catch {
+  } catch (error) {
+    // Another mod's settings.read hook can refuse (reference › Commands and configuration): promptCacheTtl
+    // then goes unread, and the debug log says why the TTL may be assumed wrong.
     settingTtl = null
+    logOnce($, 'settings read (promptCacheTtl ignored)', error)
   }
   const config: TtlConfig = {
     force5m: (await $.env.get('FORCE_PROMPT_CACHING_5M')) === '1',
@@ -311,21 +328,23 @@ async function measureNow($: EngineInterface) {
       limitStart: nextLimitStarts(m?.limitStart ?? {}, usage.rateLimits, now),
     }))
     await mapContext($, usage.context.breakdown, 'summary')
-  } catch {
+  } catch (error) {
     // No reading: the band waits for the first session.measure.
+    logOnce($, 'first context reading', error)
   }
 }
 
 // Where the context goes, from a breakdown of $.session.usage (types: SessionContextBreakdown).
 // 'summary' is Claude Code's local estimate and sends no request; 'full' counts with the API.
-async function mapContext($: EngineInterface, breakdown: unknown, detail: 'summary' | 'full') {
+async function mapContext($: EngineInterface, breakdown: BreakdownLike | null | undefined, detail: 'summary' | 'full') {
   if (breakdown === undefined || breakdown === null) return
   try {
     const at = await $.clock.now()
-    const map = contextMapOf(breakdown as BreakdownLike, detail, at)
+    const map = contextMapOf(breakdown, detail, at)
     await update($, contextMapA, () => map)
-  } catch {
-    // A breakdown of another shape: keep the last map.
+  } catch (error) {
+    // A breakdown of another shape: keep the last map, and say so in the debug log.
+    logOnce($, 'context breakdown', error)
   }
 }
 
@@ -370,11 +389,26 @@ async function maybeAutoOpen($: EngineInterface) {
   if (autoSidebar === 'off' || !isInteractive || !isFullscreenSeen || hasAutoOpened || isDismissed) return
   hasAutoOpened = true
   if ((await $.ui.panes()).some(p => p.id === PANE)) return
-  await $.ui.open({ id: PANE, title: 'Tokens & Cache' })
+  const opened = await $.ui.open({ id: PANE, title: 'Tokens & Cache' })
+  if (!opened.isPlaced) $.ui.log(`pane opened unasked waits undrawn: ${cleanLabel(String(opened.reason ?? 'no reason given'))}`, { to: 'debug' })
   $.ui.invalidate('ui.render')
 }
 
+// A timer's callback: where its rejection goes is not documented (types: $.clock.every), so a failure in
+// it is caught here – the 15-second tick must keep counting down and pinging – and logged once.
+async function guarded($: EngineInterface, kind: string, body: () => Promise<void>) {
+  try {
+    await body()
+  } catch (error) {
+    logOnce($, kind, error)
+  }
+}
+
 async function tick($: EngineInterface) {
+  await guarded($, 'tick', () => tickBody($))
+}
+
+async function tickBody($: EngineInterface) {
   $.ui.invalidate('ui.render')
   await maybeAutoOpen($)
   await maybeNotify($)
@@ -454,8 +488,6 @@ async function tick($: EngineInterface) {
   }
 }
 
-// Why a warm cache was re-written: a fresh, free context estimate (no request, types:
-// SessionUsageArgs) shows whether the loaded MCP tools changed since the last turn.
 // The loaded MCP tools of a context map, or null when it cannot tell (none yet, or written by an older
 // version without tool names).
 function toolNamesOf(map: ContextMap | null): string[] | null {
@@ -464,6 +496,8 @@ function toolNamesOf(map: ContextMap | null): string[] | null {
   return map.mcpServers.flatMap(s => s.toolNames ?? [])
 }
 
+// Why a warm cache was re-written: a fresh, free context estimate (no request, types:
+// SessionUsageArgs) shows whether the loaded MCP tools changed since the last turn.
 async function explainBreak(
   $: EngineInterface,
   before: CacheInfo | null,
@@ -475,6 +509,7 @@ async function explainBreak(
 ): Promise<string> {
   const was = toolNamesOf(await read($, contextMapA))
   let tools: { added: number; removed: number } | null = null
+  let isToolsUnknown = false
   try {
     const usage = await $.session.usage({ breakdown: 'summary' })
     await mapContext($, usage.context.breakdown, 'summary')
@@ -483,8 +518,10 @@ async function explainBreak(
     // With tool search active, loading a deferred tool keeps the prefix (prompt-caching › Connecting or
     // removing an MCP server): a change in loaded tools is then no cause.
     tools = was === null || is === null || (map?.deferredMcpTools ?? 0) > 0 ? null : toolDiff(was, is)
-  } catch {
+  } catch (error) {
     tools = null
+    isToolsUnknown = true
+    logOnce($, 'context estimate for a warm miss', error)
   }
   const effortOnly =
     prev !== null && prev.effort !== undefined && effort !== undefined && prev.effort !== effort && effortKeepsCache(model)
@@ -495,6 +532,7 @@ async function explainBreak(
     change,
     effortOnly,
     tools,
+    isToolsUnknown,
     idleMs: before === null ? null : Math.max(0, startedAt - before.lastAt),
     ttlMs: (await ttlNow($)).ms,
   })
@@ -586,7 +624,7 @@ async function copyReport($: EngineInterface): Promise<string> {
       promptsLeft: measure === null || measure.isAutoCompactOff ? null : compactForecast(measure.history, measure.autoCompactPct, measure.window),
     },
     limits: (measure?.limits ?? []).map(l => ({ name: limitName(l.kind), percentUsed: l.percentUsed })),
-    memoryFiles: (map?.memoryFiles ?? []).slice(0, 3).map(f => ({ name: homeShort(f.name), tokens: f.tokens })),
+    memoryFiles: (map?.memoryFiles ?? []).slice(0, 3).map(f => ({ name: homePath(f.name), tokens: f.tokens })),
     mcpServers: (map?.mcpServers ?? []).slice(0, 5).map(m => ({ name: m.name, tokens: m.tokens, calls: serverCalls(m.toolNames ?? [], calls) })),
     toolsByTool: Object.entries(results.byTool)
       .map(([tool, v]) => ({ tool, ...v }))
@@ -602,10 +640,12 @@ async function copyReport($: EngineInterface): Promise<string> {
   let copied: { isCopied: boolean; reason?: string }
   try {
     copied = await $.ui.copy({ text })
-  } catch {
+  } catch (error) {
     // A ui.copy hook's deny or a failed write. Fixed words, not the error's own: Claude reads a command's
-    // text (api › Add a command), and an error from another hook could carry anything.
+    // text (api › Add a command), and an error from another hook could carry anything. The debug log,
+    // which Claude does not read, keeps the real one.
     copied = { isCopied: false, reason: 'rejected by a hook or the terminal' }
+    $.ui.log(`report not copied: ${cleanLabel(error instanceof Error ? error.message : String(error))}`, { to: 'debug' })
   }
   const lines = text.split('\n').length
 
@@ -622,7 +662,9 @@ async function refreshMeasure($: EngineInterface) {
   let usage: Awaited<ReturnType<EngineInterface['session']['usage']>>
   try {
     usage = await $.session.usage()
-  } catch {
+  } catch (error) {
+    logOnce($, 'session.usage', error)
+
     return
   }
   const now = await $.clock.now()
@@ -654,7 +696,7 @@ async function refreshMeasure($: EngineInterface) {
 // survives, interface › Keep state) and after /clear, /resume, /branch, so no warning repeats.
 async function settleBudget($: EngineInterface) {
   const usd = (await read($, measureA))?.usd ?? null
-  budgetWarned = budget <= 0 || usd === null ? 0 : usd >= budget ? 100 : usd >= budget * 0.8 ? 80 : 0
+  budgetWarned = budget <= 0 || usd === null ? 0 : budgetLevel(usd, budget)
 }
 
 // Option limitNotice: the same words as the toast, as a terminal notification. Not sent ('disabled',
@@ -663,7 +705,7 @@ async function settleBudget($: EngineInterface) {
 async function notify($: EngineInterface, text: string, what: string) {
   try {
     const sent = await $.ui.notify(text, { title: 'Cache Meter' })
-    if (!sent.isSent) $.ui.log(`${what} notification not sent: ${sent.reason}`, { to: 'debug' })
+    if (!sent.isSent) $.ui.log(`${what} notification not sent: ${cleanLabel(String(sent.reason))}`, { to: 'debug' })
   } catch (error) {
     // A hook's deny or a failed write (types: $.ui.notify); its words, one cleaned line.
     $.ui.log(`${what} notification failed: ${cleanLabel(error instanceof Error ? error.message : String(error))}`, { to: 'debug' })
@@ -697,7 +739,9 @@ async function checkLimits($: EngineInterface, quiet = false): Promise<string[]>
     const name = l.kind === 'spend_limit' ? 'Spend limit' : `${limitName(l.kind)} limit`
     const text = `${name} at ${l.percentUsed}% – full ≈ ${hhmm(full)} at this pace (resets ${resetLabel(l.resetsAt)})`
     lines.push(text)
-    if (limitNotice) await notify($, text, 'limit')
+    // Not awaited: the person's Notification hooks run first and can take a while (api › Show something
+    // without starting a turn); notify catches its own failures.
+    if (limitNotice) void notify($, text, 'limit')
   }
 
   return lines
@@ -706,7 +750,7 @@ async function checkLimits($: EngineInterface, quiet = false): Promise<string[]>
 // A conversation begins (a fresh session, /clear, /resume, /branch): its figures start at zero, its
 // cost is counted from the session cost now.
 function startConversation(usd: number | null, from: 'start' | 'resume' | 'fork') {
-  convo = { steps: 0, main: { input: 0, read: 0, write: 0, output: 0 }, coldCount: 0, coldWritten: 0 }
+  convo = { steps: 0, main: ZERO, coldCount: 0, coldWritten: 0 }
   convoUsdBase = usd
   convoFrom = from
 }
@@ -726,9 +770,9 @@ async function conversationSummary($: EngineInterface): Promise<string | null> {
   const hit = hitPct(convo.main)
   const parts = [
     usd === null ? null : `${isPlan(measure) ? '≈ ' : ''}$${usd.toFixed(2)}${costLabel(measure, false)}`,
-    `${convo.steps} request${convo.steps === 1 ? '' : 's'}`,
+    plural(convo.steps, 'request'),
     hit === null ? null : `${hit}% from cache`,
-    convo.coldCount > 0 ? `${convo.coldCount} cold re-write${convo.coldCount === 1 ? '' : 's'} (${short(convo.coldWritten)} tokens)` : null,
+    convo.coldCount > 0 ? `${plural(convo.coldCount, 'cold re-write')} (${short(convo.coldWritten)} tokens)` : null,
   ].filter((p): p is string => p !== null)
 
   const since = convoFrom === 'resume' ? 'since you resumed it, it' : convoFrom === 'fork' ? 'since the branch, it' : 'it'
@@ -742,7 +786,7 @@ async function checkBudget($: EngineInterface): Promise<string | null> {
   const measure = await read($, measureA)
   const usd = measure?.usd ?? null
   if (usd === null) return null
-  const level = usd >= budget ? 100 : usd >= budget * 0.8 ? 80 : 0
+  const level = budgetLevel(usd, budget)
   if (level <= budgetWarned) return null
   budgetWarned = level
   const what = isPlan(measure) ? 'API value' : 'spent'
@@ -757,7 +801,18 @@ async function checkBudget($: EngineInterface): Promise<string | null> {
 // throttled to 10 a second, 30 for the visible pane and the expanded band in the terminal – one a second
 // is far below either).
 async function paceRedraws($: EngineInterface) {
-  if (!isInteractive) return
+  // One caller at a time: a tick and a heartbeat overlapping across the awaits below could each start a
+  // timer, and the one overwritten would never be cancelled.
+  if (!isInteractive || isPacing) return
+  isPacing = true
+  try {
+    await paceRedrawsOnce($)
+  } finally {
+    isPacing = false
+  }
+}
+
+async function paceRedrawsOnce($: EngineInterface) {
   const now = await $.clock.now()
   const ttl = await ttlNow($)
   const status = cacheStatus(await read($, cacheA), now, ttl.ms)
@@ -779,21 +834,35 @@ async function paceRedraws($: EngineInterface) {
 }
 
 async function fastTick($: EngineInterface) {
-  lastBeat = await $.clock.now()
-  $.ui.invalidate('ui.render')
-  await paceRedraws($)
+  await guarded($, 'redraw timer', async () => {
+    lastBeat = await $.clock.now()
+    $.ui.invalidate('ui.render')
+    await paceRedraws($)
+  })
 }
 
-async function turnsNow($: EngineInterface): Promise<number> {
+// Failures a person never sees but a maintainer needs (an API whose shape changed, a hook that refuses):
+// one debug-log line per kind and load, so a per-turn call cannot flood the log. Cleaned, one line.
+const loggedFailures = new Set<string>()
+function logOnce($: EngineInterface, kind: string, error: unknown) {
+  if (loggedFailures.has(kind)) return
+  loggedFailures.add(kind)
+  $.ui.log(`${kind} failed: ${cleanLabel(error instanceof Error ? error.message : String(error))}`, { to: 'debug' })
+}
+
+// Prompts in the transcript, or null when Claude Code does not say: then no figure counts from them.
+async function turnsNow($: EngineInterface): Promise<number | null> {
   try {
     return await $.session.turns()
-  } catch {
-    return 0
+  } catch (error) {
+    logOnce($, 'session.turns', error)
+
+    return null
   }
 }
 
 async function noteHistoryStart($: EngineInterface) {
-  historySince = promptBase > 0 && (await read($, stepsA)).length === 0 ? await $.clock.now() : null
+  historySince = promptBase !== null && promptBase > 0 && (await read($, stepsA)).length === 0 ? await $.clock.now() : null
 }
 
 async function resetCache($: EngineInterface) {
@@ -809,9 +878,12 @@ async function compactNow($: EngineInterface) {
 
       return
     }
-    // The session.compact hook below sees this compaction too ($.session.compact skips only the calling
-    // hook, types – this is a button's handler); resetting the countdown here as well is idempotent.
+    // Called from a button's handler – the mod's code outside its hooks – so the session.compact hook
+    // below is skipped for it ('re-entry', reference › The hook function, next.error): reset here what
+    // that hook resets – the countdown and the tool-result tally.
     await resetCache($)
+    const at = await $.clock.now()
+    await update($, toolResultsA, () => ({ ...NO_RESULTS, since: at }))
   } catch (error) {
     $.ui.toast(`Compact is not possible right now: ${error instanceof Error ? error.message : String(error)}`)
   }
@@ -1058,9 +1130,7 @@ export const register: Register = (on, options) => {
   limitNotice = options.limitNotice === 'on'
   warnedLimits = []
   pendingSummary = null
-  convo = { steps: 0, main: { input: 0, read: 0, write: 0, output: 0 }, coldCount: 0, coldWritten: 0 }
-  convoUsdBase = null
-  convoFrom = 'start'
+  startConversation(null, 'start')
   lastHogAt = 0
   savingFrom = 0
   savingStart = 0
@@ -1069,17 +1139,23 @@ export const register: Register = (on, options) => {
     const result = await next(e)
     // First: everything below that only speaks where a person reads it (checkLimits) asks this.
     isInteractive = e.isInteractive
-    await loadTtlConfig($)
-    await measureNow($)
-    promptBase = await turnsNow($)
-    await noteHistoryStart($)
-    // A reload keeps the state, not the module's variables: /keepwarm auto carries on. State written by an
-    // older version (before 0.12) has no auto fields – read as off.
+    // State written before 0.12 has no auto fields: repaired before anything below reads them (read as off).
     const kept = await read($, keepA)
     if (kept.auto === undefined || kept.pausePings === undefined) {
       await update($, keepA, k => ({ ...k, auto: k.auto ?? null, pausePings: k.pausePings ?? 0 }))
     }
     autoMs = kept.auto ?? null
+    // State written before 0.13 has no agent time: counted from now, and the pane says since when.
+    const totalsNow: Totals = await read($, totalsA)
+    if (totalsNow.busyMs === undefined && (await read($, stepsA)).length > 0) {
+      const since = await $.clock.now()
+      await update($, totalsA, t => ({ ...t, busyMs: 0, busyTurns: 0, busySince: since }))
+    }
+    await loadTtlConfig($)
+    await measureNow($)
+    promptBase = await turnsNow($)
+    await noteHistoryStart($)
+    // A reload keeps the state, not the module's variables: /keepwarm auto carries on (repaired above).
     // session.start is the first event of every load: a fresh session warns from 0; a reload in a running
     // one (requests already counted, state kept) takes the level reached without a toast.
     budgetWarned = 0
@@ -1098,7 +1174,7 @@ export const register: Register = (on, options) => {
       // Returning the promise lets a mock clock await the tick (test § Test a timer).
       $.clock.every(TICK_MS, () => tick($))
       // Soon after start, once the band has been drawn and said whether the session is fullscreen.
-      $.clock.after(2_000, () => maybeAutoOpen($))
+      $.clock.after(2_000, () => guarded($, 'auto-open', () => maybeAutoOpen($)))
     }
     try {
       await $.command.register({
@@ -1209,6 +1285,9 @@ export const register: Register = (on, options) => {
         }
       }
       result = yield* next(e)
+      // The cache's new start, before the counter below drops: a tick in between would otherwise read the
+      // old start and ping a cache this request just touched. Rewritten in full further down.
+      if (isMain && result.usage !== null) await update($, cacheA, c => (c === null ? c : { ...c, lastAt: startedAt }))
     } finally {
       if (isMain) mainRequests = Math.max(0, mainRequests - 1)
     }
@@ -1391,7 +1470,7 @@ export const register: Register = (on, options) => {
     if (e.tool.startsWith('mcp__')) await update($, healthA, health => ({ ...health, toolCalls: bump(health.toolCalls ?? {}, e.tool) }))
     if (e.agentId === undefined && typeof result.text === 'string') {
       const tokens = estimateTokens(result.text)
-      const label = toolLabel(e.tool, e as unknown as Record<string, unknown>)
+      const label = toolLabel(e.tool, e)
       const at = await $.clock.now()
       await update($, toolResultsA, prev => addToolResult(prev ?? NO_RESULTS, e.tool, label, tokens, at))
       // One large result is worth a word while it can still be acted on (compact, or read less next time).
@@ -1433,14 +1512,11 @@ export const register: Register = (on, options) => {
       if (before === null || before.autoCompactWindow !== e.context.window) auto = autoCompactOf(usage.context.breakdown, e.context.window)
       startedAt = usage.startedAt
       await mapContext($, usage.context.breakdown, 'summary')
-    } catch {
+    } catch (error) {
       auto = null
+      logOnce($, 'context estimate after a turn', error)
     }
-    try {
-      prompts = await $.session.turns()
-    } catch {
-      prompts = null
-    }
+    prompts = await turnsNow($)
     const now = await $.clock.now()
     await update($, measureA, m => {
       const tokens = e.context.tokens ?? null
@@ -1697,7 +1773,7 @@ export const register: Register = (on, options) => {
         : budget > 0
           ? ` · ${costWord} $${usd.toFixed(2)} of $${budget.toFixed(2)}`
           : ` · ${costWord} $${usd.toFixed(2)}`
-    const costColor = budget > 0 && usd !== null ? (usd >= budget ? 'error' : usd >= budget * 0.8 ? 'warning' : undefined) : undefined
+    const costColor = budget > 0 && usd !== null ? ({ 100: 'error', 80: 'warning', 0: undefined } as const)[budgetLevel(usd, budget)] : undefined
     // The last stretch pulses (the dot, once a second); a keepwarm ping flashes for a few seconds.
     const isBeating = heartbeat !== null && heartbeat.until > now
     const beatText = isBeating && heartbeat !== null ? ` · ping ok · ${short(heartbeat.read)} read` : ''
@@ -1836,9 +1912,9 @@ export const register: Register = (on, options) => {
     // words that belong to the part (`agent time ` before a time, ` API value` after a cost); a part split
     // because it is wider than a line by itself is drawn whole in its own style. `sepColor` colours the
     // separator where the row's state does (a warning, a success).
-    type Part = { text: string; lead?: string; tail?: string; bold?: boolean; color?: string; dim?: boolean }
+    type Part = { text: string; lead?: string; tail?: string; bold?: boolean; color?: ThemeKey; dim?: boolean }
     const dimPart = (text: string): Part => ({ text, dim: true })
-    const packed = (key: string, rowLabel: string | null, parts: readonly Part[], width: number, sep = ' · ', sepColor?: string) => {
+    const packed = (key: string, rowLabel: string | null, parts: readonly Part[], width: number, sep = ' · ', sepColor?: ThemeKey) => {
       const indent = rowLabel === null ? 0 : 11
       const whole = (pt: Part) => `${pt.lead ?? ''}${pt.text}${pt.tail ?? ''}`
       const lines = packParts(
@@ -2072,7 +2148,7 @@ export const register: Register = (on, options) => {
             </Text>
             {promptsLeft !== null && (
               <Text color={promptsLeft <= 3 ? 'warning' : undefined} dimColor={promptsLeft > 3}>
-                {promptsLeft === 0 ? ' · at the next prompt' : ` · in ≈ ${promptsLeft} prompt${promptsLeft === 1 ? '' : 's'} at this pace`}
+                {promptsLeft === 0 ? ' · at the next prompt' : ` · in ≈ ${plural(promptsLeft, 'prompt')} at this pace`}
               </Text>
             )}
           </Text>
@@ -2083,7 +2159,7 @@ export const register: Register = (on, options) => {
 
     // --- session ------------------------------------------------------------------------------
     // What caching saved: every input token at the base price against what reads and writes cost,
-    // with the last request's model and the current TTL for the whole session (README › Pane).
+    // with the last request's model and the current TTL for the whole session (docs/how-it-works.md › What caching saved).
     const saving = cacheSaving(totals.main, readMultiplier(steps.at(-1)?.model ?? ''), writeMultiplier(ttl.ms))
     // Cost and saving count to a new value on the Overview (option animations): from what was on screen
     // – mid-count too – to the new figure; not on the first draw, after a reload or on another tab.
@@ -2109,8 +2185,8 @@ export const register: Register = (on, options) => {
     const errorCount = Object.values(health.errors).reduce((a, n) => a + n, 0)
     const stopCount = Object.values(health.stops).reduce((a, n) => a + n, 0)
     const issues = [
-      errorCount > 0 ? `${errorCount} API error${errorCount === 1 ? '' : 's'}` : '',
-      stopCount > 0 ? `${stopCount} unusual stop${stopCount === 1 ? '' : 's'}` : '',
+      errorCount > 0 ? plural(errorCount, 'API error') : '',
+      stopCount > 0 ? plural(stopCount, 'unusual stop') : '',
     ]
       .filter(Boolean)
       .join(' · ')
@@ -2120,6 +2196,10 @@ export const register: Register = (on, options) => {
     // Agent time: summed in turn.complete; state an older version wrote has no such fields (read as 0).
     const busyMs = totals.busyMs ?? 0
     const busyTurns = totals.busyTurns ?? 0
+    // Since when agent time counts, when not since the session's start: a relaunch with history, or an update
+    // to 0.13 mid-conversation (busySince). Unknown prompt history (promptBase null) gives no share either.
+    const busyFrom = historySince ?? totals.busySince ?? null
+    const isWholeSession = busyFrom === null && promptBase !== null
     // Prompts and their cost as the Health tab counts them ($.session.turns(), Claude Code's cost figure);
     // the time per prompt over the turns that time was measured on, which /clear resets with it.
     const promptCount = measure?.prompts ?? null
@@ -2162,9 +2242,9 @@ export const register: Register = (on, options) => {
             'agent-time',
             null,
             [
-              { text: promptCount ? `${promptCount} prompt${promptCount === 1 ? '' : 's'}` : '', dim: true },
+              { text: promptCount ? plural(promptCount, 'prompt') : '', dim: true },
               // Kept in $.state: /clear, /resume, /branch and a relaunch start it over, as the requests above.
-              { lead: 'agent time ', text: clockLabel(busyMs), bold: true, tail: historySince === null ? undefined : ` since ${hhmm(historySince)}` },
+              { lead: 'agent time ', text: clockLabel(busyMs), bold: true, tail: busyFrom === null ? undefined : ` since ${hhmm(busyFrom)}` },
               { text: perPrompt === '' ? '' : `⌀ ${perPrompt} per prompt`, dim: true },
             ],
             rightIn,
@@ -2175,7 +2255,7 @@ export const register: Register = (on, options) => {
             null,
             [
               ...usageParts(totals.sub).map((text, i) => ({ ...dimPart(text), lead: i === 0 ? 'subagents ' : undefined })),
-              dimPart(`${totals.subSteps} request${totals.subSteps === 1 ? '' : 's'}`),
+              dimPart(plural(totals.subSteps, 'request')),
             ],
             rightIn,
           )}
@@ -2294,7 +2374,7 @@ export const register: Register = (on, options) => {
       const hit = hitPct(s) ?? 100
 
       // The first write of a cache (session start, after /compact) is not a loss: drawn in blue.
-      const color = s.kind === 'first' ? FILL.context : hit >= 80 ? HEALTH.good : hit >= 50 ? HEALTH.fair : HEALTH.poor
+      const color = s.kind === 'first' ? FILL.context : HEALTH[hitTier(hit)]
 
       const share = all > 0 ? (s.input + s.write) / all : 0
 
@@ -2538,7 +2618,7 @@ export const register: Register = (on, options) => {
             </Text>
             {caption('Memory files', 'CLAUDE.md and rules')}
             {map.memoryFiles.length === 0 && <Text dimColor>none</Text>}
-            {map.memoryFiles.slice(0, 5).map((f, i) => itemRow(`memory-${i}`, homeShort(f.name), f.tokens, topFile, { share: shareOf(f.tokens), isPath: true }))}
+            {map.memoryFiles.slice(0, 5).map((f, i) => itemRow(`memory-${i}`, homePath(f.name), f.tokens, topFile, { share: shareOf(f.tokens), isPath: true }))}
             {caption('MCP servers', map.deferredMcpTools > 0 ? `${map.deferredMcpTools} more tools behind tool search` : '')}
             {map.mcpServers.length === 0 && <Text dimColor>none loaded</Text>}
             {/* Its tools and calls on a dim line beneath: beside the bar they left a narrow pane no room for it. */}
@@ -2547,7 +2627,7 @@ export const register: Register = (on, options) => {
                 {itemRow(`mcp-${m.name}`, m.name, m.tokens, topServer, { share: shareOf(m.tokens) })}
                 <Text key={`mcp-${m.name}-note`} dimColor wrap="truncate-end">
                   {'  '}
-                  {mcpNote(m.tools, m.toolNames, health.toolCalls ?? {}, measure?.prompts == null ? null : measure.prompts - promptBase)}
+                  {mcpNote(m.tools, m.toolNames, health.toolCalls ?? {}, measure?.prompts == null || promptBase === null ? null : measure.prompts - promptBase)}
                 </Text>
               </Box>
             ))}
@@ -2583,13 +2663,13 @@ export const register: Register = (on, options) => {
       .sort((a, b) => b.input + b.read + b.write + b.output - (a.input + a.read + a.write + a.output))
       .slice(0, 5)
     // Three Health rows whose words, separator and its colour depend on one state: decided together here.
-    type Row = { parts: Part[]; sep: string; sepColor?: string }
+    type Row = { parts: Part[]; sep: string; sepColor?: ThemeKey }
     const budgetRow: Row =
       budget <= 0
         ? { parts: [dimPart('off'), dimPart('option sessionBudget warns at 80 % and 100 %')], sep: ' – ' }
         : usd === null
           ? { parts: [dimPart('cost unknown yet'), dimPart(`budget $${budget.toFixed(2)}`)], sep: ' · ' }
-          : { parts: [{ text: `${Math.round((usd / budget) * 100)}% of $${budget.toFixed(2)}`, color: usd >= budget ? 'error' : usd >= budget * 0.8 ? 'warning' : 'success' }], sep: ' · ' }
+          : { parts: [{ text: `${Math.round((usd / budget) * 100)}% of $${budget.toFixed(2)}`, color: ({ 100: 'error', 80: 'warning', 0: 'success' } as const)[budgetLevel(usd, budget)] }], sep: ' · ' }
     const lastMiss = `${unexpected.lastAt === null ? '' : `last ${hhmm(unexpected.lastAt)}`}${unexpected.lastIdleMs == null ? '' : ` after ${duration(unexpected.lastIdleMs)} idle`}`.trim()
     const warmRow: Row =
       unexpected.count === 0 && totals.mainSteps === 0
@@ -2636,9 +2716,9 @@ export const register: Register = (on, options) => {
             busyTurns === 0
               ? [{ text: '–', bold: true }, dimPart('counted from the next answer')]
               : [
-                  { text: clockLabel(busyMs), bold: true, tail: historySince === null ? undefined : ` since ${hhmm(historySince)}` },
+                  { text: clockLabel(busyMs), bold: true, tail: busyFrom === null ? undefined : ` since ${hhmm(busyFrom)}` },
                   { text: `⌀ ${clockLabel(busyMs / busyTurns)}/prompt`, dim: true },
-                  { text: historySince === null && age !== null && age > 0 && busyMs <= age ? `${Math.round((busyMs / age) * 100)}% of the session` : '', dim: true },
+                  { text: isWholeSession && age !== null && age > 0 && busyMs <= age ? `${Math.round((busyMs / age) * 100)}% of the session` : '', dim: true },
                 ],
             fullIn,
           )}
@@ -2897,90 +2977,6 @@ export const register: Register = (on, options) => {
       </Box>
     )
   })
-}
-
-function autoCompactOf(
-  breakdown: { autoCompactThreshold?: number; isAutoCompactEnabled: boolean } | undefined,
-  window: number,
-): { pct: number | null; isOff: boolean; isKnown: boolean } {
-  if (!breakdown || window <= 0) return { pct: null, isOff: false, isKnown: false }
-  if (!breakdown.isAutoCompactEnabled) return { pct: null, isOff: true, isKnown: true }
-  if (!breakdown.autoCompactThreshold) return { pct: null, isOff: false, isKnown: false }
-
-  return { pct: Math.round((breakdown.autoCompactThreshold / window) * 100), isOff: false, isKnown: true }
-}
-
-function limitName(kind: string): string {
-  if (kind === 'five_hour') return '5 hours'
-  if (kind === 'seven_day') return '7 days'
-  if (kind === 'spend_limit') return 'Spend limit'
-
-  return kind
-}
-
-function resetLabel(iso: string): string {
-  const ms = Date.parse(iso)
-  if (Number.isNaN(ms)) return iso
-  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-
-  return `${days[new Date(ms).getDay()]} ${hhmm(ms)}`
-}
-
-function usageParts(u: Usage4): string[] {
-  return [`read ${short(u.read)}`, `written ${short(u.write)}`, `new ${short(u.input)}`, `out ${short(u.output)}`]
-}
-
-/** Green from 80 %, yellow from 50 %, red below; plain while unknown. */
-function hitColor(pct: number | null): string | undefined {
-  if (pct === null) return undefined
-  if (pct >= 80) return 'success'
-  if (pct >= 50) return 'warning'
-
-  return 'error'
-}
-
-/** A home directory as `~`, so paths stay short and screenshots show no user name. */
-function homeShort(path: string): string {
-  return homePath(path)
-}
-
-/**
- * A subscription: Claude Code reports plan limits only there (types: SessionMeasureInput.rateLimits,
- * "empty off a subscription or before the first reading").
- */
-function isPlan(measure: Measure | null): boolean {
-  return (measure?.limits.length ?? 0) > 0
-}
-
-/** What the cost figure means here: a comparison value on a plan, real spend on an API key. */
-function costLabel(measure: Measure | null, isLong: boolean): string {
-  if (isPlan(measure)) return isLong ? ' API value (API-key price)' : ' API value'
-
-  return isLong ? ' spent (as /cost)' : ' spent'
-}
-
-/**
- * An MCP server's note in the context tab: its tools and how often they were called since the start,
- * /clear, /resume or /branch. "unused so far" only after a few prompts in that span, so a fresh or
- * resumed session does not call every server idle.
- */
-function mcpNote(tools: number, toolNames: readonly string[] | undefined, calls: Readonly<Record<string, number>>, prompts: number | null): string {
-  // Its share of each request (its tool definitions go out with every one) is the row's share column.
-  if (toolNames === undefined) return `${tools} tools`
-  const n = serverCalls(toolNames, calls)
-  const idle = n === 0 && prompts !== null && prompts >= 3 ? ' – unused so far' : ''
-
-  return `${tools} tools · ${n} call${n === 1 ? '' : 's'}${idle}`
-}
-
-/** One request column's details for its hover row, padded so it covers the time row beneath the chart. */
-function columnDetail(s: Step, width: number): string {
-  const hit = hitPct(s)
-  const what = s.kind === 'first' ? 'first write' : s.kind === 'cold' ? 'cold re-write' : ''
-  // In order of need: what is dropped first when the row is narrow comes last.
-  const text = fitParts([hhmm(s.at), `${short(s.input + s.read + s.write)} in`, `${hit === null ? '–' : `${hit}%`} hit`, what, `${short(s.write)} written`, `out ${short(s.output)}`], width)
-
-  return text.padEnd(width)
 }
 
 // Keeps the Overview redrawing every ANIM_FRAME_MS until `until` (the latest end asked for); one train
