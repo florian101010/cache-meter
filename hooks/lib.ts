@@ -370,7 +370,7 @@ export function columnCells(values: readonly Column[], width: number, rows: numb
 /**
  * Cache-read price as a multiple of the base input price, by model: 0.05× on Opus 5.5 and Sonnet
  * 5.5, 0.025× on Fable 5.1 and Mythos 5.1, 0.1× elsewhere. Source and how to keep these current:
- * CONTRIBUTING.md › Prices (pricing › Prompt caching, checked 2026-10-12).
+ * CONTRIBUTING.md › Prices (pricing › Prompt caching, checked 2026-11-02).
  */
 export function readMultiplier(model: string): number {
   if (/(opus|sonnet)-5-5/.test(model)) return 0.05
@@ -925,8 +925,8 @@ export const COMPACT_NOTE_MIN = 20_000
 export const COMPACT_NOTE_SHARE = 0.25
 
 /**
- * The Context tab's note on /compact, or null: only measured figures – the messages' size as Claude Code
- * counts it – and what /compact does by the docs (commands: "Free up context by summarizing the
+ * The Context tab's note on /compact, or null: only measured figures – the messages' share of each request,
+ * as Claude Code counts them – and what /compact does by the docs (commands: "Free up context by summarizing the
  * conversation so far"; costs: compacting a large context "is itself a large request"). No saving is
  * promised: what the summary keeps is not known before.
  */

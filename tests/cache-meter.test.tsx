@@ -2588,7 +2588,8 @@ test('animation: no shine with animations = off', { options: { animations: 'off'
   await ui.unmount()
 })
 
-test('café wiring: the state follows the cache – working, warm, cold', async ($, on) => {
+// Over 4.9 s on the CI runner (1.6 s locally): more room than the default 5 s (reference › Limits).
+test('café wiring: the state follows the cache – working, warm, cold', { timeoutMs: 20_000 }, async ($, on) => {
   const { clock } = world(on)
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   await step($)

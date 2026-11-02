@@ -11,7 +11,7 @@ Agent time in the `/tokens` pane, and a Context tab redrawn for a narrow pane. R
   - **Overview, Session card:** a new line `4 prompts · agent time 3m 4s · ⌀ $1.00 and 46s per prompt`.
   - **Health, Session card:** a row *Agent time* with the time per prompt and its share of the session.
   - **`/tokens report`:** a line *Agent time*.
-- Like the request count, agent time lives in the session state: `/clear`, `/resume`, `/branch` and a relaunch start it over, and the pane then says *since HH:MM*.
+- Like the request count, agent time lives in the session state: `/clear`, `/resume`, `/branch` and a relaunch start it over; when the conversation already held prompts, the pane says *since HH:MM*.
 
 ### Changed
 - **Context tab, redrawn for a narrow pane:** every list shares one grid – name, bar, tokens, share of each request.
@@ -23,6 +23,10 @@ Agent time in the `/tokens` pane, and a Context tab redrawn for a narrow pane. R
 
 ### Fixed
 - **Context tab:** in a narrow pane an MCP server's row wrapped – its bar broke over two lines and its token figure slid under it. Name, bar and figures no longer shrink; only a note gives way.
+
+### CI
+- The café wiring test gets 20 s instead of the default 5: on the CI runner it already took 4.9 s.
+- Prices checked against the pricing page on 2026-11-02 (*Prompt caching*): unchanged.
 
 ## [0.12.3] – 2026-11-02
 
@@ -320,6 +324,7 @@ Changes for Anthropic's plugin directory, whose validation blocked 0.5.1.
 - Pane `/tokens`: per-request token history, totals, plan limits, cost.
 - `/keepwarm`.
 
+[0.13.0]: https://github.com/florian101010/cache-meter/compare/cache-meter--v0.12.3...cache-meter--v0.13.0
 [0.12.3]: https://github.com/florian101010/cache-meter/compare/cache-meter--v0.12.2...cache-meter--v0.12.3
 [0.12.2]: https://github.com/florian101010/cache-meter/compare/cache-meter--v0.12.1...cache-meter--v0.12.2
 [0.12.1]: https://github.com/florian101010/cache-meter/compare/cache-meter--v0.12.0...cache-meter--v0.12.1
