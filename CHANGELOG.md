@@ -4,7 +4,7 @@ All notable changes to Cache Meter, a Claude Code mod. The format follows [Keep 
 
 ## [0.13.0] – 2026-11-02
 
-Agent time in the `/tokens` pane. Requires Claude Code 2.1.295 or later.
+Agent time in the `/tokens` pane, and a Context tab redrawn for a narrow pane. Requires Claude Code 2.1.295 or later.
 
 ### Added
 - **Agent time:** how long Claude worked on your prompts – the wall-clock length of each main turn (`turn.complete` `durationMs`, *events › Follow a turn*), an interrupted turn included, a subagent's left out because it runs inside a main turn.
@@ -12,6 +12,17 @@ Agent time in the `/tokens` pane. Requires Claude Code 2.1.295 or later.
   - **Health, Session card:** a row *Agent time* with the time per prompt and its share of the session.
   - **`/tokens report`:** a line *Agent time*.
 - Like the request count, agent time lives in the session state: `/clear`, `/resume`, `/branch` and a relaunch start it over, and the pane then says *since HH:MM*.
+
+### Changed
+- **Context tab, redrawn for a narrow pane:** every list shares one grid – name, bar, tokens, share of each request.
+  - **One base for every percentage:** the tokens each request carries. Before, a category showed its share of the whole window (`Messages … 5%`) while the `/compact` note under it said 44 %.
+  - **Fewer rows:** categories without tokens are left out, and two or more under 1 % fold into *Other*. Tools whose results came to nothing are left out too.
+  - **Finer bars:** drawn to an eighth of a cell, so a 62-token file is a sliver, not a full block.
+  - **Shorter texts:** the `/compact` note is one sentence, dim until context fill reaches half the auto-compact point. Card headings are short, with their detail at the right.
+  - **Readable names:** paths keep `~/` and the file name. A plugin's agents show by their own name instead of four alike `pr-review-toolkit:…` rows, and an MCP server's tools and calls sit on a line beneath it.
+
+### Fixed
+- **Context tab:** in a narrow pane an MCP server's row wrapped – its bar broke over two lines and its token figure slid under it. Name, bar and figures no longer shrink; only a note gives way.
 
 ## [0.12.3] – 2026-11-02
 

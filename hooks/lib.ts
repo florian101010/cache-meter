@@ -401,6 +401,31 @@ export function right(text: string, width: number): string {
   return text.length >= width ? text : ' '.repeat(width - text.length) + text
 }
 
+/**
+ * A bar exactly `width` cells wide for `value` against `top`, in eighths of a cell, padded with spaces;
+ * a value above zero shows at least a sliver, so a small item is not drawn as large as a full cell.
+ */
+export function barCells(value: number, top: number, width: number): string {
+  if (width <= 0) return ''
+  const eighths = top > 0 && value > 0 ? Math.max(1, Math.round((Math.min(value, top) / top) * width * 8)) : 0
+
+  // The meters' partial blocks (EIGHTHS, below): 1/8 to 7/8 of a cell.
+  return ('█'.repeat(Math.floor(eighths / 8)) + (eighths % 8 === 0 ? '' : (EIGHTHS[(eighths % 8) - 1] ?? ''))).padEnd(width)
+}
+
+/**
+ * The Context tab's categories: none without tokens, and the ones under `minShare` of `base` (what each
+ * request carries) folded into one "Other" row – only when there are two or more, one stays as it is.
+ */
+export function foldSmall(items: readonly { name: string; tokens: number }[], base: number, minShare = 0.01): { name: string; tokens: number }[] {
+  const kept = items.filter(i => i.tokens > 0)
+  if (base <= 0) return kept
+  const small = kept.filter(i => i.tokens < base * minShare)
+  if (small.length < 2) return kept
+
+  return [...kept.filter(i => i.tokens >= base * minShare), { name: 'Other', tokens: small.reduce((a, i) => a + i.tokens, 0) }]
+}
+
 /** The parts of `$.session.usage`'s breakdown a context map reads (types: SessionContextBreakdown). */
 export type BreakdownLike = {
   categories: readonly { name: string; tokens: number; kind: string }[]
@@ -909,7 +934,7 @@ export function compactNote(messages: number | null, context: number | null): st
   if (messages === null || context === null || context <= 0) return null
   if (messages < COMPACT_NOTE_MIN || messages < context * COMPACT_NOTE_SHARE) return null
 
-  return `Messages ${short(messages)} (${Math.round((messages / context) * 100)}% of the context) are sent again with every request – /compact summarizes them to free space, itself one large request`
+  return `Messages are ${Math.round((messages / context) * 100)}% of each request – /compact summarizes them, itself one large request`
 }
 
 /** A plan limit worth a warning: half used or more, and full before it resets at this pace. */

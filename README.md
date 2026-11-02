@@ -151,8 +151,8 @@ Cache Meter speaks up only with figures it measured – no guessed savings:
 |---|---|
 | One tool result floods the context (≥ 10k tokens and ≥ 2 % of the window) | `Read ~/src/big.ts put ≈ 50.0k tokens into the context – sent again with every request until /compact` – the size is an estimate (characters ÷ 4); at most one such toast per 20 seconds |
 | A plan limit is half used and, at this pace, full before it resets | `5 hours limit at 60% – full ≈ 18:40 at this pace (resets Mon 20:00)` – once per window; a notification too with `limitNotice` |
-| The conversation's messages are a quarter of the context or more (≥ 20k) | in the Context tab: `Messages 60.0k (30% of the context) are sent again with every request – /compact summarizes them to free space, itself one large request` |
-| An MCP server's tools ride along with every request | in the Context tab, beside each server: its share of each request, and `unused so far` after three prompts without a call |
+| The conversation's messages are a quarter of the context or more (≥ 20k) | in the Context tab: `Messages are 30% of each request – /compact summarizes them, itself one large request` – dim while auto-compact is far, in the warning colour from half the way there |
+| An MCP server's tools ride along with every request | in the Context tab: each server's share of each request, and beneath it its tools, calls and `unused so far` after three prompts without a call |
 | You `/clear` | `Conversation cleared – it came to $1.50 spent · 12 requests · 94% from cache` – only what that conversation measured (after `/resume`: *since you resumed it*; after a reload mid-conversation without the cost) |
 | The dashboard opens above the prompt in a terminal | a tip in the reply and on the Overview: `/tui fullscreen puts this beside the chat as a sidebar` (in fullscreen: a window of 110 columns or more) |
 | A break outlasts `/keepwarm auto`'s window | `Keepwarm auto: break longer than 2h – the cache may expire; on again with your next answer` |

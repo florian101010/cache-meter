@@ -22,6 +22,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { AgentUse, CacheInfo, ColdWrite, ContextMap, Health, KeepWarm, Measure, ServerToolCall, Step, ToolResults, Totals, TtlConfig, Usage4 } from './state'
 import {
   COLD_MIN,
+  barCells,
   clockLabel,
   FIVE_MIN,
   HOUR,
@@ -52,6 +53,7 @@ import {
   turnLine,
   cacheStatus,
   duration,
+  foldSmall,
   forecast,
   hhmm,
   hitPct,
@@ -101,6 +103,8 @@ const TICK_MS = 15_000
 // From this context fill a cold cache is worth a hint to compact before the next prompt re-writes it all.
 const COMPACT_HINT_PCT = 50
 const STEPS_KEPT = 80
+// A Context-tab row after its name: ' ' + bar + ' ' + tokens (6) + share (5).
+const ROW_FIGURES = 13
 
 const cacheA = atom({ plugin: 'cache-meter', key: 'cache' } as const, null)
 const stepsA = atom({ plugin: 'cache-meter', key: 'steps' } as const, [])
@@ -2286,38 +2290,75 @@ export const register: Register = (on, options) => {
     )
 
     // --- context tab: where the context goes ---------------------------------------------------
-    const itemRow = (name: string, tokens: number, top: number, nameW: number, note = '') => {
-      const barW = Math.max(4, Math.min(24, fullIn - nameW - 20))
-      const lit = top > 0 ? Math.max(tokens > 0 ? 1 : 0, Math.round((tokens / top) * barW)) : 0
+    // One grid for every list in the tab: name · bar · tokens · share of each request · note. Name, bar and
+    // figures never shrink, only the note gives way (minWidth 0), so a row cannot wrap: a long MCP note
+    // used to squeeze the bar and push the figure onto a second line. One bar width per card (`noteW`),
+    // so the figures of a card stay in one column.
+    const nameW = Math.max(12, Math.min(30, Math.floor(fullIn * 0.36)))
+    const itemRow = (key: string, name: string, tokens: number, top: number, opts: { share?: string; note?: string; noteW?: number; isPath?: boolean } = {}) => {
+      const barW = Math.max(4, Math.min(24, fullIn - nameW - ROW_FIGURES - (opts.noteW ?? 0)))
 
       return (
-        <Box flexDirection="row">
-          <Box width={nameW}>
-            <Text wrap="truncate-start">{name}</Text>
+        <Box key={key} flexDirection="row">
+          <Box width={nameW} flexShrink={0}>
+            {/* A path keeps its start (~/) and its file name; any other name its start. */}
+            <Text wrap={opts.isPath ? 'truncate-middle' : 'truncate-end'}>{name}</Text>
           </Box>
-          <Text color="suggestion"> {'█'.repeat(lit)}</Text>
-          <Text>{' '.repeat(barW - lit)}</Text>
-          <Text bold> {right(short(tokens), 7)}</Text>
-          <Text dimColor wrap="truncate-end">
-            {note}
-          </Text>
+          <Box key={`${key}-figures`} flexShrink={0}>
+            <Text color="suggestion"> {barCells(tokens, top, barW)}</Text>
+            <Text bold> {right(short(tokens), 6)}</Text>
+            <Text dimColor>{right(opts.share ?? '', 5)}</Text>
+          </Box>
+          {opts.note !== undefined && opts.note !== '' && (
+            <Box key={`${key}-note`} flexShrink={1} minWidth={0}>
+              <Text dimColor wrap="truncate-end">
+                {` ${opts.note}`}
+              </Text>
+            </Box>
+          )}
         </Box>
       )
     }
-    const window = measure?.window ?? 0
-    const pctOf = (tokens: number) => (window > 0 ? ` ${Math.round((tokens / window) * 100)}%` : '')
-    const nameW = Math.max(12, Math.min(34, Math.floor(fullIn * 0.4)))
-    const topCat = map?.categories[0]?.tokens ?? 0
+    // A small heading inside a card, with an optional dim note on the right that gives way first.
+    const caption = (left: string, rightText = '', rightColor?: string) => (
+      <Box flexDirection="row" justifyContent="space-between">
+        <Box flexShrink={0}>
+          <Text dimColor bold>
+            {left}
+          </Text>
+        </Box>
+        {rightText !== '' && (
+          <Box flexShrink={1} minWidth={0} marginLeft={1}>
+            <Text color={rightColor} dimColor={rightColor === undefined} wrap="truncate-start">
+              {rightText}
+            </Text>
+          </Box>
+        )}
+      </Box>
+    )
+    // Every share in the tab has one base: the tokens each request carries (as the compact note and the
+    // MCP share always had), from the last measure, else the sum of the used categories.
+    const shareBase = measure?.tokens ?? (map?.categories.reduce((a, c) => a + c.tokens, 0) || 0)
+    const shareOf = (tokens: number) => shareOfRequest(tokens, shareBase > 0 ? shareBase : null)
+    const categories = map === null ? [] : foldSmall(map.categories, shareBase).slice(0, 8)
+    const topCat = categories.reduce((a, c) => Math.max(a, c.tokens), 0)
     const topFile = map?.memoryFiles[0]?.tokens ?? 0
     const topServer = map?.mcpServers[0]?.tokens ?? 0
+    const topAgent = map?.agents.reduce((a, c) => Math.max(a, c.tokens), 0) ?? 0
+    // Tools whose results came to nothing (ToolSearch, an empty Read) say nothing about the context.
     const resultTools = Object.entries(results.byTool)
+      .filter(([, v]) => v.tokens > 0)
       .sort((a, b) => b[1].tokens - a[1].tokens)
       .slice(0, 5)
     const topResult = resultTools[0]?.[1].tokens ?? 0
     const topLargest = results.largest[0]?.tokens ?? 0
+    const maxCount = resultTools.reduce((a, [, v]) => Math.max(a, String(v.count).length + 1), 0)
     // Claude Code's own estimate of the conversation, as /context names the category.
     const messagesTokens = map?.categories.find(c => c.name === 'Messages')?.tokens ?? null
     const compactLine = compactNote(messagesTokens, measure?.tokens ?? null)
+    // The note is information while auto-compact is far; it turns to a warning from half the way there.
+    const isNearCompact = percent !== null && percent >= (auto ?? 100) / 2
+    const skills = map?.skills ?? null
     const contextView = (
       <Box flexDirection="column">
         {contextCard}
@@ -2328,14 +2369,14 @@ export const register: Register = (on, options) => {
                 Where it goes
               </Text>
             </Box>
-            <Text dimColor wrap="truncate-end">
-              {map === null ? 'no reading yet' : `${map.detail === 'full' ? 'exact' : 'estimate'} · ${hhmm(map.at)}`}
+            <Text dimColor wrap="truncate-start">
+              {map === null ? 'no reading yet' : `% of each request · ${map.detail === 'full' ? 'exact' : 'estimate'} ${hhmm(map.at)}`}
             </Text>
           </Box>
           {map === null && <Text dimColor>Claude Code reports it after the first answer.</Text>}
-          {map !== null && map.categories.slice(0, 8).map(c => itemRow(c.name, c.tokens, topCat, nameW, pctOf(c.tokens)))}
+          {categories.map(c => itemRow(`cat-${c.name}`, c.name, c.tokens, topCat, { share: shareOf(c.tokens) }))}
           {compactLine !== null && (
-            <Text color="warning" wrap="wrap">
+            <Text color={isNearCompact ? 'warning' : undefined} dimColor={!isNearCompact} wrap="wrap">
               {compactLine}
             </Text>
           )}
@@ -2358,9 +2399,11 @@ export const register: Register = (on, options) => {
         </Box>
         <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="column">
           <Box flexDirection="row" justifyContent="space-between">
-            <Text color="claude" bold>
-              What the conversation holds
-            </Text>
+            <Box flexShrink={0} marginRight={1}>
+              <Text color="claude" bold>
+                What the conversation holds
+              </Text>
+            </Box>
             <Text dimColor wrap="truncate-start">
               {results.since === null ? 'since the start' : `since the compact at ${hhmm(results.since)}`}
             </Text>
@@ -2369,12 +2412,10 @@ export const register: Register = (on, options) => {
             <Text dimColor>no tool results yet</Text>
           ) : (
             <Box flexDirection="column">
-              <Text dimColor wrap="truncate-end">
-                Tool results by tool, ≈ tokens (characters ÷ 4){messagesTokens === null ? '' : ` · all messages ${short(messagesTokens)}`}
-              </Text>
-              {resultTools.map(([tool, v]) => itemRow(tool, v.tokens, topResult, nameW, ` · ${v.count}×`))}
-              <Text dimColor>Largest single results</Text>
-              {results.largest.map(l => itemRow(l.label, l.tokens, topLargest, nameW))}
+              {caption('Tool results by tool', '≈ characters ÷ 4')}
+              {resultTools.map(([tool, v]) => itemRow(`tool-${tool}`, tool, v.tokens, topResult, { share: shareOf(v.tokens), note: `${v.count}×`, noteW: maxCount + 1 }))}
+              {caption('Largest single results')}
+              {results.largest.map((l, i) => itemRow(`large-${i}`, l.label, l.tokens, topLargest, { share: shareOf(l.tokens), noteW: maxCount + 1, isPath: true }))}
             </Box>
           )}
         </Box>
@@ -2383,33 +2424,32 @@ export const register: Register = (on, options) => {
             <Text color="claude" bold>
               Heaviest items
             </Text>
-            <Text dimColor>Memory files (CLAUDE.md and rules)</Text>
-            {map.memoryFiles.length === 0 && <Text dimColor> none</Text>}
-            {map.memoryFiles.slice(0, 5).map(f => itemRow(homeShort(f.name), f.tokens, topFile, nameW))}
-            <Text dimColor wrap="truncate-end">
-              MCP servers{map.deferredMcpTools > 0 ? ` · ${map.deferredMcpTools} more tools behind tool search, not loaded` : ''}
-            </Text>
-            {map.mcpServers.length === 0 && <Text dimColor> none loaded</Text>}
-            {map.mcpServers.slice(0, 5).map(m => itemRow(m.name, m.tokens, topServer, nameW, mcpNote(m.tools, m.toolNames, health.toolCalls ?? {}, measure?.prompts == null ? null : measure.prompts - promptBase, shareOfRequest(m.tokens, measure?.tokens ?? null))))}
-            <Text wrap="truncate-end">
-              <Text dimColor>Skills </Text>
-              {map.skills === null ? (
-                <Text dimColor>–</Text>
-              ) : (
-                <Text>
-                  <Text bold color={map.skills.included < map.skills.total ? 'warning' : undefined}>
-                    {map.skills.included} of {map.skills.total}
-                  </Text>
-                  <Text dimColor> listed · {short(map.skills.tokens)} tokens</Text>
-                  {map.skills.included < map.skills.total && <Text dimColor> · the rest did not fit the listing budget</Text>}
+            {caption('Memory files', 'CLAUDE.md and rules')}
+            {map.memoryFiles.length === 0 && <Text dimColor>none</Text>}
+            {map.memoryFiles.slice(0, 5).map((f, i) => itemRow(`memory-${i}`, homeShort(f.name), f.tokens, topFile, { share: shareOf(f.tokens), isPath: true }))}
+            {caption('MCP servers', map.deferredMcpTools > 0 ? `${map.deferredMcpTools} more tools behind tool search` : '')}
+            {map.mcpServers.length === 0 && <Text dimColor>none loaded</Text>}
+            {/* Its tools and calls on a dim line beneath: beside the bar they left a narrow pane no room for it. */}
+            {map.mcpServers.slice(0, 5).map(m => (
+              <Box key={`mcp-${m.name}-block`} flexDirection="column">
+                {itemRow(`mcp-${m.name}`, m.name, m.tokens, topServer, { share: shareOf(m.tokens) })}
+                <Text key={`mcp-${m.name}-note`} dimColor wrap="truncate-end">
+                  {'  '}
+                  {mcpNote(m.tools, m.toolNames, health.toolCalls ?? {}, measure?.prompts == null ? null : measure.prompts - promptBase)}
                 </Text>
-              )}
-            </Text>
-            {map.agents.length > 0 && (
-              <Text dimColor wrap="truncate-end">
-                Agents {map.agents.slice(0, 4).map(a => `${a.name} ${short(a.tokens)}`).join(' · ')}
-              </Text>
-            )}
+              </Box>
+            ))}
+            {skills === null
+              ? caption('Skills', '–')
+              : caption(
+                  'Skills',
+                  `${skills.included} of ${skills.total} listed · ${short(skills.tokens)}`,
+                  skills.included < skills.total ? 'warning' : undefined,
+                )}
+            {skills !== null && skills.included < skills.total && <Text dimColor>the rest did not fit the listing budget</Text>}
+            {map.agents.length > 0 && caption('Agents')}
+            {/* A plugin's agent by its own name: "plugin:agent" cut at the end left four rows alike. */}
+            {map.agents.slice(0, 4).map((a, i) => itemRow(`agent-${i}`, a.name.slice(a.name.lastIndexOf(':') + 1), a.tokens, topAgent, { share: shareOf(a.tokens) }))}
           </Box>
         )}
       </Box>
@@ -2803,14 +2843,13 @@ function costLabel(measure: Measure | null, isLong: boolean): string {
  * /clear, /resume or /branch. "unused so far" only after a few prompts in that span, so a fresh or
  * resumed session does not call every server idle.
  */
-function mcpNote(tools: number, toolNames: readonly string[] | undefined, calls: Readonly<Record<string, number>>, prompts: number | null, share = ''): string {
-  // The server's share of every request's context: its tool definitions go out with each one.
-  const each = share === '' ? '' : ` · ${share} of each request`
-  if (toolNames === undefined) return ` · ${tools} tools${each}`
+function mcpNote(tools: number, toolNames: readonly string[] | undefined, calls: Readonly<Record<string, number>>, prompts: number | null): string {
+  // Its share of each request (its tool definitions go out with every one) is the row's share column.
+  if (toolNames === undefined) return `${tools} tools`
   const n = serverCalls(toolNames, calls)
   const idle = n === 0 && prompts !== null && prompts >= 3 ? ' – unused so far' : ''
 
-  return ` · ${tools} tools${each} · ${n} call${n === 1 ? '' : 's'}${idle}`
+  return `${tools} tools · ${n} call${n === 1 ? '' : 's'}${idle}`
 }
 
 /** One request column's details for its hover row, padded so it covers the time row beneath the chart. */
