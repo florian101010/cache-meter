@@ -27,8 +27,8 @@ Every push to `main` is a new version for Anthropic's plugin directory: it is sc
 The mods API is early access and changes between Claude Code releases. Three things keep this mod current:
 
 1. **CI is pinned.** `ci.yml` installs exactly `CLAUDE_CODE_VERSION` (now 2.1.296), so a new release never breaks a pull request by surprise. Raise it on purpose, after the steps below, and update *Tested with* in the README and AGENTS.md.
-2. **A weekly check** (`.github/workflows/upstream.yml`, Mondays, or by hand under *Actions*) runs `validate --strict` and every test on the **newest** Claude Code, and compares the official pages below with the content hashes in `docs/upstream-docs.txt` (`.github/scripts/upstream-docs.sh --check`). Either kind of change opens one issue, *Upstream: …*, and comments on it again while it stays open.
-3. **On such an issue:** read the release notes of the new version (`claude --version`, the [changelog](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md)) and the changed pages, load the mod in a session of that version so Claude Code writes its new type declarations (`.claude-plugin/types/claude-code/index.d.ts`), run `tsc -p .`, `claude plugin validate --strict .` and `claude plugin test .`, fix code and docs, run `.github/scripts/upstream-docs.sh --write`, raise `CLAUDE_CODE_VERSION`, bump `version` – one pull request.
+2. **A weekly check** (`.github/workflows/upstream.yml`, Mondays, or by hand under *Actions*) runs `validate --strict` and every test on the **newest** Claude Code, and compares the official pages below (list: `docs/upstream-docs.txt`) with the copies last read, kept on the branch [`upstream-docs`](https://github.com/florian101010/cache-meter/tree/upstream-docs) (`.github/scripts/upstream-docs.sh --check`; the copies are normalized, so a change of the site's markup alone is no change). Either kind of change opens one issue, *Upstream: …*, and comments on it again while it stays open; the docs issue carries the diff, and `--check` writes all of it to `upstream-docs.diff`.
+3. **On such an issue:** read the release notes of the new version (`claude --version`, the [changelog](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md)) and the changed pages, load the mod in a session of that version so Claude Code writes its new type declarations (`.claude-plugin/types/claude-code/index.d.ts`), run `tsc -p .`, `claude plugin validate --strict .` and `claude plugin test .`, fix code and docs, raise `CLAUDE_CODE_VERSION`, bump `version` – one pull request. Then store what you read: `.github/scripts/upstream-docs.sh --write` (the first time `git fetch origin upstream-docs && git worktree add .upstream-docs upstream-docs`) commits the pages as read now, with the date and `claude --version` in `READ`, on `upstream-docs`; push it with `git -C .upstream-docs push`. The copies stay off `main`: the plugin directory installs everything on `main` and holds files over 256 KiB for a reviewer.
 
 ### The official documentation this mod relies on
 
@@ -129,6 +129,6 @@ AGENTS.md                         guide for coding agents: install, verify, test
 .claude/CLAUDE.md                 imports AGENTS.md for Claude Code sessions in this repository
 llms.txt                          machine-readable index of the documentation
 .github/workflows/upstream.yml    weekly: tests on the newest Claude Code, official docs compared
-.github/scripts/upstream-docs.sh          content hashes of the official pages (--check, --write)
-docs/upstream-docs.txt            the hashes, with the date and Claude Code version they were taken at
+.github/scripts/upstream-docs.sh  the official pages compared with the copies last read (--check, --write)
+docs/upstream-docs.txt            the list of those pages; the copies are on the branch upstream-docs
 ```
