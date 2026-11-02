@@ -12,7 +12,9 @@ import {
   FIVE_MIN,
   HOUR,
   cafeState,
+  barCells,
   compactNote,
+  foldSmall,
   hogNote,
   isContextHog,
   shareOfRequest,
@@ -827,20 +829,20 @@ test('context tab: heaviest items from the free estimate, exact count only on a 
 
   const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
   await ui.press({ key: 'tab-context' })
-  expect(await ui.find({ type: 'Text', text: /^estimate · / })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^% of each request · estimate \d\d:\d\d$/ })).toBeDefined()
   // Used categories only, heaviest first; free space is not a share of the context.
   expect(await ui.find({ type: 'Text', text: 'Messages' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: 'Free space' })).toBeUndefined()
   // The home directory shows as ~ (shorter, and no user name on a screenshot).
   expect(await ui.find({ type: 'Text', text: '~/.claude/CLAUDE.md' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: ' · 2 tools' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '  2 tools' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /1 more tools behind tool search/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: '120 of 154' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^120 of 154 listed · / })).toBeDefined()
 
   await ui.press({ key: 'context-exact' })
   expect(usageDetails.at(-1)).toBe('full')
   expect(usageDetails.filter(d => d === 'full')).toHaveLength(1)
-  expect(await ui.find({ type: 'Text', text: /^exact · / })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^% of each request · exact \d\d:\d\d$/ })).toBeDefined()
   await ui.unmount()
 })
 
@@ -1104,7 +1106,7 @@ test('MCP servers: calls counted per server, idle ones marked after a few prompt
   await $.session.measure({ context: { tokens: 100_000, window: 1_000_000, percent: 10 }, rateLimits: [], changed: ['context'] })
   const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
   await ui.press({ key: 'tab-context' })
-  expect(await ui.find({ type: 'Text', text: / · 2 tools · (\d+%|<1%) of each request · 3 calls$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^ {2}2 tools · 3 calls$/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /unused so far/ })).toBeUndefined()
   await ui.unmount()
 })
@@ -1181,13 +1183,13 @@ test('MCP servers: unused only after three prompts since the start or a /resume'
   await $.session.measure({ context: { tokens: 100_000, window: 1_000_000, percent: 10 }, rateLimits: [], changed: ['context'] })
   let ui = await $.ui.mount({ surface: 'terminal', ...PANE })
   await ui.press({ key: 'tab-context' })
-  expect(await ui.find({ type: 'Text', text: / · 2 tools · (\d+%|<1%) of each request · 0 calls$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^ {2}2 tools · 0 calls$/ })).toBeDefined()
   await ui.unmount()
   next.turns = 7
   await $.session.measure({ context: { tokens: 100_000, window: 1_000_000, percent: 10 }, rateLimits: [], changed: ['context'] })
   ui = await $.ui.mount({ surface: 'terminal', ...PANE })
   await ui.press({ key: 'tab-context' })
-  expect(await ui.find({ type: 'Text', text: / · 2 tools · (\d+%|<1%) of each request · 0 calls – unused so far$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^ {2}2 tools · 0 calls – unused so far$/ })).toBeDefined()
   await ui.unmount()
   // /resume or /branch: counted from there again.
   await $.classic.SessionStart({ source: 'resume', seconds_since_last_response: 60, context_tokens: 100_000 })
@@ -1408,11 +1410,10 @@ test('what the conversation holds: tool results of the main conversation, reset 
   // Another mod answered without core's text: nothing to measure.
   next.toolText = null
   await toolCall($, { tool: 'Read', file_path: '/Users/u/third.ts' })
-  expect(await contextText($, /all messages 80\.0k$/)).toBeDefined()
   for (const name of ['Bash', 'Read', 'Bash npm', 'Read ~/project/a.ts']) expect(await contextText($, new RegExp(`^${name}$`))).toBeDefined()
   expect(await contextText($, /^ +10\.0k$/)).toBeDefined()
   expect(await contextText($, /^ +1\.0k$/)).toBeDefined()
-  expect(await contextText($, /^ · 1×$/)).toBeDefined()
+  expect(await contextText($, /^ 1×$/)).toBeDefined()
   expect(await contextText($, /other\.ts|third\.ts|SECRET/)).toBeUndefined()
   await $.session.compact({ trigger: 'manual', messages: SUMMARY })
   expect(await contextText($, /^no tool results yet$/)).toBeDefined()
@@ -2322,7 +2323,7 @@ test('compact note: only measured figures, from 20k messages and a quarter of th
   expect(compactNote(19_999, 40_000)).toBeNull()
   expect(compactNote(30_000, 200_000)).toBeNull()
   expect(compactNote(60_000, 200_000)).toBe(
-    'Messages 60.0k (30% of the context) are sent again with every request – /compact summarizes them to free space, itself one large request',
+    'Messages are 30% of each request – /compact summarizes them, itself one large request',
   )
 })
 
@@ -2332,7 +2333,14 @@ test('compact note: shown in the Context tab when the messages fill the context'
   await step($)
   await run($, 'tokens', 'context')
   const ui = await $.ui.mount({ surface: 'terminal', ...PANE })
-  expect(await ui.find({ type: 'Text', text: /^Messages \d+\.\dk \(\d+% of the context\) are sent again with every request/ })).toBeDefined()
+  const note = await ui.find({ type: 'Text', text: /^Messages are \d+% of each request – \/compact summarizes them/ })
+  expect(note).toBeDefined()
+  // Far from auto-compact (10 % of a 97 % threshold): information, not a warning.
+  expect(note?.props.dimColor).toBe(true)
+  expect(note?.props.color).toBeUndefined()
+  // One base for every share in the tab: the Messages row says what the note says.
+  const pct = String(note?.children.join('')).match(/are (\d+)%/)?.[1]
+  expect(await ui.find({ type: 'Text', text: new RegExp(`^ +${pct}%$`) })).toBeDefined()
   await ui.unmount()
 })
 
@@ -2580,7 +2588,8 @@ test('animation: no shine with animations = off', { options: { animations: 'off'
   await ui.unmount()
 })
 
-test('café wiring: the state follows the cache – working, warm, cold', async ($, on) => {
+// Over 4.9 s on the CI runner (1.6 s locally): more room than the default 5 s (reference › Limits).
+test('café wiring: the state follows the cache – working, warm, cold', { timeoutMs: 20_000 }, async ($, on) => {
   const { clock } = world(on)
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   await step($)
@@ -3487,5 +3496,55 @@ test('agent time after a relaunch or /resume: counted from then on, and the pane
   await ui.press({ key: 'tab-health' })
   // No share of the session: the time before the relaunch is not known.
   expect(await ui.find({ type: 'Text', text: /^ since \d\d:\d\d · ⌀ 45s\/prompt$/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('barCells: exact width, eighths of a cell, a sliver for any value above zero', () => {
+  expect(barCells(10, 10, 4)).toBe('████')
+  expect(barCells(5, 10, 4)).toBe('██  ')
+  // 1/16 of 4 cells is two eighths.
+  expect(barCells(10, 160, 4)).toBe('▎   ')
+  // Tiny but not zero: a sliver, not a full cell; zero: nothing.
+  expect(barCells(1, 1_000_000, 4)).toBe('▏   ')
+  expect(barCells(0, 10, 4)).toBe('    ')
+  expect(barCells(20, 10, 3)).toBe('███')
+  expect(barCells(5, 0, 3)).toBe('   ')
+  expect(barCells(5, 10, 0)).toBe('')
+})
+
+test('foldSmall: empty items dropped, two or more under 1 % folded into Other', () => {
+  const items = [
+    { name: 'Messages', tokens: 50_000 },
+    { name: 'Skills', tokens: 20_000 },
+    { name: 'System tools', tokens: 300 },
+    { name: 'Custom agents', tokens: 500 },
+    { name: 'Empty', tokens: 0 },
+  ]
+  expect(foldSmall(items, 100_000)).toEqual([
+    { name: 'Messages', tokens: 50_000 },
+    { name: 'Skills', tokens: 20_000 },
+    { name: 'Other', tokens: 800 },
+  ])
+  // A single small one keeps its own name.
+  expect(foldSmall(items.slice(0, 3), 100_000).map(i => i.name)).toEqual(['Messages', 'Skills', 'System tools'])
+  // No base yet: nothing folded, only the empty one dropped.
+  expect(foldSmall(items, 0)).toHaveLength(4)
+})
+
+test('context tab rows cannot wrap: name, bar and figures keep their width, only a note gives way', async ($, on) => {
+  const { next } = world(on)
+  next.tools = [
+    { name: 'mcp__claude-artifacts__publish', serverName: 'claude-artifacts', tokens: 8_600, isLoaded: true },
+    { name: 'mcp__claude-artifacts__read', serverName: 'claude-artifacts', tokens: 100, isLoaded: true },
+  ]
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await step($)
+  await $.session.measure({ context: { tokens: 100_000, window: 1_000_000, percent: 10 }, rateLimits: [], changed: ['context'] })
+  // As narrow as a docked pane on a tablet.
+  const ui = await $.ui.mount({ surface: 'terminal', ...PANE, props: { ...PANE.props, bodyColumns: 52 } })
+  await ui.press({ key: 'tab-context' })
+  expect((await ui.find({ key: 'mcp-claude-artifacts-figures' }))?.props.flexShrink).toBe(0)
+  // The server's tools and calls on their own line beneath its row.
+  expect(await ui.find({ type: 'Text', text: /^ {2}2 tools · 0 calls$/ })).toBeDefined()
   await ui.unmount()
 })
