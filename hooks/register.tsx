@@ -22,6 +22,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { AgentUse, CacheInfo, ColdWrite, ContextMap, Health, KeepWarm, Measure, ServerToolCall, Step, ToolResults, Totals, TtlConfig, Usage4 } from './state'
 import {
   COLD_MIN,
+  clockLabel,
   FIVE_MIN,
   HOUR,
   MAX_PINGS,
@@ -110,6 +111,8 @@ const totalsA = atom({ plugin: 'cache-meter', key: 'totals' } as const, {
   subSteps: 0,
   coldCount: 0,
   coldWritten: 0,
+  busyMs: 0,
+  busyTurns: 0,
 })
 const measureA = atom({ plugin: 'cache-meter', key: 'measure' } as const, null)
 const ttlA = atom({ plugin: 'cache-meter', key: 'reportedTtl' } as const, null)
@@ -559,6 +562,7 @@ async function copyReport($: EngineInterface): Promise<string> {
     ageMs: measure?.startedAt == null ? null : Math.max(0, now - measure.startedAt),
     prompts: measure?.prompts ?? null,
     requests: totals.mainSteps,
+    busy: { ms: totals.busyMs ?? 0, turns: totals.busyTurns ?? 0 },
     model: steps.at(-1)?.model ?? null,
     usd: measure?.usd ?? null,
     isPlan: isPlan(measure),
@@ -1331,6 +1335,15 @@ export const register: Register = (on, options) => {
   on('turn.complete', async ($, e, next) => {
     const isMain = e.agentId === undefined
     if (isMain) mainRequests = 0
+    // Agent time: the main turn's wall-clock length (TurnCompleteFields.durationMs, types), an interrupted
+    // turn included – the time passed all the same. A subagent's turn runs inside a main one and is left
+    // out, so nothing counts twice. Before every early return below: the line under the answer is optional.
+    // A keepwarm ping adds nothing: an event raised inside the timer's $.model.fork call skips this mod's
+    // hooks ('re-entry', reference › The hook function, next.error).
+    if (isMain) {
+      const ms = Number.isFinite(e.durationMs) ? Math.max(0, e.durationMs) : 0
+      await update($, totalsA, t => ({ ...t, busyMs: (t.busyMs ?? 0) + ms, busyTurns: (t.busyTurns ?? 0) + 1 }))
+    }
     const open = openTurns[e.turnId]
     const { [e.turnId]: _done, ...rest } = openTurns
     openTurns = rest
@@ -2048,6 +2061,18 @@ export const register: Register = (on, options) => {
     const limits = measure?.limits ?? []
     // Name (11) + bar + ' 100%' (5) + ' · resets Mon 17:10' (19): the bar takes what the column leaves.
     const limitBar = Math.max(6, Math.min(24, rightIn - 35))
+    // Agent time: summed in turn.complete; state an older version wrote has no such fields (read as 0).
+    const busyMs = totals.busyMs ?? 0
+    const busyTurns = totals.busyTurns ?? 0
+    // Prompts and their cost as the Health tab counts them ($.session.turns(), Claude Code's cost figure);
+    // the time per prompt over the turns that time was measured on, which /clear resets with it.
+    const promptCount = measure?.prompts ?? null
+    const perPrompt = [
+      measure?.usd != null && promptCount ? `${isPlan(measure) ? '≈ ' : ''}$${(measure.usd / promptCount).toFixed(2)}` : '',
+      busyTurns > 0 ? clockLabel(busyMs / busyTurns) : '',
+    ]
+      .filter(Boolean)
+      .join(' and ')
     const sessionCard = (
       <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="column">
         <Box flexDirection="row" justifyContent="space-between">
@@ -2072,6 +2097,19 @@ export const register: Register = (on, options) => {
           <Text bold>{usdShown === null ? '–' : `${isPlan(measure) ? '≈ ' : ''}$${usdShown.toFixed(2)}`}</Text>
           <Text dimColor>{measure?.usd == null ? '' : costLabel(measure, tier !== 'narrow')}</Text>
         </Text>
+        {busyTurns > 0 && (
+          <Text wrap="truncate-end">
+            <Text dimColor>
+              {promptCount ? `${promptCount} prompt${promptCount === 1 ? '' : 's'} · ` : ''}agent time{' '}
+            </Text>
+            <Text bold>{clockLabel(busyMs)}</Text>
+            <Text dimColor>
+              {/* Kept in $.state: /clear, /resume, /branch and a relaunch start it over, as the requests above. */}
+              {historySince === null ? '' : ` since ${hhmm(historySince)}`}
+              {perPrompt === '' ? '' : ` · ⌀ ${perPrompt} per prompt`}
+            </Text>
+          </Text>
+        )}
         {totals.subSteps > 0 && (
           <Text dimColor wrap="truncate-end">
             subagents {usageLine(totals.sub)} · {totals.subSteps} requests
@@ -2378,7 +2416,7 @@ export const register: Register = (on, options) => {
     )
 
     // --- health tab: rates, stops, errors, server-side tools, Claude Code's cache verdict ---------
-    const label = (text: string) => <Text dimColor>{text.padEnd(10)}</Text>
+    const label = (text: string) => <Text dimColor>{text.padEnd(11)}</Text>
     const age = measure?.startedAt == null ? null : Math.max(0, now - measure.startedAt)
     const hours = age === null ? 0 : age / HOUR
     const prompts = measure?.prompts ?? null
@@ -2418,6 +2456,17 @@ export const register: Register = (on, options) => {
             <Text dimColor>
               {' '}
               · {totals.mainSteps} requests{historySince === null ? '' : ` since ${hhmm(historySince)}`}
+            </Text>
+          </Text>
+          <Text wrap="truncate-end">
+            {label('Agent time')}
+            <Text bold>{busyTurns === 0 ? '–' : clockLabel(busyMs)}</Text>
+            <Text dimColor>
+              {busyTurns === 0
+                ? ' · counted from the next answer'
+                : `${historySince === null ? '' : ` since ${hhmm(historySince)}`} · ⌀ ${clockLabel(busyMs / busyTurns)}/prompt${
+                    historySince === null && age !== null && age > 0 && busyMs <= age ? ` · ${Math.round((busyMs / age) * 100)}% of the session` : ''
+                  }`}
             </Text>
           </Text>
           <Text wrap="truncate-end">

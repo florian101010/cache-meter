@@ -38,7 +38,7 @@ Type **`/keepwarm`** before lunch or a meeting. Shortly before expiry one ping �
 
 ### 📊 Understand it
 
-**`/tokens`** opens a dashboard: **why a warm cache broke**, what caching saved, **which tool results and files fill your context** (and which MCP servers you never call), when auto-compact and your plan limit hit at this pace, what each subagent used, API errors and cost per hour. **`/tokens report`** copies it all as Markdown.
+**`/tokens`** opens a dashboard: **why a warm cache broke**, what caching saved, **which tool results and files fill your context** (and which MCP servers you never call), when auto-compact and your plan limit hit at this pace, what each subagent used, API errors, cost per hour and how long Claude worked for you. **`/tokens report`** copies it all as Markdown.
 
 </td>
 </tr>
@@ -223,9 +223,9 @@ It is also listed as `/keepwarm-auto` in the slash-command menu.
 
 | Tab | What it answers | Open with |
 |---|---|---|
-| **Overview** | How long is the cache still warm? Did the last requests hit it? What did caching save? How many prompts until auto-compact? How close are my plan limits – and when are they full at this pace? | `/tokens` |
+| **Overview** | How long is the cache still warm? Did the last requests hit it? What did caching save? How many prompts so far, and how long did Claude work on them? How many prompts until auto-compact? How close are my plan limits – and when are they full at this pace? | `/tokens` |
 | **Context** | What fills my context – which tool results (by tool, and the largest single ones), CLAUDE.md files, MCP servers (and how often this session called each), skills, agents? | `/tokens context` |
-| **Health** | Did requests fail or get cut off? How long does the advisor take? What does the session cost per hour and per prompt? Was a warm cache re-written anyway – and why? What did each subagent use? | `/tokens health` |
+| **Health** | Did requests fail or get cut off? How long does the advisor take? What does the session cost per hour and per prompt? How much of it did Claude spend working? Was a warm cache re-written anyway – and why? What did each subagent use? | `/tokens health` |
 | **Report** | Everything above as Markdown on the clipboard – to share, file or compare | `/tokens report` |
 
 <p>
@@ -267,7 +267,7 @@ Small touches go with it, each a fraction of a second: the big countdown flashes
 
 <p align="center"><img src="https://raw.githubusercontent.com/florian101010/cache-meter/assets/brand/feature-report.svg" width="100%" alt="Copy it – /tokens report: your session stats as a Markdown report fill line by line and land on your own clipboard with a check mark – never your conversation."></p>
 
-`/tokens report` puts your session stats on your clipboard as Markdown – figures and labels, never a word of your prompts or Claude's answers: cost, hit rate, cold re-writes and warm misses with their cause, context fill and the auto-compact forecast, the heaviest files, servers and tool results, subagents and plan limits. Paste it into an issue, a pull request or your notes. Paths are shortened to `~` and Bash commands appear only by program name; each subagent's task description – a line Claude wrote when it started the subagent – is included as it is. Review it before you post it publicly.
+`/tokens report` puts your session stats on your clipboard as Markdown – figures and labels, never a word of your prompts or Claude's answers: cost, agent time, hit rate, cold re-writes and warm misses with their cause, context fill and the auto-compact forecast, the heaviest files, servers and tool results, subagents and plan limits. Paste it into an issue, a pull request or your notes. Paths are shortened to `~` and Bash commands appear only by program name; each subagent's task description – a line Claude wrote when it started the subagent – is included as it is. Review it before you post it publicly.
 
 It stays with you: the report goes only to your own clipboard – the one of the device your terminal runs on. The Health tab's Session card reminds you: *copy as Markdown: /tokens report*.
 
@@ -427,7 +427,7 @@ With `auto`, Cache Meter follows Claude Code's own TTL controls and your plan st
 | `turn.step` | Reads each request's token counts, model, effort, stop reason and server-side tool calls; before a main request that splits a warm cache it shows a note; after a warm miss it names the cause (a fresh, free context estimate shows a changed tool set); sums each subagent's requests and looks up its type and task once (`$.agent.list`); after each main request refreshes context, cost and plan limits from the plain `$.session.usage()`, which costs nothing, and checks the plan-limit warning. | Nothing – the request and its result go through as they are |
 | `classic.StopFailure` | Counts the kind of API error a turn ended on | Nothing |
 | `turn.start` | Notes the session cost when a turn starts, for the line under its answer | Nothing |
-| `turn.complete` | Notes that no main request is running (so `/keepwarm` never pings during one); returns the line shown under the answer (option `turnLine`) | The answer itself is not changed – the line is shown beneath it ([reference › Turns](https://code.claude.com/docs/en/plugins/mods/reference#turns)) |
+| `turn.complete` | Notes that no main request is running (so `/keepwarm` never pings during one); adds the main turn's length to the agent time; returns the line shown under the answer (option `turnLine`) | The answer itself is not changed – the line is shown beneath it ([reference › Turns](https://code.claude.com/docs/en/plugins/mods/reference#turns)) |
 | `tool.call` | After the call ran: counts MCP calls per server, and for the main conversation estimates the result's size (characters ÷ 4 of the text the model reads) under a short label – file path, or a Bash command's program name. The text itself is not kept. A single result of 10k tokens or more (and 2 % of the window) raises a toast with its label. | Nothing – the call, its input and its result pass through unchanged; it never denies or answers a call |
 | `session.measure` | Reads context fill, plan limits, cost and the context breakdown; checks the plan-limit warning (a toast, and with `limitNotice` a notification) | Nothing |
 | `session.compact` | After a real compaction, resets the countdown, since the next request writes a fresh cache, and the tool-result tally, since the summary replaced those results. It sees every compaction – `/compact`, auto-compact and its own **Compact** button (`$.session.compact` skips only the calling hook, types; the button is not a hook) – and the button also resets the countdown right away | Nothing – it never skips or alters a compaction |
